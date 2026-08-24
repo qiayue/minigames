@@ -1949,6 +1949,13 @@ async function submitScore() {
 /* ========== 输入 ========== */
 function toGame(ev) {
   const rect = cv.getBoundingClientRect();
+  if (rotated) {
+    // 界面整体顺时针旋转了 90°：屏幕 Y 轴对应画布 X 轴
+    return {
+      x: (ev.clientY - rect.top) * W / rect.height,
+      y: (rect.right - ev.clientX) * H / rect.width,
+    };
+  }
   return {
     x: (ev.clientX - rect.left) * W / rect.width,
     y: (ev.clientY - rect.top) * H / rect.height,
@@ -2073,7 +2080,114 @@ cv.addEventListener('contextmenu', ev => {
   ev.preventDefault();
   if (sel) { sel = null; renderTray(); }
 });
+// 触屏抬手后不要留下悬停预览
+for (const evt of ['pointerup', 'pointercancel']) {
+  cv.addEventListener(evt, ev => { if (ev.pointerType !== 'mouse') mouse = { x: -1, y: -1 }; });
+}
+// 禁掉双指缩放与 iOS 的手势缩放（双击缩放交给 CSS touch-action 处理）
+document.addEventListener('touchstart', ev => { if (ev.touches.length > 1) ev.preventDefault(); }, { passive: false });
+document.addEventListener('touchmove', ev => { if (ev.touches.length > 1) ev.preventDefault(); }, { passive: false });
+document.addEventListener('gesturestart', ev => ev.preventDefault());
+/* ========== 全屏 & 自适应布局 ========== */
+let rotated = false;
+
+function fsElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+// iOS Safari 的 iPhone 上没有全屏 API，此时靠自动横屏铺满
+const FS_SUPPORTED = !!(document.documentElement.requestFullscreen
+  || document.documentElement.webkitRequestFullscreen);
+
+function toggleFullscreen() {
+  const root = document.documentElement;
+  if (!fsElement()) {
+    const req = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (req) {
+      Promise.resolve(req.call(root)).then(() => {
+        // 安卓 Chrome 支持锁定横屏；iOS 不支持，会被自动旋转兜底
+        try {
+          if (screen.orientation && screen.orientation.lock) {
+            const r = screen.orientation.lock('landscape');
+            if (r && r.catch) r.catch(() => {});
+          }
+        } catch (e) { /* 不支持就算了 */ }
+      }).catch(() => {});
+    }
+  } else {
+    if (screen.orientation && screen.orientation.unlock) {
+      try { screen.orientation.unlock(); } catch (e) { /* 部分浏览器不支持 */ }
+    }
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) Promise.resolve(exit.call(document)).catch(() => {});
+  }
+}
+
+function applyLayout() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const portrait = vh > vw;
+  const small = Math.min(vw, vh) < 560;
+  // 竖屏的小屏设备：整体旋转 90°，把长边留给战场
+  const wantRot = portrait && small;
+  if (wantRot !== rotated) {
+    rotated = wantRot;
+    document.body.classList.toggle('rot', rotated);
+    const hint = $('rotHint');
+    if (hint) {
+      hint.classList.toggle('show', rotated);
+      if (rotated) setTimeout(() => hint.classList.remove('show'), 2600);
+    }
+  }
+  // 旋转后可用高度其实是屏幕宽度
+  const usableH = rotated ? vw : vh;
+  const usableW = rotated ? vh : vw;
+  document.body.classList.toggle('compact', usableH < 620 || usableW < 780);
+  document.body.classList.toggle('fs', !!fsElement());
+  // 矮而宽的屏幕：卡槽竖到左边，战场才吃得满
+  document.body.classList.toggle('side', usableH < 520 && usableW > usableH);
+  const btn = $('fsBtn');
+  if (btn) {
+    btn.style.display = FS_SUPPORTED ? '' : 'none';
+    btn.textContent = fsElement() ? '🗗' : '⛶';
+  }
+  fitStage();
+}
+
+// 按可用空间给战场算出精确像素，保证永远是 940:526 且不被裁切
+let fitting = false;
+function fitStage() {
+  const wrapEl = $('stageWrap'), stage = $('stage');
+  if (!wrapEl || !stage || fitting) return;
+  fitting = true;
+  stage.style.width = ''; stage.style.height = '';
+  const aw = wrapEl.clientWidth, ah = wrapEl.clientHeight;
+  if (aw > 0 && ah > 0) {
+    const k = Math.min(aw / W, ah / H);
+    stage.style.width = Math.max(1, Math.floor(W * k)) + 'px';
+    stage.style.height = Math.max(1, Math.floor(H * k)) + 'px';
+  }
+  fitting = false;
+}
+if (window.ResizeObserver) {
+  new ResizeObserver(() => fitStage()).observe($('stageWrap'));
+  new ResizeObserver(() => fitStage()).observe($('tray'));
+}
+
+$('fsBtn').addEventListener('click', () => { ensureAc(); toggleFullscreen(); });
+$('rotHint').addEventListener('click', () => $('rotHint').classList.remove('show'));
+window.addEventListener('resize', applyLayout);
+window.addEventListener('orientationchange', () => setTimeout(applyLayout, 120));
+document.addEventListener('fullscreenchange', applyLayout);
+document.addEventListener('webkitfullscreenchange', applyLayout);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', applyLayout);
+applyLayout();
+
 window.addEventListener('keydown', ev => {
+  if ((ev.key === 'f' || ev.key === 'F') && FS_SUPPORTED) {
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    toggleFullscreen();
+    return;
+  }
   if (ev.key === 'Escape') {
     if (sel) { sel = null; renderTray(); return; }
     if (state === 'playing') pauseGame();
@@ -7194,6 +7308,14 @@ window.__game = {
     }
     return got;
   },
+  get rotated() { return rotated; },
+  get side() { return document.body.classList.contains('side'); },
+  get stageBox() {
+    const r = $('stage').getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height) };
+  },
+  get compact() { return document.body.classList.contains('compact'); },
+  relayout: () => applyLayout(),
   get state() { return state; },
   get energy() { return energy; },
   get history() { return history.slice(); },

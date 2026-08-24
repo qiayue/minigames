@@ -2,7 +2,11 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>机械防线 · 盲盒塔防</title>
 <meta name="description" content="植物大战僵尸风格的机械塔防小游戏：开盲盒抽机器，用自动炮台、碎纸机守住防线！">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
@@ -31,14 +35,32 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-height: 100%;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
   }
-  #wrap { width: min(980px, 100vw); padding: 8px 10px 18px; }
+  /* 一屏铺满：头部 + 卡槽固定高度，战场吃掉剩下的所有空间 */
+  #wrap {
+    width: min(1180px, 100vw);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: calc(6px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right))
+             calc(6px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+  }
+  #stageWrap {
+    flex: 1 1 auto; min-height: 0; min-width: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
 
   header {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 10px; padding: 8px 4px; flex-wrap: wrap;
+    gap: 8px; padding: 2px 4px; flex: 0 0 auto; flex-wrap: wrap;
   }
   #brand { font-size: 20px; font-weight: 800; letter-spacing: 1px; white-space: nowrap; }
   #brand small { color: var(--dim); font-weight: 500; font-size: 12px; margin-left: 6px; }
@@ -62,7 +84,7 @@
   #tray {
     display: flex; align-items: stretch; gap: 8px; padding: 8px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-    margin-bottom: 8px; flex-wrap: wrap;
+    flex: 0 0 auto; flex-wrap: wrap;
   }
   #boxBtn {
     position: relative;
@@ -161,8 +183,13 @@
     position: relative; border-radius: 14px; overflow: hidden;
     border: 1px solid var(--line); background: #10151c;
     box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+    width: 100%; max-width: 100%; max-height: 100%;
+    aspect-ratio: 940 / 526;   /* JS 会按可用空间写死精确像素，这里只是首帧兜底 */
   }
-  #cv { display: block; width: 100%; height: auto; touch-action: manipulation; }
+  #cv {
+    display: block; width: 100%; height: 100%;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
 
   .ov {
     position: absolute; inset: 0; display: flex; flex-direction: column;
@@ -255,8 +282,115 @@
   #board .me, .board .me { color: var(--ok); }
   #board .note, .board .note { color: var(--dim); font-size: 12px; padding: 4px 0; }
 
-  footer { color: var(--dim); font-size: 12px; text-align: center; padding-top: 10px; line-height: 1.8; }
+  footer { color: var(--dim); font-size: 12px; text-align: center; padding-top: 4px; line-height: 1.6; flex: 0 0 auto; }
   footer a { color: var(--accent2); text-decoration: none; }
+
+  /* 全屏时收掉页脚说明，把空间还给战场 */
+  body.fs footer { display: none; }
+
+  /* ========== 紧凑布局：手机 / 矮屏 ========== */
+  body.compact #wrap { gap: 4px; padding-top: calc(3px + env(safe-area-inset-top)); }
+  body.compact footer { display: none; }
+  body.compact header { padding: 0 2px; gap: 6px; }
+  body.compact #brand { font-size: 14px; }
+  body.compact #brand small { font-size: 10px; margin-left: 3px; }
+  body.compact .pill { padding: 3px 9px; font-size: 12px; }
+  body.compact .iconBtn { padding: 4px 8px; font-size: 13px; }
+  body.compact #tray { padding: 5px; gap: 5px; border-radius: 10px; }
+  body.compact #trayInfo { min-width: 150px; gap: 3px; }
+  body.compact #trayTip { font-size: 11px; }
+  body.compact #trayRow2 { gap: 5px; }
+  body.compact #boxBtn { min-width: 76px; font-size: 12px; padding: 5px 7px; }
+  body.compact #boxBtn .big { font-size: 17px; }
+  body.compact #moveBtn, body.compact #fuseBtn, body.compact #shovelBtn {
+    min-width: 46px; font-size: 11px;
+  }
+  body.compact #moveBtn .big, body.compact #fuseBtn .big, body.compact #shovelBtn .big { font-size: 16px; }
+  body.compact #pulls .hist { width: 24px; height: 24px; }
+  /* 卡槽在紧凑模式下变成一条可横向滑动的卡带，不再换行撑高 */
+  body.compact #classicTray {
+    flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+    padding-bottom: 2px;
+  }
+  body.compact #classicTray .card,
+  body.compact #classicTray.many .card { flex: 0 0 auto; width: 54px; padding: 3px 1px 2px; }
+  body.compact #classicTray .card canvas,
+  body.compact #classicTray.many .card canvas { width: 36px; height: 36px; }
+  body.compact #classicTray .card .nm,
+  body.compact #classicTray.many .card .nm { font-size: 9px; white-space: nowrap; }
+  body.compact #classicTray .card .cost,
+  body.compact #classicTray.many .card .cost { font-size: 9px; padding: 0 4px; }
+  body.compact .ov { padding: 10px; }
+  body.compact .ov h1 { font-size: 21px; margin-bottom: 3px; }
+  body.compact .ov .sub { font-size: 11px; margin-bottom: 8px; }
+  body.compact .howto {
+    font-size: 11px; line-height: 1.7; padding: 8px 12px; margin-bottom: 10px;
+    max-height: 34vh; overflow-y: auto;
+  }
+  body.compact .bigBtn { font-size: 14px; padding: 9px 18px; }
+  body.compact #endStats .st { padding: 5px 12px; font-size: 11px; }
+  body.compact #endStats .st b { font-size: 17px; }
+  body.compact #board, body.compact .board { max-height: 130px; min-width: 220px; font-size: 12px; }
+  body.compact #revealCard { padding: 10px 18px; }
+  body.compact #revealCard canvas { width: 62px; height: 62px; }
+  body.compact #revealName { font-size: 15px; }
+  body.compact #revealDesc { display: none; }
+
+  /* ========== 矮宽屏：卡槽竖排到左侧，战场吃满整屏高度 ========== */
+  body.side #wrap {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "tray header" "tray stage";
+    column-gap: 6px; row-gap: 2px;
+  }
+  body.side header { grid-area: header; }
+  body.side #stageWrap { grid-area: stage; }
+  body.side #tray {
+    grid-area: tray; flex-direction: column; flex-wrap: nowrap;
+    width: 72px; overflow: hidden; gap: 4px; padding: 4px;
+  }
+  body.side #boxBtn { min-width: 0; width: 100%; flex: 0 0 auto; font-size: 11px; padding: 4px 2px; }
+  body.side #trayInfo { min-width: 0; flex: 0 0 auto; align-items: center; }
+  body.side #trayTip { display: none; }
+  body.side #trayRow2 { justify-content: center; gap: 3px; }
+  body.side #trayRow2 .lbl { display: none; }
+  body.side #pulls { justify-content: center; }
+  body.side #pulls .hist { width: 20px; height: 20px; }
+  /* 只有卡片区滚动，工具按钮始终钉在底部 */
+  body.side #classicTray {
+    flex-direction: column; flex-wrap: nowrap;
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    gap: 6px; padding: 8px 8px 2px 2px;   /* 给右上角的价格角标留位置 */
+    -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+  }
+  body.side #classicTray::-webkit-scrollbar { width: 3px; }
+  body.side #classicTray::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+  body.side #classicTray .card,
+  body.side #classicTray.many .card { width: 100%; flex: 0 0 auto; }
+  body.side #moveBtn, body.side #fuseBtn, body.side #shovelBtn {
+    min-width: 0; width: 100%; flex: 0 0 auto; padding: 3px 0; font-size: 0;
+  }
+  body.side #moveBtn .big, body.side #fuseBtn .big, body.side #shovelBtn .big { font-size: 17px; }
+
+  /* ========== 竖屏手机：整个界面旋转 90°，把长边给战场 ========== */
+  body.rot { overflow: hidden; }
+  body.rot #wrap {
+    position: fixed; top: 0; left: 0;
+    width: 100vh; width: 100dvh;
+    height: 100vw; height: 100dvw;
+    transform-origin: 0 0;
+    transform: rotate(90deg) translateY(-100%);
+  }
+  #rotHint {
+    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+    background: rgba(22,29,39,.9); border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 14px; font-size: 12px; color: var(--dim); z-index: 40;
+    pointer-events: none; opacity: 0; transition: opacity .4s;
+  }
+  #rotHint.show { opacity: 1; }
+
   @media (max-width: 640px) {
     #brand { font-size: 16px; }
     .ov h1 { font-size: 26px; }
@@ -275,6 +409,7 @@
     </div>
     <div id="btns">
       <button class="iconBtn" id="wavesBtn" title="创造模式：开关敌潮" style="display:none;">🌊 敌潮：开</button>
+      <button class="iconBtn" id="fsBtn" title="全屏 / 退出全屏">⛶</button>
       <button class="iconBtn" id="pauseBtn" title="暂停 / 继续">⏸️</button>
       <button class="iconBtn" id="muteBtn" title="声音开关">🔊</button>
       <button class="iconBtn" id="restartBtn" title="重新开始">🔄</button>
@@ -298,6 +433,7 @@
     <button id="shovelBtn" title="选中后点击场上的机器将其拆除"><span class="big">🔧</span>拆除</button>
   </div>
 
+  <div id="stageWrap">
   <div id="stage">
     <canvas id="cv"></canvas>
 
@@ -361,9 +497,13 @@
       </div>
     </div>
   </div>
+  </div>
+
+  <div id="rotHint">📱 已自动横屏 · 转动手机可切回</div>
 
   <footer>
-    电脑：鼠标操作 · 手机：直接点触 | Esc 取消选择/暂停<br>
+    电脑：鼠标操作 · <b>F</b> 键或 ⛶ 全屏 · Esc 取消选择/暂停<br>
+    手机：直接点触 · 竖屏会自动横过来 · 点 ⛶ 进入全屏<br>
     部署于 Cloudflare Workers · 开源于 <a href="https://github.com/qiayue/minigames" target="_blank" rel="noreferrer">GitHub</a>
   </footer>
 </div>
