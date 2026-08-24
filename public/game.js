@@ -1868,6 +1868,12 @@ function draw() {
     g.translate(rand(-1, 1) * shakeAmp * shakeT * 3, rand(-1, 1) * shakeAmp * shakeT * 3);
   }
   if (!bgCanvas) buildBackground();
+  // 负载自适应：单位很多时压低辉光半径（视觉几乎无差别，开销大幅下降）
+  {
+    let units = enemies.length;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c]) units++;
+    fxQuality = units > 58 ? 0.35 : units > 38 ? 0.65 : 1;
+  }
   g.drawImage(bgCanvas, 0, 0, W, H);
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -2054,6 +2060,30 @@ const EMBLEM_POS = [
   [-29, -11], [-29, 14], [0, -50], [16, 40],
 ];
 
+/* ===== 渐变缓存：同一套坐标+配色只创建一次（渐变在绘制时才按 CTM 求值，可安全复用） ===== */
+function cachedLG(ctx, x0, y0, x1, y1, stops) {
+  const cache = ctx.__gc || (ctx.__gc = new Map());
+  const k = 'l' + x0 + '_' + y0 + '_' + x1 + '_' + y1 + '|' + stops.join('_');
+  let gd = cache.get(k);
+  if (!gd) {
+    gd = ctx.createLinearGradient(x0, y0, x1, y1);
+    for (let i = 0; i < stops.length; i += 2) gd.addColorStop(stops[i], stops[i + 1]);
+    cache.set(k, gd);
+  }
+  return gd;
+}
+function cachedRG(ctx, x0, y0, r0, x1, y1, r1, stops) {
+  const cache = ctx.__gc || (ctx.__gc = new Map());
+  const k = 'r' + x0 + '_' + y0 + '_' + r0 + '_' + x1 + '_' + y1 + '_' + r1 + '|' + stops.join('_');
+  let gd = cache.get(k);
+  if (!gd) {
+    gd = ctx.createRadialGradient(x0, y0, r0, x1, y1, r1);
+    for (let i = 0; i < stops.length; i += 2) gd.addColorStop(stops[i], stops[i + 1]);
+    cache.set(k, gd);
+  }
+  return gd;
+}
+
 /* ===== 材质与通用绘制助手 ===== */
 // 三档材质：1 钢铁 / 2 合金 / 3 秘金
 const TIERS = [
@@ -2065,11 +2095,7 @@ function pal(lv) { return TIERS[Math.min(Math.max(lv || 1, 1), 3) - 1]; }
 
 // 斜面金属板：上亮下暗 + 描边
 function panel(ctx, x, y, w, h, r, P, noEdge) {
-  const gd = ctx.createLinearGradient(x, y, x, y + h);
-  gd.addColorStop(0, P.light);
-  gd.addColorStop(0.42, P.base);
-  gd.addColorStop(1, P.dark);
-  ctx.fillStyle = gd;
+  ctx.fillStyle = cachedLG(ctx, x, y, x, y + h, [0, P.light, 0.42, P.base, 1, P.dark]);
   rr(ctx, x, y, w, h, r); ctx.fill();
   if (!noEdge) {
     ctx.strokeStyle = 'rgba(0,0,0,0.35)';
@@ -2087,10 +2113,12 @@ function bolt(ctx, x, y, P, rad) {
   ctx.fillStyle = P.light;
   ctx.beginPath(); ctx.arc(x, y, R * 0.75, 0, TAU); ctx.fill();
 }
-// 发光包装
+// 发光包装（辉光半径随场上单位数自适应，保证密集战斗时的帧率）
+let fxQuality = 1;
 function emissive(ctx, color, blur, fn) {
+  if (fxQuality <= 0) { fn(); return; }
   ctx.save();
-  ctx.shadowBlur = blur;
+  ctx.shadowBlur = blur * fxQuality;
   ctx.shadowColor = color;
   fn();
   ctx.restore();
@@ -2131,10 +2159,10 @@ function drawMachine(ctx, type, x, y, s, m) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(s, s);
-  // 阴影
-  ctx.fillStyle = 'rgba(0,0,0,0.32)';
+  // 柔和接触阴影
+  ctx.fillStyle = cachedRG(ctx, 0, 36, 1, 0, 36, 32, [0, 'rgba(0,0,0,0.42)', 0.6, 'rgba(0,0,0,0.2)', 1, 'rgba(0,0,0,0)']);
   ctx.beginPath();
-  ctx.ellipse(0, 36, 30, 7, 0, 0, TAU);
+  ctx.ellipse(0, 36, 32, 8.5, 0, 0, TAU);
   ctx.fill();
   if (type === 'box') {
     drawGiftBox(ctx, m);
@@ -3819,8 +3847,21 @@ function drawEnemy(e) {
   } else {
     g.translate(e.x, y + bob * 0.4);
   }
+  // 体型微放大，让敌人与机器的视觉比重相称
+  const esc = e.boss ? 1.04 : e.fly ? 1.08 : 1.14;
+  g.scale(esc, esc);
   const flash = e.flash > 0;
   const frozen = e.slowT > 0;
+  // 地面接触阴影（飞行单位的影子留在地面上并缩小）
+  {
+    const sy = e.fly ? 22 + 34 : 34;
+    const sw = e.w * (e.fly ? 0.34 : 0.52);
+    const sg = g.createRadialGradient(0, sy, 1, 0, sy, Math.max(sw, 6));
+    sg.addColorStop(0, e.fly ? 'rgba(0,0,0,0.26)' : 'rgba(0,0,0,0.42)');
+    sg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = sg;
+    g.beginPath(); g.ellipse(0, sy, sw, sw * 0.3, 0, 0, TAU); g.fill();
+  }
   switch (e.type) {
     case 'scrap': drawScrap(e, bob); break;
     case 'armored': drawArmored(e, bob); break;
@@ -3917,507 +3958,894 @@ function drawEnemy(e) {
   }
 }
 
+/* ===== 敌人绘制助手 ===== */
+// 渐变机体块
+function eBody(x, y, w, h, r, c1, c2, c3) {
+  const stops = c3 ? [0, c1, 0.45, c2, 1, c3] : [0, c1, 1, c2];
+  g.fillStyle = cachedLG(g, x, y, x, y + h, stops);
+  rr(g, x, y, w, h, r); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1.3;
+  rr(g, x, y, w, h, r); g.stroke();
+}
+// 左上轮廓光
+function eRim(x, y, w, h, r, alpha) {
+  g.save();
+  rr(g, x, y, w, h, r);
+  g.clip();
+  g.strokeStyle = 'rgba(255,255,255,' + (alpha || 0.3) + ')';
+  g.lineWidth = 2.4;
+  rr(g, x + 1, y + 1, w - 2, h - 2, r);
+  g.stroke();
+  g.restore();
+}
+// 铆钉
+function eBolt(x, y, c) {
+  g.fillStyle = 'rgba(0,0,0,0.45)';
+  g.beginPath(); g.arc(x, y + 0.6, 2.1, 0, TAU); g.fill();
+  g.fillStyle = c || '#b9c8d6';
+  g.beginPath(); g.arc(x, y, 1.5, 0, TAU); g.fill();
+}
+// 发光眼
+function eEye(x, y, r, color, glow) {
+  g.fillStyle = '#0b0d12';
+  g.beginPath(); g.arc(x, y, r + 1.8, 0, TAU); g.fill();
+  emissive(g, color, glow === undefined ? 9 : glow, () => {
+    g.fillStyle = color;
+    g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+  });
+  g.fillStyle = 'rgba(255,255,255,0.75)';
+  g.beginPath(); g.arc(x - r * 0.32, y - r * 0.32, r * 0.32, 0, TAU); g.fill();
+}
+// 旋翼（模糊盘 + 桨影）
+function eRotor(x, y, r, spin, tint) {
+  g.save();
+  g.translate(x, y);
+  g.scale(1, 0.24);
+  g.fillStyle = tint || 'rgba(190,215,235,0.32)';
+  g.beginPath(); g.arc(0, 0, r + Math.sin(spin) * 1.4, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(230,245,255,0.5)';
+  g.lineWidth = 2.4;
+  for (let i = 0; i < 2; i++) {
+    const a = spin * 3 + i * Math.PI / 2;
+    g.beginPath();
+    g.moveTo(-Math.cos(a) * r, -Math.sin(a) * r);
+    g.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    g.stroke();
+  }
+  g.restore();
+  g.fillStyle = '#39434f';
+  g.beginPath(); g.arc(x, y, 2.6, 0, TAU); g.fill();
+}
+// 履带
+function eTread(x, y, w, h, n, c1, c2) {
+  eBody(x, y, w, h, h / 2, c1, c2);
+  g.fillStyle = 'rgba(0,0,0,0.35)';
+  for (let i = 0; i < n; i++) {
+    rr(g, x + 4 + i * ((w - 8) / n), y + 2.5, (w - 8) / n * 0.55, h - 5, 1.5);
+    g.fill();
+  }
+}
+
+/* ===== 废铁机器人 ===== */
 function drawScrap(e, bob) {
   const leg = Math.sin(e.anim * 9) * 5;
   // 腿
-  g.fillStyle = '#4a4038';
-  rr(g, -12, 20, 8, 14 + leg * 0.4, 3); g.fill();
-  rr(g, 4, 20, 8, 14 - leg * 0.4, 3); g.fill();
-  // 身体
-  g.fillStyle = '#7a6a52';
-  rr(g, -16, -8, 32, 32, 5); g.fill();
-  // 补丁
-  g.fillStyle = '#8f7d61';
-  rr(g, -10, 2, 10, 8, 2); g.fill();
-  g.fillStyle = '#5d5142';
-  rr(g, 4, 10, 8, 7, 2); g.fill();
-  // 前臂（攻击摆动）
+  eBody(-13, 19, 9, 15 + leg * 0.4, 3.5, '#5c4f3e', '#332b21');
+  eBody(4, 19, 9, 15 - leg * 0.4, 3.5, '#5c4f3e', '#332b21');
+  g.fillStyle = '#241d16';
+  rr(g, -15, 32 + leg * 0.4, 13, 5, 2.5); g.fill();
+  rr(g, 2, 32 - leg * 0.4, 13, 5, 2.5); g.fill();
+  // 躯干：焊接的破铁板
+  eBody(-17, -9, 34, 33, 6, '#9c8058', '#6d5a3e', '#4a3c28');
+  eRim(-17, -9, 34, 33, 6, 0.22);
+  // 补丁板
+  g.fillStyle = '#8a7350';
+  rr(g, -12, 0, 12, 10, 2); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1;
+  rr(g, -12, 0, 12, 10, 2); g.stroke();
+  g.fillStyle = '#5a4a34';
+  rr(g, 3, 9, 10, 8, 2); g.fill();
+  // 锈斑
+  g.fillStyle = 'rgba(176,106,58,0.5)';
+  g.beginPath(); g.ellipse(-7, 16, 6, 3.4, 0.3, 0, TAU); g.fill();
+  g.beginPath(); g.ellipse(9, -3, 4, 2.6, -0.4, 0, TAU); g.fill();
+  eBolt(-13, -5); eBolt(12, -5); eBolt(-13, 20); eBolt(12, 20);
+  // 摆动的前臂
   const arm = Math.sin(e.anim * 9) * 0.4 - 0.5;
   g.save();
-  g.translate(-14, 0);
+  g.translate(-15, 0);
   g.rotate(arm);
-  g.fillStyle = '#665845';
-  rr(g, -16, -3, 18, 7, 3); g.fill();
-  g.fillStyle = '#4a4038';
-  g.beginPath(); g.arc(-16, 0, 5, 0, TAU); g.fill();
+  eBody(-17, -4, 19, 8, 3.5, '#7d684a', '#4d3f2c');
+  g.fillStyle = '#3a3126';
+  g.beginPath(); g.arc(-17, 0, 5.4, 0, TAU); g.fill();
+  g.fillStyle = '#5c4f3e';
+  g.beginPath(); g.arc(-17, 0, 3.2, 0, TAU); g.fill();
   g.restore();
-  // 头
-  g.fillStyle = '#8a795f';
+  // 露出的线束
+  g.strokeStyle = '#c94f4f';
+  g.lineWidth = 1.6;
   g.beginPath();
-  g.arc(0, -20, 13, 0, TAU);
+  g.moveTo(13, 4);
+  g.quadraticCurveTo(20, 8 + Math.sin(e.anim * 6) * 2, 17, 16);
+  g.stroke();
+  g.strokeStyle = '#4fa7c9';
+  g.beginPath();
+  g.moveTo(14, 6);
+  g.quadraticCurveTo(22, 12 + Math.cos(e.anim * 5) * 2, 19, 19);
+  g.stroke();
+  // 头
+  const head = g.createRadialGradient(-4, -25, 2, 0, -20, 15);
+  head.addColorStop(0, '#b39a70');
+  head.addColorStop(1, '#6b5940');
+  g.fillStyle = head;
+  g.beginPath(); g.arc(0, -20, 13.5, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1.4;
+  g.beginPath(); g.arc(0, -20, 13.5, 0, TAU); g.stroke();
+  // 头顶铁皮帽
+  g.fillStyle = '#4d4030';
+  g.beginPath();
+  g.ellipse(0, -30, 12, 4.5, 0, Math.PI, 0);
   g.fill();
-  // 独眼
-  g.fillStyle = '#1a1410';
-  g.beginPath(); g.arc(-4, -21, 6, 0, TAU); g.fill();
-  g.fillStyle = '#ff5d5d';
-  g.beginPath(); g.arc(-4, -21, 3, 0, TAU); g.fill();
+  eEye(-4, -21, 5, '#ff5d5d', 10);
+  // 下颚栅格
+  g.fillStyle = '#2f2820';
+  rr(g, -8, -13, 16, 6, 2); g.fill();
+  g.fillStyle = '#8a795f';
+  for (let i = 0; i < 4; i++) { rr(g, -7 + i * 4, -12, 2, 4, 0.8); g.fill(); }
+  // 肩板
+  eBody(-22, -10, 11, 12, 4, '#9c8058', '#4f4130');
+  eBody(12, -10, 11, 12, 4, '#9c8058', '#4f4130');
+  // 排气冒烟
+  g.fillStyle = 'rgba(140,130,120,0.2)';
+  for (let i = 0; i < 2; i++) {
+    const ph = (time * 0.7 + i * 0.5) % 1;
+    g.beginPath(); g.arc(16 + Math.sin(ph * 6) * 3, -28 - ph * 14, 2.5 + ph * 4, 0, TAU); g.fill();
+  }
   // 天线
   g.strokeStyle = '#5d5142';
   g.lineWidth = 2;
   g.beginPath();
-  g.moveTo(6, -31); g.lineTo(9, -40);
+  g.moveTo(7, -30);
+  g.quadraticCurveTo(11, -37, 9 + Math.sin(e.anim * 4) * 2, -42);
   g.stroke();
-  g.fillStyle = '#ff9d2e';
-  g.beginPath(); g.arc(9, -41, 2.5, 0, TAU); g.fill();
+  emissive(g, 'rgba(255,157,46,0.9)', 7, () => {
+    g.fillStyle = '#ff9d2e';
+    g.beginPath(); g.arc(9 + Math.sin(e.anim * 4) * 2, -43, 2.6, 0, TAU); g.fill();
+  });
 }
 
+/* ===== 装甲机器人 ===== */
 function drawArmored(e, bob) {
   const leg = Math.sin(e.anim * 8) * 5;
-  g.fillStyle = '#39434f';
-  rr(g, -13, 20, 9, 15 + leg * 0.4, 3); g.fill();
-  rr(g, 4, 20, 9, 15 - leg * 0.4, 3); g.fill();
-  // 身体（钢板）
-  g.fillStyle = '#5c6e84';
-  rr(g, -18, -10, 36, 34, 6); g.fill();
-  g.fillStyle = '#6e8199';
-  rr(g, -18, -10, 36, 12, 6); g.fill();
+  eBody(-14, 19, 11, 16 + leg * 0.4, 4, '#4d5b6b', '#28313c');
+  eBody(4, 19, 11, 16 - leg * 0.4, 4, '#4d5b6b', '#28313c');
+  g.fillStyle = '#1f272f';
+  rr(g, -16, 33 + leg * 0.4, 15, 5, 2.5); g.fill();
+  rr(g, 2, 33 - leg * 0.4, 15, 5, 2.5); g.fill();
+  // 躯干装甲
+  eBody(-19, -11, 38, 34, 7, '#8ba2b8', '#5c6e84', '#3b4857');
+  eRim(-19, -11, 38, 34, 7, 0.3);
+  // 胸甲分片
+  g.fillStyle = 'rgba(0,0,0,0.22)';
+  rr(g, -15, 2, 30, 3, 1.5); g.fill();
+  rr(g, -15, 12, 30, 3, 1.5); g.fill();
+  // 胸口散热口
+  g.fillStyle = '#232c36';
+  rr(g, -9, -5, 18, 9, 2.5); g.fill();
+  emissive(g, 'rgba(255,157,46,0.7)', 6, () => {
+    g.fillStyle = '#ff9d2e';
+    for (let i = 0; i < 3; i++) { rr(g, -7, -3.5 + i * 2.6, 14, 1.4, 0.7); g.fill(); }
+  });
   // 肩甲
-  g.fillStyle = '#46566a';
-  rr(g, -24, -12, 10, 16, 4); g.fill();
-  rr(g, 14, -12, 10, 16, 4); g.fill();
-  // 铆钉
-  g.fillStyle = '#33404f';
-  for (const px of [-12, 0, 12]) {
-    g.beginPath(); g.arc(px, 8, 2, 0, TAU); g.fill();
-  }
+  eBody(-27, -14, 12, 18, 5, '#9db3c8', '#4d5f73');
+  eBody(15, -14, 12, 18, 5, '#9db3c8', '#4d5f73');
+  hazard(g, -26, -13, 10, 4, 2);
+  hazard(g, 16, -13, 10, 4, 2);
+  eBolt(-13, 8); eBolt(0, 8); eBolt(13, 8);
   // 前臂
   const arm = Math.sin(e.anim * 8) * 0.35 - 0.5;
   g.save();
-  g.translate(-16, -2);
+  g.translate(-17, -2);
   g.rotate(arm);
-  g.fillStyle = '#46566a';
-  rr(g, -18, -4, 20, 8, 3); g.fill();
+  eBody(-19, -5, 21, 10, 4, '#7d92a8', '#435364');
+  g.fillStyle = '#33404f';
+  g.beginPath(); g.arc(-19, 0, 5, 0, TAU); g.fill();
   g.restore();
   // 头盔
-  g.fillStyle = '#7b8fa6';
+  const helm = g.createLinearGradient(0, -36, 0, -16);
+  helm.addColorStop(0, '#a8bccf');
+  helm.addColorStop(1, '#5f7285');
+  g.fillStyle = helm;
   g.beginPath();
-  g.arc(0, -24, 14, Math.PI, 0);
-  g.lineTo(14, -16);
-  g.lineTo(-14, -16);
+  g.arc(0, -24, 14.5, Math.PI, 0);
+  g.lineTo(14.5, -15);
+  g.lineTo(-14.5, -15);
   g.closePath();
   g.fill();
-  // 目镜缝
-  g.fillStyle = '#0d1117';
-  rr(g, -11, -24, 16, 5, 2); g.fill();
-  g.fillStyle = '#ffc531';
-  rr(g, -9, -23, 5, 3, 1); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1.4;
+  g.stroke();
+  // 头盔脊
+  g.fillStyle = '#c3d5e6';
+  rr(g, -2.5, -38, 5, 14, 2); g.fill();
+  // 目镜缝 + 扫描光
+  g.fillStyle = '#080b0f';
+  rr(g, -11.5, -25, 18, 6, 2.5); g.fill();
+  const scan = (Math.sin(e.anim * 2.2) * 0.5 + 0.5) * 11;
+  emissive(g, 'rgba(255,197,49,0.95)', 9, () => {
+    g.fillStyle = '#ffc531';
+    rr(g, -10.5 + scan, -24.2, 5.5, 4.4, 1.6); g.fill();
+  });
 }
 
+/* ===== 疾速无人机 ===== */
 function drawDrone(e) {
   const spin = e.anim * 40;
   // 旋翼臂
-  g.strokeStyle = '#5a6774';
-  g.lineWidth = 3;
+  g.strokeStyle = '#414c59';
+  g.lineWidth = 3.4;
+  g.lineCap = 'round';
   g.beginPath();
-  g.moveTo(-16, -10); g.lineTo(-26, -18);
-  g.moveTo(16, -10); g.lineTo(26, -18);
+  g.moveTo(-14, -8); g.lineTo(-26, -17);
+  g.moveTo(14, -8); g.lineTo(26, -17);
   g.stroke();
-  // 旋翼（模糊椭圆）
-  g.fillStyle = 'rgba(180,200,215,0.4)';
-  for (const px of [-26, 26]) {
-    g.save();
-    g.translate(px, -20);
-    g.scale(1, 0.25);
-    g.beginPath();
-    g.arc(0, 0, 12 + Math.sin(spin) * 1.5, 0, TAU);
-    g.fill();
-    g.restore();
-  }
-  // 机身
-  g.fillStyle = '#4a5568';
+  g.lineCap = 'butt';
+  eRotor(-26, -19, 12, spin);
+  eRotor(26, -19, 12, spin + 1.1);
+  // 机身（碳纤维梭形）
+  const body = g.createLinearGradient(0, -16, 0, 10);
+  body.addColorStop(0, '#67788c');
+  body.addColorStop(0.5, '#3c4757');
+  body.addColorStop(1, '#232b36');
+  g.fillStyle = body;
   g.beginPath();
-  g.ellipse(0, -4, 18, 13, 0, 0, TAU);
-  g.fill();
-  g.fillStyle = '#5d6b80';
-  g.beginPath();
-  g.ellipse(0, -8, 13, 8, 0, 0, TAU);
-  g.fill();
-  // 扫描眼
-  g.fillStyle = '#ff5d5d';
-  g.beginPath();
-  g.arc(-8, -4, 4.5, 0, TAU);
-  g.fill();
-  g.fillStyle = 'rgba(255,93,93,0.35)';
-  g.beginPath();
-  g.arc(-8, -4, 7.5, 0, TAU);
-  g.fill();
-  // 挂爪
-  g.strokeStyle = '#39434f';
-  g.lineWidth = 2.5;
-  g.beginPath();
-  g.moveTo(-5, 8); g.lineTo(-8, 16);
-  g.moveTo(5, 8); g.lineTo(8, 16);
-  g.stroke();
-}
-
-function drawBomber(e) {
-  const spin = e.anim * 45;
-  const blink = Math.sin(e.anim * 12) > 0;
-  // 顶部旋翼
-  g.strokeStyle = '#5a6774';
-  g.lineWidth = 3;
-  g.beginPath();
-  g.moveTo(0, -16); g.lineTo(0, -22);
-  g.stroke();
-  g.fillStyle = 'rgba(180,200,215,0.45)';
-  g.save();
-  g.translate(0, -24);
-  g.scale(1, 0.22);
-  g.beginPath();
-  g.arc(0, 0, 16 + Math.sin(spin) * 2, 0, TAU);
-  g.fill();
-  g.restore();
-  // 蜂体（黄黑条纹）
-  g.save();
-  g.beginPath();
-  g.arc(0, -2, 14, 0, TAU);
-  g.clip();
-  for (let i = -3; i < 4; i++) {
-    g.fillStyle = i % 2 === 0 ? '#ffc531' : '#2a2622';
-    g.save();
-    g.translate(i * 7, -2);
-    g.rotate(-0.5);
-    g.fillRect(-4, -18, 7, 36);
-    g.restore();
-  }
-  g.restore();
-  g.strokeStyle = '#1c1a14';
-  g.lineWidth = 2;
-  g.beginPath();
-  g.arc(0, -2, 14, 0, TAU);
-  g.stroke();
-  // 眼睛（朝基地方向）
-  g.fillStyle = '#0d1117';
-  g.beginPath(); g.arc(-8, -6, 5, 0, TAU); g.fill();
-  g.fillStyle = '#ff5d5d';
-  g.beginPath(); g.arc(-9, -6, 2.5, 0, TAU); g.fill();
-  // 尾刺（炸弹引信）
-  g.fillStyle = '#c8d4e0';
-  g.beginPath();
-  g.moveTo(12, 2); g.lineTo(20, 7); g.lineTo(12, 9);
+  g.moveTo(-20, -2);
+  g.quadraticCurveTo(-16, -14, 0, -15);
+  g.quadraticCurveTo(16, -14, 20, -2);
+  g.quadraticCurveTo(14, 9, 0, 10);
+  g.quadraticCurveTo(-14, 9, -20, -2);
   g.closePath();
   g.fill();
-  // 警示灯
-  g.fillStyle = blink ? '#ff5d5d' : '#5b2020';
+  g.strokeStyle = 'rgba(0,0,0,0.45)';
+  g.lineWidth = 1.3;
+  g.stroke();
+  // 顶部高光
+  g.fillStyle = 'rgba(255,255,255,0.18)';
   g.beginPath();
-  g.arc(0, -18, 3, 0, TAU);
+  g.ellipse(-3, -9, 12, 4.5, -0.15, 0, TAU);
   g.fill();
+  // 侧板缝
+  g.strokeStyle = 'rgba(0,0,0,0.3)';
+  g.lineWidth = 1;
+  g.beginPath(); g.moveTo(-12, -6); g.lineTo(-12, 6); g.stroke();
+  g.beginPath(); g.moveTo(12, -6); g.lineTo(12, 6); g.stroke();
+  // 扫描眼 + 扫描扇
+  emissive(g, 'rgba(255,93,93,0.5)', 12, () => {
+    g.fillStyle = 'rgba(255,93,93,0.22)';
+    g.beginPath();
+    g.moveTo(-9, -3);
+    g.lineTo(-30, -12);
+    g.lineTo(-30, 6);
+    g.closePath();
+    g.fill();
+  });
+  eEye(-9, -3, 4.6, '#ff5d5d', 11);
+  // 起落架
+  g.strokeStyle = '#2e3742';
+  g.lineWidth = 2.6;
+  g.beginPath();
+  g.moveTo(-7, 8); g.lineTo(-11, 17);
+  g.moveTo(7, 8); g.lineTo(11, 17);
+  g.stroke();
+  g.fillStyle = '#4a5666';
+  rr(g, -15, 16, 9, 3.4, 1.6); g.fill();
+  rr(g, 6, 16, 9, 3.4, 1.6); g.fill();
+  // 尾灯
+  emissive(g, 'rgba(127,215,255,0.9)', 6, () => {
+    g.fillStyle = Math.sin(e.anim * 8) > 0 ? '#7fd7ff' : '#204558';
+    g.beginPath(); g.arc(17, 0, 2.2, 0, TAU); g.fill();
+  });
 }
 
+/* ===== 自爆无人蜂 ===== */
+function drawBomber(e) {
+  const spin = e.anim * 45;
+  const pulse = (Math.sin(e.anim * 10) * 0.5 + 0.5);
+  // 顶部旋翼
+  g.strokeStyle = '#414c59';
+  g.lineWidth = 3;
+  g.beginPath(); g.moveTo(0, -15); g.lineTo(0, -23); g.stroke();
+  eRotor(0, -25, 16, spin, 'rgba(255,220,140,0.3)');
+  // 蜂体（黄黑条纹 + 立体）
+  g.save();
+  g.beginPath();
+  g.ellipse(0, -2, 15, 13.5, 0, 0, TAU);
+  g.clip();
+  const bg = g.createLinearGradient(0, -15, 0, 12);
+  bg.addColorStop(0, '#ffd45c');
+  bg.addColorStop(1, '#c88f14');
+  g.fillStyle = bg;
+  g.fillRect(-18, -18, 36, 32);
+  for (let i = -2; i < 4; i++) {
+    g.fillStyle = 'rgba(28,24,18,0.92)';
+    g.save();
+    g.translate(i * 9 - 2, -2);
+    g.rotate(-0.45);
+    g.fillRect(-3, -20, 5.5, 40);
+    g.restore();
+  }
+  g.fillStyle = 'rgba(255,255,255,0.25)';
+  g.beginPath(); g.ellipse(-5, -9, 8, 3.6, -0.3, 0, TAU); g.fill();
+  g.restore();
+  g.strokeStyle = '#1a1712';
+  g.lineWidth = 2;
+  g.beginPath(); g.ellipse(0, -2, 15, 13.5, 0, 0, TAU); g.stroke();
+  // 透明蜂翼
+  g.fillStyle = 'rgba(200,235,255,0.3)';
+  for (const sx of [-1, 1]) {
+    g.save();
+    g.translate(sx * 8, -10);
+    g.rotate(sx * (0.5 + Math.sin(e.anim * 30) * 0.25));
+    g.beginPath(); g.ellipse(sx * 11, 0, 12, 5, 0, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(220,245,255,0.55)';
+    g.lineWidth = 1;
+    g.beginPath(); g.ellipse(sx * 11, 0, 12, 5, 0, 0, TAU); g.stroke();
+    g.restore();
+  }
+  // 腹部炸弹核心
+  emissive(g, 'rgba(255,60,40,' + (0.5 + pulse * 0.5) + ')', 10 + pulse * 12, () => {
+    const core = g.createRadialGradient(0, 6, 1, 0, 6, 8);
+    core.addColorStop(0, '#fff1d8');
+    core.addColorStop(0.4, '#ff6a3a');
+    core.addColorStop(1, '#a52010');
+    g.fillStyle = core;
+    g.beginPath(); g.arc(0, 6, 5.5 + pulse * 1.5, 0, TAU); g.fill();
+  });
+  // 眼
+  eEye(-8, -6, 4.6, '#ff5d5d', 9);
+  // 尾刺引信
+  g.fillStyle = '#c8d4e0';
+  g.beginPath();
+  g.moveTo(12, 3); g.lineTo(22, 8); g.lineTo(12, 10);
+  g.closePath(); g.fill();
+  g.strokeStyle = '#ff9d2e';
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.moveTo(20, 7);
+  g.quadraticCurveTo(26, 4 + Math.sin(e.anim * 12) * 2, 29, 7);
+  g.stroke();
+  // 警示灯
+  emissive(g, 'rgba(255,93,93,0.9)', 8, () => {
+    g.fillStyle = pulse > 0.5 ? '#ff5d5d' : '#5b2020';
+    g.beginPath(); g.arc(0, -18, 3.2, 0, TAU); g.fill();
+  });
+}
+
+/* ===== 盾卫机器人 ===== */
 function drawShieldbot(e, bob) {
   const leg = Math.sin(e.anim * 7) * 4;
   const hasShield = e.shield > 0;
-  // 腿
-  g.fillStyle = '#39434f';
-  rr(g, -10, 20, 9, 15 + leg * 0.4, 3); g.fill();
-  rr(g, 5, 20, 9, 15 - leg * 0.4, 3); g.fill();
-  // 身体
-  g.fillStyle = '#55707c';
-  rr(g, -14, -10, 32, 34, 6); g.fill();
-  g.fillStyle = '#68858f';
-  rr(g, -14, -10, 32, 12, 6); g.fill();
-  // 头
-  g.fillStyle = '#78959e';
-  g.beginPath();
-  g.arc(2, -20, 12, 0, TAU);
-  g.fill();
-  g.fillStyle = '#0d1117';
-  rr(g, -8, -24, 14, 6, 3); g.fill();
-  g.fillStyle = '#4cc2ff';
-  rr(g, -6, -23, 5, 4, 1); g.fill();
-  // 持盾臂
-  g.fillStyle = '#46566a';
-  rr(g, -22, -6, 12, 8, 3); g.fill();
-  if (hasShield) {
-    // 塔盾（面向基地）
-    g.fillStyle = '#3f5d78';
-    rr(g, -32, -30, 14, 58, 6); g.fill();
-    g.fillStyle = '#54789a';
-    rr(g, -32, -30, 14, 16, 6); g.fill();
+  eBody(-11, 19, 11, 16 + leg * 0.4, 4, '#4a5c66', '#26333a');
+  eBody(4, 19, 11, 16 - leg * 0.4, 4, '#4a5c66', '#26333a');
+  g.fillStyle = '#1d272c';
+  rr(g, -13, 33 + leg * 0.4, 15, 5, 2.5); g.fill();
+  rr(g, 2, 33 - leg * 0.4, 15, 5, 2.5); g.fill();
+  // 躯干
+  eBody(-15, -11, 33, 34, 7, '#8fb4c2', '#4e6b78', '#2c3f47');
+  eRim(-15, -11, 33, 34, 7, 0.3);
+  // 胸口护盾徽记
+  g.fillStyle = '#243840';
+  rr(g, -9, -6, 21, 17, 4); g.fill();
+  emissive(g, 'rgba(76,194,255,0.8)', 7, () => {
     g.strokeStyle = '#7fd7ff';
     g.lineWidth = 2;
-    rr(g, -30, -28, 10, 54, 5); g.stroke();
+    g.beginPath();
+    g.moveTo(1.5, -3); g.lineTo(8, -0.5); g.lineTo(8, 3);
+    g.quadraticCurveTo(8, 7, 1.5, 8.6);
+    g.quadraticCurveTo(-5, 7, -5, 3);
+    g.lineTo(-5, -0.5); g.closePath();
+    g.stroke();
+  });
+  // 腰带
+  g.fillStyle = '#31474f';
+  rr(g, -15, 14, 33, 6, 2); g.fill();
+  g.fillStyle = '#ffc531';
+  rr(g, -3, 15, 8, 4, 1.5); g.fill();
+  // 肩甲
+  eBody(11, -15, 12, 15, 5, '#a8ccd8', '#4a6672');
+  // 头
+  const helm = g.createLinearGradient(0, -34, 0, -14);
+  helm.addColorStop(0, '#9cbcc9');
+  helm.addColorStop(1, '#4f6a76');
+  g.fillStyle = helm;
+  g.beginPath(); g.arc(2, -21, 12.5, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1.3;
+  g.beginPath(); g.arc(2, -21, 12.5, 0, TAU); g.stroke();
+  g.fillStyle = '#080b0f';
+  rr(g, -8, -25, 16, 6.5, 2.5); g.fill();
+  emissive(g, 'rgba(76,194,255,0.95)', 8, () => {
+    g.fillStyle = '#4cc2ff';
+    rr(g, -6, -24, 6, 4.5, 1.6); g.fill();
+  });
+  // 持盾臂
+  eBody(-24, -7, 13, 10, 4, '#7d95a3', '#41555f');
+  if (hasShield) {
+    // 塔盾
+    const sh = g.createLinearGradient(-36, -32, -18, 30);
+    sh.addColorStop(0, '#7fb4d8');
+    sh.addColorStop(0.45, '#3f6d8b');
+    sh.addColorStop(1, '#24404f');
+    g.fillStyle = sh;
+    rr(g, -36, -32, 17, 62, 7); g.fill();
+    g.strokeStyle = '#16303d';
+    g.lineWidth = 2;
+    rr(g, -36, -32, 17, 62, 7); g.stroke();
+    // 盾面能量纹
+    emissive(g, 'rgba(127,215,255,0.85)', 8, () => {
+      g.strokeStyle = 'rgba(160,230,255,0.9)';
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(-27.5, -26); g.lineTo(-27.5, 24);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(-33, -12); g.lineTo(-22, -12);
+      g.moveTo(-33, 8); g.lineTo(-22, 8);
+      g.stroke();
+    });
     // 观察缝
-    g.fillStyle = '#101820';
-    rr(g, -29, -14, 8, 5, 2); g.fill();
-    // 盾面铆钉
-    g.fillStyle = '#2c4257';
-    for (const py of [-24, 2, 20]) {
-      g.beginPath(); g.arc(-25, py, 1.8, 0, TAU); g.fill();
-    }
+    g.fillStyle = '#0d1820';
+    rr(g, -33, -17, 11, 5, 2); g.fill();
+    // 铆钉
+    eBolt(-30, -26, '#9fc9e8'); eBolt(-30, 2, '#9fc9e8'); eBolt(-30, 24, '#9fc9e8');
+    // 护盾力场闪光
+    g.strokeStyle = 'rgba(127,215,255,' + (0.25 + Math.sin(time * 4) * 0.12) + ')';
+    g.lineWidth = 2.5;
+    g.beginPath();
+    g.ellipse(-27, -2, 15, 40, 0, -1.4, 1.4);
+    g.stroke();
   } else {
-    // 破盾后残余把手
     g.fillStyle = '#39434f';
-    rr(g, -26, -6, 6, 10, 2); g.fill();
+    rr(g, -28, -7, 7, 12, 2.5); g.fill();
+    // 破碎的盾框残骸
+    g.strokeStyle = 'rgba(120,160,185,0.6)';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(-31, -18); g.lineTo(-26, -6); g.lineTo(-33, 4);
+    g.stroke();
   }
 }
 
+/* ===== 冲刺机器人 ===== */
 function drawRunner(e, bob) {
-  const leg = Math.sin(e.anim * (e.dashing > 0 ? 22 : 11)) * 7;
-  const lean = e.dashing > 0 ? 0.32 : 0.12;
+  const dashing = e.dashing > 0;
+  const leg = Math.sin(e.anim * (dashing ? 22 : 11)) * 7;
   g.save();
-  g.rotate(lean);
+  g.rotate(dashing ? 0.3 : 0.1);
   // 速度线
-  if (e.dashing > 0) {
-    g.strokeStyle = 'rgba(255,215,100,0.55)';
-    g.lineWidth = 2;
-    for (let i = 0; i < 3; i++) {
+  if (dashing) {
+    g.strokeStyle = 'rgba(255,215,100,0.5)';
+    g.lineWidth = 2.2;
+    for (let i = 0; i < 4; i++) {
+      const oy = -18 + i * 12;
       g.beginPath();
-      g.moveTo(20 + i * 9, -16 + i * 12);
-      g.lineTo(40 + i * 11, -16 + i * 12);
+      g.moveTo(22 + i * 6, oy);
+      g.lineTo(44 + i * 10 + Math.sin(time * 20 + i) * 4, oy);
       g.stroke();
     }
   }
-  // 腿（细长）
-  g.fillStyle = '#4a4a56';
-  rr(g, -12, 18, 7, 16 + leg * 0.5, 3); g.fill();
-  rr(g, 5, 18, 7, 16 - leg * 0.5, 3); g.fill();
-  // 流线型身体
-  const body = g.createLinearGradient(0, -12, 0, 22);
-  body.addColorStop(0, '#8a6f4a');
-  body.addColorStop(1, '#5e4c34');
-  g.fillStyle = body;
-  g.beginPath();
-  g.ellipse(0, 6, 15, 18, 0, 0, TAU);
-  g.fill();
-  // 推进背包
-  g.fillStyle = '#3b3b45';
-  rr(g, 8, -6, 12, 18, 4); g.fill();
-  if (e.dashing > 0) {
-    g.save();
-    g.shadowBlur = 12;
-    g.shadowColor = 'rgba(255,180,60,0.9)';
-    g.fillStyle = '#ffb347';
+  // 数字腿（反关节）
+  for (const [sx, ph] of [[-9, 1], [7, -1]]) {
+    const k = leg * ph * 0.5;
+    g.strokeStyle = '#3f3f4d';
+    g.lineWidth = 5;
+    g.lineCap = 'round';
     g.beginPath();
-    g.ellipse(22, 3, 6 + rand(0, 3), 4, 0, 0, TAU);
-    g.fill();
-    g.restore();
+    g.moveTo(sx, 14);
+    g.lineTo(sx - 5 + k * 0.4, 24);
+    g.lineTo(sx + 3 + k, 34);
+    g.stroke();
+    g.lineCap = 'butt';
+    g.fillStyle = '#5a5a6b';
+    g.beginPath(); g.arc(sx - 5 + k * 0.4, 24, 2.8, 0, TAU); g.fill();
+    g.fillStyle = '#26262f';
+    rr(g, sx - 2 + k, 33, 13, 5, 2.5); g.fill();
+    g.fillStyle = '#3d3d4a';
+    rr(g, sx - 2 + k, 33, 13, 2, 1); g.fill();
   }
-  // 头
-  g.fillStyle = '#9a7f57';
+  // 流线机身
+  g.fillStyle = cachedLG(g, -12, -12, 12, 22, [0, '#d3ac72', 0.5, '#8a6f4a', 1, '#463823']);
   g.beginPath();
-  g.ellipse(-3, -18, 12, 10, -0.2, 0, TAU);
+  g.ellipse(0, 5, 15, 18, 0, 0, TAU);
   g.fill();
-  // 单眼护目镜
-  g.fillStyle = '#12100c';
-  rr(g, -13, -22, 16, 7, 3); g.fill();
-  g.fillStyle = e.dashing > 0 ? '#ffd764' : '#ff8c50';
-  rr(g, -11, -21, 6, 4, 2); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.45)';
+  g.lineWidth = 1.4;
+  g.stroke();
+  // 胸甲板 + 橙色导流条
+  g.save();
+  g.beginPath(); g.ellipse(0, 5, 15, 18, 0, 0, TAU); g.clip();
+  g.fillStyle = '#5d5566';
+  g.beginPath();
+  g.moveTo(-13, -6); g.quadraticCurveTo(0, -12, 12, -4);
+  g.lineTo(12, 6); g.quadraticCurveTo(0, 1, -13, 5);
+  g.closePath(); g.fill();
+  emissive(g, 'rgba(255,157,46,0.8)', 6, () => {
+    g.fillStyle = '#ff9d2e';
+    g.beginPath();
+    g.moveTo(-11, -1); g.quadraticCurveTo(0, -6, 11, 0);
+    g.lineTo(11, 2.4); g.quadraticCurveTo(0, -3.4, -11, 1.6);
+    g.closePath(); g.fill();
+  });
+  // 腹部面板缝
+  g.strokeStyle = 'rgba(0,0,0,0.3)';
+  g.lineWidth = 1.1;
+  g.beginPath(); g.moveTo(-11, 13); g.lineTo(11, 11); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,0.2)';
+  g.beginPath(); g.ellipse(-6, 0, 5, 10, -0.2, 0, TAU); g.fill();
+  g.restore();
+  // 肩甲
+  eBody(-13, -9, 12, 11, 5, '#cfae7d', '#6d5738');
+  // 推进背包
+  eBody(7, -8, 14, 20, 5, '#59596b', '#2c2c38');
+  g.fillStyle = '#ffc531';
+  rr(g, 10, -5, 8, 2.6, 1.2); g.fill();
+  // 尾焰
+  if (dashing) {
+    emissive(g, 'rgba(255,180,60,0.95)', 16, () => {
+      const fl = g.createLinearGradient(20, 4, 44, 4);
+      fl.addColorStop(0, 'rgba(255,240,190,0.95)');
+      fl.addColorStop(0.5, 'rgba(255,150,50,0.7)');
+      fl.addColorStop(1, 'rgba(255,90,20,0)');
+      g.fillStyle = fl;
+      g.beginPath();
+      g.moveTo(20, -2);
+      g.quadraticCurveTo(34, -8 - rand(0, 4), 44 + rand(0, 8), 4);
+      g.quadraticCurveTo(34, 14 + rand(0, 4), 20, 8);
+      g.closePath(); g.fill();
+    });
+  } else {
+    emissive(g, 'rgba(255,157,46,0.7)', 6, () => {
+      g.fillStyle = '#ff9d2e';
+      g.beginPath(); g.ellipse(21, 3, 3.4, 4.5, 0, 0, TAU); g.fill();
+    });
+  }
+  // 头 + 护目镜
+  const head = g.createLinearGradient(0, -30, 0, -10);
+  head.addColorStop(0, '#c5a674');
+  head.addColorStop(1, '#7b6444');
+  g.fillStyle = head;
+  g.beginPath(); g.ellipse(-3, -17, 13, 11, -0.2, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1.3;
+  g.stroke();
+  g.fillStyle = '#0d0b08';
+  g.save();
+  g.translate(-4, -19);
+  g.rotate(-0.2);
+  rr(g, -11, -4, 18, 8, 3.5); g.fill();
+  g.restore();
+  emissive(g, dashing ? 'rgba(255,215,100,0.95)' : 'rgba(255,140,80,0.9)', 10, () => {
+    g.fillStyle = dashing ? '#ffd764' : '#ff8c50';
+    g.save();
+    g.translate(-4, -19);
+    g.rotate(-0.2);
+    rr(g, -9, -2.4, 7, 4.6, 2); g.fill();
+    g.restore();
+  });
   g.restore();
 }
 
+/* ===== 弹跳机器人 ===== */
 function drawJumper(e, bob) {
   const inAir = e.jumpT > 0;
-  const compress = inAir ? 1 : 1 + Math.sin(e.anim * 8) * 0.06;
+  const squash = inAir ? 0.92 : 1 + Math.sin(e.anim * 8) * 0.07;
   g.save();
   g.translate(0, inAir ? -Math.sin((1 - e.jumpT / 0.55) * Math.PI) * 42 : 0);
-  g.scale(1, compress);
+  g.scale(1 / squash, squash);
+  const legLen = inAir ? 24 : 14;
   // 弹簧腿
-  g.strokeStyle = '#8ba1b8';
-  g.lineWidth = 3;
+  g.strokeStyle = '#a9bccd';
+  g.lineWidth = 3.4;
   g.beginPath();
-  const legLen = inAir ? 22 : 14;
-  g.moveTo(0, 14);
-  for (let i = 0; i <= 4; i++) {
-    g.lineTo((i % 2 === 0 ? -7 : 7), 14 + (i + 1) * legLen / 5);
-  }
+  g.moveTo(0, 13);
+  for (let i = 0; i <= 5; i++) g.lineTo((i % 2 === 0 ? -8 : 8), 13 + (i + 1) * legLen / 5);
   g.stroke();
-  // 弹簧脚垫
-  g.fillStyle = '#39434f';
-  rr(g, -12, 14 + legLen, 24, 6, 3); g.fill();
-  // 身体
-  const body = g.createLinearGradient(0, -18, 0, 14);
-  body.addColorStop(0, '#7d8a63');
-  body.addColorStop(1, '#4e5940');
-  g.fillStyle = body;
-  rr(g, -16, -14, 32, 28, 8); g.fill();
-  // 减震器
-  g.fillStyle = '#c8d4e0';
-  rr(g, -20, -6, 6, 14, 3); g.fill();
-  rr(g, 14, -6, 6, 14, 3); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,0.3)';
+  g.lineWidth = 1.2;
+  g.beginPath();
+  g.moveTo(0, 13);
+  for (let i = 0; i <= 5; i++) g.lineTo((i % 2 === 0 ? -8 : 8), 13 + (i + 1) * legLen / 5);
+  g.stroke();
+  // 脚垫
+  eBody(-13, 13 + legLen, 26, 7, 3.5, '#5b6774', '#2b333c');
+  // 躯干
+  eBody(-17, -14, 34, 29, 9, '#a3b57f', '#6c7f4f', '#414f2e');
+  eRim(-17, -14, 34, 29, 9, 0.26);
+  // 胸口减震器
+  g.fillStyle = '#2f3a24';
+  rr(g, -8, -6, 16, 14, 4); g.fill();
+  emissive(g, 'rgba(255,215,100,0.7)', 6, () => {
+    g.fillStyle = '#ffd764';
+    rr(g, -5, -3, 10, 3, 1.5); g.fill();
+    rr(g, -5, 2, 10, 3, 1.5); g.fill();
+  });
+  // 侧减震柱
+  for (const sx of [-22, 15]) {
+    eBody(sx, -7, 7, 16, 3, '#d3dde7', '#7d8994');
+    g.fillStyle = '#39434f';
+    rr(g, sx - 1, -1 + (inAir ? -2 : 2), 9, 3.4, 1.5); g.fill();
+  }
   // 头
-  g.fillStyle = '#8e9c72';
-  g.beginPath(); g.arc(0, -22, 11, 0, TAU); g.fill();
-  g.fillStyle = '#12140e';
-  g.beginPath(); g.arc(-4, -23, 5, 0, TAU); g.fill();
-  g.fillStyle = '#ffd764';
-  g.beginPath(); g.arc(-4, -23, 2.4, 0, TAU); g.fill();
+  const head = g.createRadialGradient(-3, -27, 2, 0, -23, 13);
+  head.addColorStop(0, '#c3d29c');
+  head.addColorStop(1, '#6d7d51');
+  g.fillStyle = head;
+  g.beginPath(); g.arc(0, -23, 11.5, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1.3;
+  g.beginPath(); g.arc(0, -23, 11.5, 0, TAU); g.stroke();
+  eEye(-4, -24, 4.4, '#ffd764', 9);
   // 剩余跳跃次数
-  g.fillStyle = '#ffd764';
   for (let i = 0; i < e.jumpsLeft; i++) {
-    g.beginPath(); g.arc(-6 + i * 7, -36, 2.2, 0, TAU); g.fill();
+    emissive(g, 'rgba(255,215,100,0.9)', 6, () => {
+      g.fillStyle = '#ffd764';
+      g.beginPath(); g.arc(-6 + i * 7, -38, 2.4, 0, TAU); g.fill();
+    });
   }
   g.restore();
 }
 
+/* ===== 维修无人机 ===== */
 function drawHealer(e) {
   const spin = e.anim * 38;
   const glow = e.healT < 0.6;
   // 旋翼
   g.strokeStyle = '#5a6774';
-  g.lineWidth = 3;
+  g.lineWidth = 3.2;
+  g.lineCap = 'round';
   g.beginPath();
-  g.moveTo(-14, -8); g.lineTo(-24, -16);
-  g.moveTo(14, -8); g.lineTo(24, -16);
+  g.moveTo(-13, -7); g.lineTo(-24, -16);
+  g.moveTo(13, -7); g.lineTo(24, -16);
   g.stroke();
-  g.fillStyle = 'rgba(180,230,200,0.45)';
-  for (const px of [-24, 24]) {
-    g.save();
-    g.translate(px, -18);
-    g.scale(1, 0.24);
-    g.beginPath();
-    g.arc(0, 0, 11 + Math.sin(spin) * 1.5, 0, TAU);
-    g.fill();
-    g.restore();
-  }
+  g.lineCap = 'butt';
+  eRotor(-24, -18, 11, spin, 'rgba(190,240,215,0.35)');
+  eRotor(24, -18, 11, spin + 0.9, 'rgba(190,240,215,0.35)');
   // 机身（白绿医疗涂装）
-  const body = g.createLinearGradient(0, -14, 0, 10);
-  body.addColorStop(0, '#e6f2ea');
-  body.addColorStop(1, '#7fa892');
+  const body = g.createLinearGradient(0, -16, 0, 12);
+  body.addColorStop(0, '#f4fbf7');
+  body.addColorStop(0.55, '#c7ded1');
+  body.addColorStop(1, '#6d9484');
   g.fillStyle = body;
   g.beginPath();
-  g.ellipse(0, -3, 17, 13, 0, 0, TAU);
+  g.ellipse(0, -3, 18, 14, 0, 0, TAU);
   g.fill();
-  // 医疗十字
-  g.save();
-  if (glow) { g.shadowBlur = 10; g.shadowColor = 'rgba(88,214,139,0.9)'; }
-  g.fillStyle = '#3fbf74';
-  g.fillRect(-2.5, -11, 5, 15);
-  g.fillRect(-7.5, -6, 15, 5);
-  g.restore();
-  // 修理臂
-  g.strokeStyle = '#5a6774';
-  g.lineWidth = 2.5;
-  g.beginPath();
-  g.moveTo(-8, 9); g.lineTo(-12, 18);
-  g.moveTo(8, 9); g.lineTo(12, 18);
+  g.strokeStyle = 'rgba(20,50,40,0.45)';
+  g.lineWidth = 1.4;
   g.stroke();
-  g.fillStyle = '#c8d4e0';
-  g.beginPath(); g.arc(-12, 19, 3, 0, TAU); g.fill();
-  g.beginPath(); g.arc(12, 19, 3, 0, TAU); g.fill();
+  // 绿色腰线
+  g.fillStyle = '#3fbf74';
+  g.save();
+  g.beginPath(); g.ellipse(0, -3, 18, 14, 0, 0, TAU); g.clip();
+  g.fillRect(-20, 2, 40, 4);
+  g.restore();
+  // 医疗十字
+  emissive(g, glow ? 'rgba(88,214,139,0.95)' : 'rgba(88,214,139,0.5)', glow ? 14 : 7, () => {
+    g.fillStyle = '#2fae66';
+    rr(g, -2.8, -12, 5.6, 16, 1.6); g.fill();
+    rr(g, -8, -6.8, 16, 5.6, 1.6); g.fill();
+  });
+  // 舷窗
+  g.fillStyle = 'rgba(40,80,70,0.65)';
+  g.beginPath(); g.ellipse(-11, -5, 4, 3, 0, 0, TAU); g.fill();
+  g.beginPath(); g.ellipse(11, -5, 4, 3, 0, 0, TAU); g.fill();
+  // 修理臂 + 夹钳
+  g.strokeStyle = '#5a6774';
+  g.lineWidth = 2.6;
+  g.beginPath();
+  g.moveTo(-8, 9); g.lineTo(-13, 19);
+  g.moveTo(8, 9); g.lineTo(13, 19);
+  g.stroke();
+  for (const sx of [-13, 13]) {
+    g.fillStyle = '#c8d4e0';
+    g.beginPath(); g.arc(sx, 20, 3.4, 0, TAU); g.fill();
+    emissive(g, 'rgba(88,214,139,0.85)', 6, () => {
+      g.fillStyle = '#8ff2b6';
+      g.beginPath(); g.arc(sx, 20, 1.6, 0, TAU); g.fill();
+    });
+  }
   // 治疗光环
   if (glow) {
     g.strokeStyle = 'rgba(88,214,139,0.5)';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.arc(0, -3, 26 + Math.sin(time * 8) * 3, 0, TAU);
-    g.stroke();
+    g.lineWidth = 2.2;
+    g.beginPath(); g.arc(0, -3, 27 + Math.sin(time * 8) * 3, 0, TAU); g.stroke();
+    g.strokeStyle = 'rgba(143,242,182,0.28)';
+    g.beginPath(); g.arc(0, -3, 34 + Math.sin(time * 8 + 1) * 3, 0, TAU); g.stroke();
   }
 }
 
+/* ===== 重型碾压车 ===== */
+function drawCrusher(e) {
+  const roll = e.anim * 3;
+  // 后履带
+  eTread(-6, 6, 44, 18, 6, '#48525c', '#242a31');
+  // 车体
+  const body = g.createLinearGradient(0, -30, 0, 18);
+  body.addColorStop(0, '#a8695a');
+  body.addColorStop(0.45, '#7c4a3c');
+  body.addColorStop(1, '#452720');
+  g.fillStyle = body;
+  rr(g, -14, -28, 56, 44, 8); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.45)';
+  g.lineWidth = 1.6;
+  rr(g, -14, -28, 56, 44, 8); g.stroke();
+  eRim(-14, -28, 56, 44, 8, 0.2);
+  // 侧板缝与铆钉
+  g.strokeStyle = 'rgba(0,0,0,0.28)';
+  g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(-14, -8); g.lineTo(42, -8); g.stroke();
+  eBolt(-8, -22, '#c79a86'); eBolt(-8, 2, '#c79a86');
+  eBolt(36, -22, '#c79a86'); eBolt(36, 2, '#c79a86');
+  // 驾驶舱
+  eBody(6, -25, 28, 20, 5, '#4a5763', '#232a32');
+  const win = g.createLinearGradient(10, -22, 22, -8);
+  win.addColorStop(0, '#ffe08a');
+  win.addColorStop(1, '#c07f16');
+  g.fillStyle = win;
+  rr(g, 10, -21, 11, 10, 2.5); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.35)';
+  g.beginPath();
+  g.moveTo(10, -12); g.lineTo(18, -21); g.lineTo(21, -21); g.lineTo(11, -11);
+  g.closePath(); g.fill();
+  // 排气管 + 烟
+  eBody(33, -44, 8, 20, 3, '#5c534a', '#2b261f');
+  g.fillStyle = 'rgba(120,120,125,0.28)';
+  for (let i = 0; i < 3; i++) {
+    const ph = (time * 0.9 + i * 0.33) % 1;
+    g.beginPath();
+    g.arc(37 + Math.sin(ph * 5) * 4, -46 - ph * 22, 3 + ph * 6, 0, TAU);
+    g.fill();
+  }
+  // 警示条纹
+  hazard(g, -14, 8, 56, 9, 3);
+  // 前滚筒
+  const drum = g.createRadialGradient(-30, 6, 3, -26, 12, 24);
+  drum.addColorStop(0, '#8c98a4');
+  drum.addColorStop(1, '#3c454f');
+  g.fillStyle = drum;
+  g.beginPath(); g.arc(-26, 12, 22, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.5)';
+  g.lineWidth = 2;
+  g.beginPath(); g.arc(-26, 12, 22, 0, TAU); g.stroke();
+  g.fillStyle = '#39434e';
+  g.beginPath(); g.arc(-26, 12, 14, 0, TAU); g.fill();
+  // 滚筒尖钉
+  for (let i = 0; i < 9; i++) {
+    const a = roll + i * TAU / 9;
+    const px = -26 + Math.cos(a) * 19, py = 12 + Math.sin(a) * 19;
+    g.fillStyle = Math.cos(a) < 0 ? '#8d9aa6' : '#5e6b78';
+    g.save();
+    g.translate(px, py);
+    g.rotate(a);
+    g.beginPath();
+    g.moveTo(-3.4, -3); g.lineTo(5, 0); g.lineTo(-3.4, 3);
+    g.closePath(); g.fill();
+    g.restore();
+  }
+  // 支架
+  eBody(-18, -6, 13, 22, 3, '#7a5a49', '#3d2a21');
+}
+
+/* ===== 钢铁泰坦（Boss） ===== */
 function drawTitan(e) {
   const step = Math.sin(e.anim * 4) * 6;
   const hasShield = e.shield > 0;
+  const t = time;
   // 双腿
-  g.fillStyle = '#3a4048';
-  rr(g, -22, 16, 18, 26 + step * 0.4, 5); g.fill();
-  rr(g, 6, 16, 18, 26 - step * 0.4, 5); g.fill();
-  g.fillStyle = '#2b3037';
-  rr(g, -24, 38, 22, 8, 3); g.fill();
-  rr(g, 4, 38, 22, 8, 3); g.fill();
-  // 躯干（重装甲）
-  const torso = g.createLinearGradient(-30, -30, 30, 20);
-  torso.addColorStop(0, '#8a5a4a');
-  torso.addColorStop(0.5, '#6d4438');
-  torso.addColorStop(1, '#4a2e26');
-  g.fillStyle = torso;
-  rr(g, -32, -34, 64, 54, 10); g.fill();
-  // 胸口散热格栅
-  g.fillStyle = '#2a1f1a';
-  rr(g, -18, -20, 36, 24, 5); g.fill();
-  g.fillStyle = '#ff7a2e';
-  for (let i = 0; i < 4; i++) {
-    rr(g, -15, -17 + i * 6, 30, 3, 1.5); g.fill();
+  for (const [sx, ph] of [[-22, 1], [6, -1]]) {
+    const k = step * ph * 0.4;
+    eBody(sx, 14, 19, 27 + k, 6, '#5b6472', '#252a33');
+    eBody(sx - 2, 39 + k, 23, 9, 4, '#7a8494', '#333a45');
+    g.fillStyle = 'rgba(0,0,0,0.3)';
+    rr(g, sx + 2, 20, 11, 4, 2); g.fill();
   }
-  // 肩甲
-  g.fillStyle = '#7b8fa6';
-  rr(g, -46, -36, 18, 26, 7); g.fill();
-  rr(g, 28, -36, 18, 26, 7); g.fill();
-  g.fillStyle = '#ffc531';
-  rr(g, -44, -32, 14, 4, 2); g.fill();
-  rr(g, 30, -32, 14, 4, 2); g.fill();
+  // 腰部
+  eBody(-18, 4, 38, 16, 5, '#6a5145', '#31231d');
+  // 躯干重甲
+  const torso = g.createLinearGradient(-30, -34, 30, 22);
+  torso.addColorStop(0, '#b0776a');
+  torso.addColorStop(0.4, '#7d4d40');
+  torso.addColorStop(1, '#3e2620');
+  g.fillStyle = torso;
+  rr(g, -32, -34, 64, 54, 11); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.5)';
+  g.lineWidth = 2;
+  rr(g, -32, -34, 64, 54, 11); g.stroke();
+  eRim(-32, -34, 64, 54, 11, 0.22);
+  // 胸甲分层
+  g.fillStyle = 'rgba(0,0,0,0.2)';
+  rr(g, -28, -6, 56, 4, 2); g.fill();
+  // 胸口反应炉
+  g.fillStyle = '#1c1512';
+  rr(g, -19, -24, 38, 26, 6); g.fill();
+  emissive(g, 'rgba(255,120,40,0.9)', 14, () => {
+    const core = g.createRadialGradient(0, -11, 2, 0, -11, 15);
+    core.addColorStop(0, '#fff0d0');
+    core.addColorStop(0.4, '#ff9d2e');
+    core.addColorStop(1, 'rgba(190,60,10,0.15)');
+    g.fillStyle = core;
+    g.beginPath(); g.arc(0, -11, 12 + Math.sin(t * 3) * 1.2, 0, TAU); g.fill();
+  });
+  g.strokeStyle = '#e8c877';
+  g.lineWidth = 2.2;
+  g.beginPath(); g.arc(0, -11, 14, 0, TAU); g.stroke();
+  // 散热格栅
+  g.fillStyle = '#ff7a2e';
+  for (let i = 0; i < 3; i++) { rr(g, -26, -20 + i * 7, 5, 4, 1.5); g.fill(); }
+  for (let i = 0; i < 3; i++) { rr(g, 21, -20 + i * 7, 5, 4, 1.5); g.fill(); }
+  // 肩甲 + 尖刺
+  for (const sx of [-50, 30]) {
+    eBody(sx, -38, 20, 28, 8, '#9db3c8', '#40505f');
+    g.fillStyle = '#e8c877';
+    rr(g, sx + 2, -34, 16, 5, 2); g.fill();
+    g.fillStyle = '#c3d5e6';
+    for (let i = 0; i < 2; i++) {
+      g.beginPath();
+      g.moveTo(sx + 4 + i * 9, -38);
+      g.lineTo(sx + 7 + i * 9, -50);
+      g.lineTo(sx + 10 + i * 9, -38);
+      g.closePath(); g.fill();
+    }
+  }
   // 头部
-  g.fillStyle = '#5c6e84';
-  rr(g, -14, -54, 28, 22, 6); g.fill();
-  g.fillStyle = '#0d1117';
-  rr(g, -10, -48, 20, 8, 3); g.fill();
-  g.save();
-  g.shadowBlur = 10;
-  g.shadowColor = 'rgba(255,80,60,0.9)';
-  g.fillStyle = '#ff5d5d';
-  rr(g, -8, -47, 7, 6, 2); g.fill();
-  rr(g, 2, -47, 7, 6, 2); g.fill();
-  g.restore();
+  eBody(-15, -56, 30, 24, 7, '#8ba2b8', '#3f4d5c');
+  g.fillStyle = '#c3d5e6';
+  rr(g, -3, -62, 6, 8, 2.5); g.fill();
+  g.fillStyle = '#080b0f';
+  rr(g, -11, -50, 22, 9, 3); g.fill();
+  emissive(g, 'rgba(255,60,50,0.95)', 12, () => {
+    g.fillStyle = '#ff5d5d';
+    rr(g, -8.5, -48.5, 7.5, 6, 2); g.fill();
+    rr(g, 1.5, -48.5, 7.5, 6, 2); g.fill();
+  });
   // 背部排气
-  g.fillStyle = '#33292a';
-  rr(g, 26, -56, 9, 22, 3); g.fill();
-  rr(g, 36, -50, 9, 16, 3); g.fill();
+  eBody(28, -60, 10, 24, 3, '#4a3b36', '#241c19');
+  eBody(39, -52, 10, 18, 3, '#4a3b36', '#241c19');
+  g.fillStyle = 'rgba(130,120,115,0.25)';
+  for (let i = 0; i < 3; i++) {
+    const ph = (t * 0.8 + i * 0.33) % 1;
+    g.beginPath();
+    g.arc(33 + Math.sin(ph * 5) * 5, -62 - ph * 26, 4 + ph * 7, 0, TAU);
+    g.fill();
+  }
   // 能量护盾
   if (hasShield) {
-    g.strokeStyle = 'rgba(127,215,255,' + (0.5 + Math.sin(time * 5) * 0.15) + ')';
-    g.lineWidth = 3;
-    g.beginPath();
-    g.ellipse(-4, -12, 54, 52, 0, 0, TAU);
-    g.stroke();
-    g.fillStyle = 'rgba(127,215,255,0.08)';
-    g.beginPath();
-    g.ellipse(-4, -12, 54, 52, 0, 0, TAU);
-    g.fill();
+    const sa = 0.45 + Math.sin(t * 4) * 0.13;
+    emissive(g, 'rgba(127,215,255,0.7)', 12, () => {
+      g.strokeStyle = 'rgba(160,230,255,' + sa + ')';
+      g.lineWidth = 3;
+      g.beginPath(); g.ellipse(-4, -12, 56, 54, 0, 0, TAU); g.stroke();
+    });
+    g.fillStyle = 'rgba(127,215,255,0.07)';
+    g.beginPath(); g.ellipse(-4, -12, 56, 54, 0, 0, TAU); g.fill();
+    // 六边形能量纹
+    g.strokeStyle = 'rgba(160,230,255,0.18)';
+    g.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.6 + i * TAU / 3;
+      const hx = Math.cos(a) * 34, hy = -12 + Math.sin(a) * 32;
+      g.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const ha = k * TAU / 6;
+        g[k ? 'lineTo' : 'moveTo'](hx + Math.cos(ha) * 9, hy + Math.sin(ha) * 9);
+      }
+      g.closePath(); g.stroke();
+    }
   }
 }
 
-function drawCrusher(e) {
-  const roll = e.anim * 3;
-  // 车身
-  g.fillStyle = '#7c4a3c';
-  rr(g, -14, -28, 56, 44, 7); g.fill();
-  g.fillStyle = '#8f5748';
-  rr(g, -14, -28, 56, 14, 7); g.fill();
-  // 驾驶舱
-  g.fillStyle = '#33414e';
-  rr(g, 8, -24, 26, 18, 4); g.fill();
-  g.fillStyle = '#ffc531';
-  rr(g, 12, -20, 8, 8, 2); g.fill();
-  // 排气管
-  g.fillStyle = '#3a3128';
-  rr(g, 32, -40, 7, 18, 3); g.fill();
-  // 警示条纹
-  g.save();
-  rr(g, -14, 8, 56, 8, 3);
-  g.clip();
-  for (let i = -2; i < 8; i++) {
-    g.fillStyle = i % 2 === 0 ? '#ffc531' : '#2a2622';
-    g.save();
-    g.translate(-14 + i * 10, 12);
-    g.rotate(-0.55);
-    g.fillRect(-4, -8, 8, 18);
-    g.restore();
-  }
-  g.restore();
-  // 前滚筒
-  g.fillStyle = '#55606c';
-  g.beginPath();
-  g.arc(-26, 12, 22, 0, TAU);
-  g.fill();
-  g.fillStyle = '#414b56';
-  g.beginPath();
-  g.arc(-26, 12, 15, 0, TAU);
-  g.fill();
-  // 滚筒钉
-  g.fillStyle = '#78848f';
-  for (let i = 0; i < 8; i++) {
-    const a = roll + i * TAU / 8;
-    g.beginPath();
-    g.arc(-26 + Math.cos(a) * 19, 12 + Math.sin(a) * 19, 3, 0, TAU);
-    g.fill();
-  }
-  // 支架
-  g.fillStyle = '#5d4437';
-  rr(g, -18, -6, 12, 22, 3); g.fill();
-}
-
-/* ---- 其它绘制 ---- */
-// 地雷
 function drawMines() {
   for (const mn of mines) {
     const armed = mn.arm <= 0;
@@ -4874,6 +5302,7 @@ window.__game = {
     enemies.length = 0; bullets.length = 0; mines.length = 0;
     shells.length = 0; tracers.length = 0; orbs.length = 0;
   },
+  setEnemyX: (i, x) => { if (enemies[i]) enemies[i].x = x; },
   get mineCount() { return mines.length; },
   get shellCount() { return shells.length; },
   modulesAt: (r, c) => (grid[r][c] && grid[r][c].modules ? grid[r][c].modules.map(x => x.kind + x.lv) : null),
