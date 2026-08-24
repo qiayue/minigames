@@ -31,8 +31,9 @@ async function handleApi(request, env, url) {
       return json({ ok: false, error: 'no_storage', scores: [] });
     }
     if (request.method === 'GET') {
-      const scores = await loadScores(env);
-      return json({ ok: true, scores: scores.slice(0, MAX_LIST) });
+      const mode = sanitizeMode(url.searchParams.get('mode'));
+      const scores = await loadScores(env, mode);
+      return json({ ok: true, mode, scores: scores.slice(0, MAX_LIST) });
     }
     if (request.method === 'POST') {
       let body;
@@ -45,13 +46,14 @@ async function handleApi(request, env, url) {
       if (!entry) {
         return json({ ok: false, error: 'bad_data' }, 400);
       }
-      const scores = await loadScores(env);
+      const mode = sanitizeMode(body && body.mode);
+      const scores = await loadScores(env, mode);
       scores.push(entry);
       scores.sort((a, b) => b.score - a.score || a.at - b.at);
       const kept = scores.slice(0, MAX_KEEP);
-      await env.SCORES.put('scores', JSON.stringify(kept));
+      await env.SCORES.put('scores_' + mode, JSON.stringify(kept));
       const rank = kept.indexOf(entry) + 1; // 0 表示没进前 MAX_KEEP 名
-      return json({ ok: true, rank, scores: kept.slice(0, MAX_LIST) });
+      return json({ ok: true, rank, mode, scores: kept.slice(0, MAX_LIST) });
     }
     return json({ ok: false, error: 'method_not_allowed' }, 405);
   }
@@ -73,8 +75,16 @@ function sanitizeEntry(body) {
   return { name, score, wave, at: Date.now() };
 }
 
-async function loadScores(env) {
-  const raw = await env.SCORES.get('scores');
+function sanitizeMode(m) {
+  return m === 'classic' ? 'classic' : 'box';
+}
+
+async function loadScores(env, mode) {
+  let raw = await env.SCORES.get('scores_' + mode);
+  if (!raw && mode === 'box') {
+    // 兼容分榜之前的旧数据
+    raw = await env.SCORES.get('scores');
+  }
   if (!raw) return [];
   try {
     const list = JSON.parse(raw);

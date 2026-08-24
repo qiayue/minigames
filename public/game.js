@@ -29,7 +29,7 @@ const MACHINES = {
   magnet:    { name: '磁力吊塔',   rarity: 'rare',   hp: 320,  desc: '定期把本行最靠近基地的敌人拖回后方' },
   tesla:     { name: '特斯拉线圈', rarity: 'epic',   hp: 350,  desc: '闪电链同时打击本行多个敌人' },
   railgun:   { name: '轨道激光炮', rarity: 'epic',   hp: 300,  desc: '激光贯穿本行所有敌人' },
-  rocket:    { name: '火箭发射井', rarity: 'epic',   hp: 200,  desc: '敌人进入本行时发射火箭，贯穿全行（一次性）' },
+  rocket:    { name: '火箭发射井', rarity: 'epic',   hp: 200,  desc: '发射火箭贯穿全行，随后自动装填 15 秒' },
   // ---- 合成机型（只能通过合成获得，不进盲盒池） ----
   frostcannon: { name: '冰冻弹簧炮', rarity: 'fusion', hp: 420,  desc: '每 5 秒轰出冰冻炮弹，命中后冻结整行敌人 2 秒' },
   twinturret:  { name: '双管炮台',   rarity: 'fusion', hp: 420,  desc: '双管齐射，射速接近翻倍' },
@@ -43,7 +43,7 @@ const MACHINES = {
 const CLASSIC_ORDER = ['generator', 'turret', 'barricade', 'puncher', 'fan', 'shredder', 'magnet', 'tesla', 'railgun', 'rocket'];
 const CLASSIC_COST = {
   generator: 50, turret: 100, barricade: 50, puncher: 100, fan: 150,
-  shredder: 150, magnet: 175, tesla: 250, railgun: 250, rocket: 125,
+  shredder: 150, magnet: 175, tesla: 250, railgun: 250, rocket: 200,
 };
 const CLASSIC_CD = {
   generator: 5, turret: 5, barricade: 15, puncher: 5, fan: 8,
@@ -113,6 +113,8 @@ let state = 'menu';        // menu | playing | paused | over | win
 let mode = 'box';          // box（盲盒模式） | classic（普通模式）
 let classicCd = {};        // 普通模式各卡剩余冷却
 let classicCardEls = {};   // 普通模式卡片 DOM 引用
+let moveCd = 0;            // 手套（搬运）冷却
+const MOVE_CD = 5;
 let energy, score, kills, wave, endless, pity, history;
 let grid, enemies, bullets, orbs, parts, floats, zaps, beams;
 let waveState, waveTimer, queue, spawnT, skyT, lastRows;
@@ -131,7 +133,7 @@ function initGame() {
   skyT = 3; lastRows = [];
   bannerText = ''; bannerSub = ''; bannerT = 0; shakeT = 0; shakeAmp = 0;
   sel = null; submitted = false; time = 0;
-  classicCd = {};
+  classicCd = {}; moveCd = 0;
   renderTray();
   renderClassicTray();
   applyModeUI();
@@ -348,6 +350,7 @@ function renderTray() {
   $('shovelBtn').classList.toggle('sel', !!(sel && sel.mode === 'shovel'));
   $('boxBtn').classList.toggle('sel', !!(sel && sel.mode === 'box'));
   $('fuseBtn').classList.toggle('sel', !!(sel && sel.mode === 'fuse'));
+  $('moveBtn').classList.toggle('sel', !!(sel && sel.mode === 'move'));
 }
 
 let revealTimer = null;
@@ -748,13 +751,13 @@ function updateMachines(dt) {
           }
         }
       } else if (m.type === 'rocket') {
-        if (m.armed) {
+        // 装填完毕后有敌人进入本行即发射，随后重新装填
+        if (m.cd <= 0) {
           const incoming = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2);
           if (incoming) {
-            m.armed = false;
+            m.cd = 15;
             bullets.push({ kind: 'rocket', row: r, x: cx + 20, dmg: 900, speed: 430, hit: new Set() });
             spawnParts(cx, cellCy(r) + 10, '#aab7c4', 14, 90, 0.8, 'smoke');
-            removeMachine(r, c, true);
             shake(0.25, 4);
             sfx('boom');
           }
@@ -967,6 +970,7 @@ function update(dt) {
       if (classicCd[k] > 0) classicCd[k] -= dt;
     }
   }
+  if (moveCd > 0) moveCd -= dt;
   updateWaves(dt);
   updateMachines(dt);
   updateBullets(dt);
@@ -994,6 +998,7 @@ function updateHud() {
   else wtxt = '第' + wave + '/' + TOTAL_WAVES + '波';
   $('waveVal').textContent = wtxt;
   $('boxBtn').disabled = state !== 'playing' || energy < BOX_COST;
+  $('moveBtn').classList.toggle('cooling', moveCd > 0);
   if (mode === 'classic') {
     for (const type in classicCardEls) {
       const { el, cdOv } = classicCardEls[type];
@@ -1036,9 +1041,10 @@ function endGame(win) {
   $('endTitle').innerHTML = win
     ? '🎉 <span class="gold">防线守住了！</span>'
     : '💥 防线失守…';
-  $('endSub').textContent = win
+  const modeTag = mode === 'classic' ? '（🃏 普通模式）' : '（🎁 盲盒模式）';
+  $('endSub').textContent = (win
     ? '你抵挡住了全部 ' + TOTAL_WAVES + ' 波进攻，机械基地安然无恙！'
-    : '机器人冲进了基地，第 ' + Math.max(wave, 1) + ' 波未能守住。';
+    : '机器人冲进了基地，第 ' + Math.max(wave, 1) + ' 波未能守住。') + modeTag;
   $('endScore').textContent = score;
   $('endWave').textContent = wave;
   $('endKills').textContent = kills;
@@ -1066,21 +1072,35 @@ function show(id, on) {
   $(id).classList.toggle('show', !!on);
 }
 
-/* ========== 排行榜 ========== */
-function localScores() {
-  try { return JSON.parse(localStorage.getItem('mg_localScores') || '[]'); }
-  catch { return []; }
+/* ========== 排行榜（两个模式分开记录） ========== */
+const MODE_LABEL = { box: '🎁 盲盒模式', classic: '🃏 普通模式' };
+function localKey(m) { return 'mg_localScores_' + m; }
+function localScores(m) {
+  try {
+    let list = JSON.parse(localStorage.getItem(localKey(m)) || 'null');
+    if (!list && m === 'box') {
+      // 兼容分榜之前的旧记录
+      list = JSON.parse(localStorage.getItem('mg_localScores') || 'null');
+    }
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
 }
-function saveLocalScore(entry) {
-  const list = localScores();
+function saveLocalScore(entry, m) {
+  const list = localScores(m);
   list.push(entry);
   list.sort((a, b) => b.score - a.score);
-  localStorage.setItem('mg_localScores', JSON.stringify(list.slice(0, 20)));
+  localStorage.setItem(localKey(m), JSON.stringify(list.slice(0, 20)));
   return list.slice(0, 20);
 }
-function renderBoard(el, scores, note, mine) {
+function renderBoard(el, scores, note, mine, m) {
   el.innerHTML = '';
   el.style.display = '';
+  if (m && MODE_LABEL[m]) {
+    const h = document.createElement('div');
+    h.className = 'bh';
+    h.textContent = MODE_LABEL[m] + ' 排行榜';
+    el.appendChild(h);
+  }
   if (note) {
     const n = document.createElement('div');
     n.className = 'note';
@@ -1110,20 +1130,22 @@ function renderBoard(el, scores, note, mine) {
     el.appendChild(row);
   });
 }
-async function loadBoard(el) {
+async function loadBoard(el, m) {
+  m = m || mode;
   try {
-    const res = await fetch('/api/scores');
+    const res = await fetch('/api/scores?mode=' + m);
     const data = await res.json();
-    if (data.ok) { renderBoard(el, data.scores); return; }
+    if (data.ok) { renderBoard(el, data.scores, '', null, m); return; }
     throw new Error('no_storage');
   } catch {
-    renderBoard(el, localScores(), '（云端排行榜未启用，以下为本机记录）');
+    renderBoard(el, localScores(m), '（云端排行榜未启用，以下为本机记录）', null, m);
   }
 }
 async function submitScore() {
   if (submitted) return;
   const name = ($('nameInput').value.trim() || '无名机械师').slice(0, 16);
   localStorage.setItem('mg_playerName', name);
+  const m = mode;
   const entry = { name, score, wave, at: Date.now() };
   submitted = true;
   $('submitBtn').disabled = true;
@@ -1132,16 +1154,16 @@ async function submitScore() {
     const res = await fetch('/api/scores', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name, score, wave }),
+      body: JSON.stringify({ name, score, wave, mode: m }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error('fail');
     $('submitBtn').textContent = data.rank > 0 ? '已提交 · 第' + data.rank + '名' : '已提交';
-    renderBoard($('board'), data.scores, '', null);
+    renderBoard($('board'), data.scores, '', null, m);
   } catch {
-    const list = saveLocalScore(entry);
+    const list = saveLocalScore(entry, m);
     $('submitBtn').textContent = '已保存到本机';
-    renderBoard($('board'), list, '（云端排行榜未启用，以下为本机记录）', entry);
+    renderBoard($('board'), list, '（云端排行榜未启用，以下为本机记录）', entry, m);
   }
   $('submitRow').style.display = 'none';
   $('board').style.display = '';
@@ -1170,6 +1192,40 @@ cv.addEventListener('pointerdown', ev => {
       sel = null;
       renderTray();
     }
+    return;
+  }
+  if (sel && sel.mode === 'move') {
+    const m = grid[cell.r][cell.c];
+    if (m) {
+      if (m.type === 'box') {
+        addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '盲盒还没开封', '#ff5d5d');
+        sfx('error');
+        return;
+      }
+      if (sel.from && sel.from.r === cell.r && sel.from.c === cell.c) { sel.from = null; return; }
+      sel.from = { r: cell.r, c: cell.c };
+      sfx('place');
+      return;
+    }
+    if (!sel.from) return;
+    if (moveCd > 0) {
+      addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '手套冷却中', '#ff5d5d');
+      sfx('error');
+      return;
+    }
+    const src = grid[sel.from.r][sel.from.c];
+    if (!src) { sel.from = null; return; }
+    grid[sel.from.r][sel.from.c] = null;
+    grid[cell.r][cell.c] = src;
+    spawnParts(cellCx(sel.from.c), cellCy(sel.from.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
+    src.row = cell.r;
+    src.col = cell.c;
+    moveCd = MOVE_CD;
+    spawnParts(cellCx(cell.c), cellCy(cell.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
+    addFloat(cellCx(cell.c), cellCy(cell.r) - 40, '搬运完成', '#4cc2ff');
+    sfx('place');
+    sel = null;
+    renderTray();
     return;
   }
   if (sel && sel.mode === 'fuse') {
@@ -1285,6 +1341,11 @@ $('fuseBtn').addEventListener('click', () => {
   sel = (sel && sel.mode === 'fuse') ? null : { mode: 'fuse', first: null };
   renderTray();
 });
+$('moveBtn').addEventListener('click', () => {
+  if (state !== 'playing') return;
+  sel = (sel && sel.mode === 'move') ? null : { mode: 'move', from: null };
+  renderTray();
+});
 $('pauseBtn').addEventListener('click', () => {
   if (state === 'playing') pauseGame();
   else if (state === 'paused') resumeGame();
@@ -1308,8 +1369,17 @@ $('menuBoardBtn').addEventListener('click', () => {
   const el = $('menuBoard');
   if (el.style.display === 'none') {
     el.style.display = '';
-    el.innerHTML = '<div id="board" style="display:block;"></div>';
-    loadBoard(el.firstChild);
+    // 两个模式的榜单分开展示
+    el.innerHTML = '<div class="menuBoards"></div>';
+    const holder = el.firstChild;
+    for (const m of ['box', 'classic']) {
+      const b = document.createElement('div');
+      b.className = 'board';
+      b.style.display = 'block';
+      b.style.marginBottom = '10px';
+      holder.appendChild(b);
+      loadBoard(b, m);
+    }
   } else {
     el.style.display = 'none';
   }
@@ -1322,7 +1392,8 @@ function draw() {
   if (shakeT > 0) {
     g.translate(rand(-1, 1) * shakeAmp * shakeT * 3, rand(-1, 1) * shakeAmp * shakeT * 3);
   }
-  drawBackground();
+  if (!bgCanvas) buildBackground();
+  g.drawImage(bgCanvas, 0, 0, W, H);
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const m = grid[r][c];
@@ -1340,67 +1411,155 @@ function draw() {
   drawOrbs();
   drawFloats();
   drawHoverGhost();
+  drawVignette();
   drawBanner();
 }
 
-function drawBackground() {
-  g.fillStyle = '#10151c';
-  g.fillRect(-10, -10, W + 20, H + 20);
-  // 战场网格
+/* ---- 背景（一次性预渲染到离屏画布，细节更足、每帧更省） ---- */
+let bgCanvas = null;
+let vignetteGrad = null;
+function buildBackground() {
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = W * DPR;
+  bgCanvas.height = H * DPR;
+  const b = bgCanvas.getContext('2d');
+  b.setTransform(DPR, 0, 0, DPR, 0, 0);
+  // 底色纵向渐变
+  const bgGrad = b.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#161f2c');
+  bgGrad.addColorStop(0.55, '#111823');
+  bgGrad.addColorStop(1, '#0c1118');
+  b.fillStyle = bgGrad;
+  b.fillRect(0, 0, W, H);
+  // 战场格子：交错色 + 内嵌斜面高光/阴影 + 角落铆钉
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const x = GRID_X + c * CELL_W, y = GRID_Y + r * CELL_H;
-      g.fillStyle = (r + c) % 2 === 0 ? '#1a2330' : '#161e29';
-      g.fillRect(x, y, CELL_W, CELL_H);
-      g.strokeStyle = 'rgba(70,90,115,0.16)';
-      g.strokeRect(x + 0.5, y + 0.5, CELL_W - 1, CELL_H - 1);
+      const cellGrad = b.createLinearGradient(x, y, x, y + CELL_H);
+      if ((r + c) % 2 === 0) {
+        cellGrad.addColorStop(0, '#1d2735');
+        cellGrad.addColorStop(1, '#18202c');
+      } else {
+        cellGrad.addColorStop(0, '#18212d');
+        cellGrad.addColorStop(1, '#141c27');
+      }
+      b.fillStyle = cellGrad;
+      b.fillRect(x, y, CELL_W, CELL_H);
+      // 斜面：左上亮边、右下暗边
+      b.strokeStyle = 'rgba(255,255,255,0.035)';
+      b.beginPath();
+      b.moveTo(x + 1, y + CELL_H - 1); b.lineTo(x + 1, y + 1); b.lineTo(x + CELL_W - 1, y + 1);
+      b.stroke();
+      b.strokeStyle = 'rgba(0,0,0,0.4)';
+      b.beginPath();
+      b.moveTo(x + CELL_W - 1, y + 1); b.lineTo(x + CELL_W - 1, y + CELL_H - 1); b.lineTo(x + 1, y + CELL_H - 1);
+      b.stroke();
     }
   }
-  // 右侧入侵区域微光
-  const gr = g.createLinearGradient(W - 90, 0, W, 0);
-  gr.addColorStop(0, 'rgba(255,80,60,0)');
-  gr.addColorStop(1, 'rgba(255,80,60,0.13)');
-  g.fillStyle = gr;
-  g.fillRect(W - 90, GRID_Y, 90, ROWS * CELL_H);
-  // 左侧基地
-  g.fillStyle = '#1b2434';
-  g.fillRect(0, 0, GRID_X - 8, H);
-  g.fillStyle = '#141b27';
-  g.fillRect(0, 0, GRID_X - 8, GRID_Y);
-  // 警戒条纹
-  g.save();
-  g.beginPath();
-  g.rect(GRID_X - 8, 0, 8, H);
-  g.clip();
-  for (let y = -20; y < H + 20; y += 16) {
-    g.fillStyle = (y / 16) % 2 === 0 ? '#ffc531' : '#20242c';
-    g.save();
-    g.translate(GRID_X - 4, y);
-    g.rotate(-0.6);
-    g.fillRect(-12, 0, 24, 8);
-    g.restore();
+  // 格点铆钉
+  b.fillStyle = 'rgba(90,115,145,0.35)';
+  for (let r = 0; r <= ROWS; r++) {
+    for (let c = 0; c <= COLS; c++) {
+      b.beginPath();
+      b.arc(GRID_X + c * CELL_W, GRID_Y + r * CELL_H, 1.6, 0, TAU);
+      b.fill();
+    }
   }
-  g.restore();
+  // 环境微尘/磨损斑点
+  for (let i = 0; i < 90; i++) {
+    b.fillStyle = 'rgba(255,255,255,' + rand(0.01, 0.04) + ')';
+    b.beginPath();
+    b.arc(GRID_X + rand(0, COLS * CELL_W), GRID_Y + rand(0, ROWS * CELL_H), rand(0.5, 2.2), 0, TAU);
+    b.fill();
+  }
+  // 右侧入侵区域警示
+  const gr = b.createLinearGradient(W - 110, 0, W, 0);
+  gr.addColorStop(0, 'rgba(255,80,60,0)');
+  gr.addColorStop(1, 'rgba(255,80,60,0.16)');
+  b.fillStyle = gr;
+  b.fillRect(W - 110, GRID_Y, 110, ROWS * CELL_H);
+  b.strokeStyle = 'rgba(255,90,70,0.28)';
+  b.lineWidth = 3;
+  for (let r = 0; r < ROWS; r++) {
+    const cy = GRID_Y + r * CELL_H + CELL_H / 2;
+    for (let k = 0; k < 2; k++) {
+      const x0 = W - 34 - k * 16;
+      b.beginPath();
+      b.moveTo(x0 + 9, cy - 9);
+      b.lineTo(x0, cy);
+      b.lineTo(x0 + 9, cy + 9);
+      b.stroke();
+    }
+  }
+  // 左侧基地墙
+  const wallGrad = b.createLinearGradient(0, 0, GRID_X - 8, 0);
+  wallGrad.addColorStop(0, '#222e42');
+  wallGrad.addColorStop(1, '#182234');
+  b.fillStyle = wallGrad;
+  b.fillRect(0, 0, GRID_X - 8, H);
+  // 立管
+  b.fillStyle = '#2c3a52';
+  b.fillRect(6, 0, 7, H);
+  for (let y = 14; y < H; y += 34) {
+    b.fillStyle = '#3a4b68';
+    b.fillRect(4, y, 11, 5);
+  }
+  // 墙面铆钉
+  b.fillStyle = 'rgba(120,145,175,0.4)';
+  for (let y = 24; y < H; y += 46) {
+    b.beginPath(); b.arc(48, y, 1.8, 0, TAU); b.fill();
+    b.beginPath(); b.arc(22, y + 20, 1.8, 0, TAU); b.fill();
+  }
+  // 警戒条纹
+  b.save();
+  b.beginPath();
+  b.rect(GRID_X - 8, 0, 8, H);
+  b.clip();
+  for (let y = -20; y < H + 20; y += 16) {
+    b.fillStyle = (y / 16) % 2 === 0 ? '#ffc531' : '#20242c';
+    b.save();
+    b.translate(GRID_X - 4, y);
+    b.rotate(-0.6);
+    b.fillRect(-12, 0, 24, 8);
+    b.restore();
+  }
+  b.restore();
   // 基地盾徽 + 文字
-  g.fillStyle = '#2a3850';
-  g.beginPath();
-  g.arc(28, H / 2 - 88, 17, 0, TAU);
-  g.fill();
-  g.fillStyle = '#4cc2ff';
-  g.font = '900 17px sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText('🛡️', 28, H / 2 - 87);
-  g.fillStyle = '#8fa1b8';
-  g.font = '800 20px "PingFang SC","Microsoft YaHei",sans-serif';
-  g.fillText('基', 28, H / 2 - 40);
-  g.fillText('地', 28, H / 2 - 12);
-  g.fillStyle = 'rgba(143,161,184,0.5)';
-  g.font = '10px sans-serif';
-  g.save();
-  g.translate(28, H / 2 + 66);
-  g.fillText('DEFEND', 0, 0);
-  g.restore();
+  b.save();
+  b.shadowColor = 'rgba(76,194,255,0.7)';
+  b.shadowBlur = 14;
+  b.fillStyle = '#2a3850';
+  b.beginPath();
+  b.arc(31, H / 2 - 88, 17, 0, TAU);
+  b.fill();
+  b.restore();
+  b.font = '900 17px sans-serif';
+  b.textAlign = 'center';
+  b.textBaseline = 'middle';
+  b.fillText('🛡️', 31, H / 2 - 87);
+  b.fillStyle = '#9db2c9';
+  b.font = '800 20px "PingFang SC","Microsoft YaHei",sans-serif';
+  b.fillText('基', 31, H / 2 - 40);
+  b.fillText('地', 31, H / 2 - 12);
+  b.fillStyle = 'rgba(143,161,184,0.5)';
+  b.font = '10px sans-serif';
+  b.fillText('DEFEND', 31, H / 2 + 66);
+  // 顶部环境光
+  const top = b.createLinearGradient(0, 0, 0, 90);
+  top.addColorStop(0, 'rgba(140,180,230,0.05)');
+  top.addColorStop(1, 'rgba(140,180,230,0)');
+  b.fillStyle = top;
+  b.fillRect(0, 0, W, 90);
+}
+
+function drawVignette() {
+  if (!vignetteGrad) {
+    vignetteGrad = g.createRadialGradient(W / 2, H / 2, H * 0.5, W / 2, H / 2, H * 0.92);
+    vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
+  }
+  g.fillStyle = vignetteGrad;
+  g.fillRect(0, 0, W, H);
 }
 
 /* ---- 机器绘制 ---- */
@@ -1435,12 +1594,22 @@ function drawMachine(ctx, type, x, y, s, m) {
   ctx.restore();
   // 血条
   if (m && m.maxHp && m.hp < m.maxHp) {
-    const bw = 44 * s;
-    const ratio = clamp(m.hp / m.maxHp, 0, 1);
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(x - bw / 2, y - 52 * s, bw, 5);
-    ctx.fillStyle = ratio > 0.4 ? '#58d68b' : '#ff5d5d';
-    ctx.fillRect(x - bw / 2, y - 52 * s, bw * ratio, 5);
+    drawBar(ctx, x, y - 52 * s, 44 * s, 5, clamp(m.hp / m.maxHp, 0, 1));
+  }
+}
+
+// 圆角血条（带底槽和描边）
+function drawBar(ctx, cx, by, bw, bh, ratio, color) {
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  rr(ctx, cx - bw / 2 - 1, by - 1, bw + 2, bh + 2, 3);
+  ctx.fill();
+  if (ratio > 0) {
+    ctx.fillStyle = color || (ratio > 0.4 ? '#58d68b' : '#ff5d5d');
+    rr(ctx, cx - bw / 2, by, Math.max(bw * ratio, 2), bh, 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    rr(ctx, cx - bw / 2, by, Math.max(bw * ratio, 2), bh / 2.4, 2);
+    ctx.fill();
   }
 }
 
@@ -1798,10 +1967,14 @@ function drawTesla(ctx, m) {
   const grd = ctx.createRadialGradient(0, -26, 2, 0, -26, 13);
   grd.addColorStop(0, '#f2e8ff');
   grd.addColorStop(1, flash > 0 ? '#c77bff' : '#7e5bb5');
+  ctx.save();
+  ctx.shadowBlur = 10 + flash * 14;
+  ctx.shadowColor = 'rgba(199,123,255,0.85)';
   ctx.fillStyle = grd;
   ctx.beginPath();
   ctx.arc(0, -26, 11 + flash * 2, 0, TAU);
   ctx.fill();
+  ctx.restore();
   if (flash > 0) {
     ctx.strokeStyle = 'rgba(210,160,255,' + (0.7 * flash) + ')';
     ctx.lineWidth = 2;
@@ -1852,16 +2025,19 @@ function drawRailgun(ctx, m) {
 
 function drawRocket(ctx, m) {
   const blink = Math.sin((m && m.spin ? m.spin : 0) * 5) > 0;
+  const reload = m && m.cd > 0 ? clamp(m.cd / 15, 0, 1) : 0; // 1=刚发射
+  const sink = reload * 30; // 装填时火箭下沉
   // 发射井
   ctx.fillStyle = '#3a4656';
   rr(ctx, -24, -14, 48, 50, 8); ctx.fill();
   ctx.fillStyle = '#2b3543';
   rr(ctx, -18, -10, 36, 40, 6); ctx.fill();
-  // 舱门（打开状态）
-  ctx.fillStyle = '#4c5b6d';
-  rr(ctx, -26, -22, 20, 10, 3); ctx.fill();
-  rr(ctx, 6, -22, 20, 10, 3); ctx.fill();
-  // 火箭
+  // 火箭（装填时缓缓升起）
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-18, -40, 36, 70);
+  ctx.clip();
+  ctx.translate(0, sink);
   ctx.fillStyle = '#d5dde6';
   rr(ctx, -7, -18, 14, 30, 4); ctx.fill();
   ctx.fillStyle = '#ff5d5d';
@@ -1871,13 +2047,20 @@ function drawRocket(ctx, m) {
   ctx.lineTo(7, -18);
   ctx.closePath();
   ctx.fill();
-  // 舷窗
   ctx.fillStyle = '#4cc2ff';
   ctx.beginPath();
   ctx.arc(0, -8, 3.6, 0, TAU);
   ctx.fill();
-  // 警示灯
-  ctx.fillStyle = blink ? '#ffc531' : '#6b5514';
+  ctx.restore();
+  // 井口前板（遮住下沉的火箭底部）
+  ctx.fillStyle = '#3a4656';
+  rr(ctx, -24, 14, 48, 22, 6); ctx.fill();
+  // 舱门（打开状态）
+  ctx.fillStyle = '#4c5b6d';
+  rr(ctx, -26, -22, 20, 10, 3); ctx.fill();
+  rr(ctx, 6, -22, 20, 10, 3); ctx.fill();
+  // 状态灯：装填中红色常亮，就绪黄色闪烁
+  ctx.fillStyle = reload > 0 ? '#ff5d5d' : (blink ? '#ffc531' : '#6b5514');
   ctx.beginPath();
   ctx.arc(19, -8, 3, 0, TAU);
   ctx.fill();
@@ -2163,15 +2346,10 @@ function drawEnemy(e) {
   // 血条 + 护盾条
   if (e.hp < e.maxHp || (e.maxShield && e.shield < e.maxShield)) {
     const bw = e.type === 'crusher' ? 64 : 40;
-    const ratio = clamp(e.hp / e.maxHp, 0, 1);
     const by = rowCy(e) - (e.type === 'crusher' ? 52 : 46);
-    g.fillStyle = 'rgba(0,0,0,0.55)';
-    g.fillRect(e.x - bw / 2, by, bw, 4.5);
-    g.fillStyle = ratio > 0.4 ? '#58d68b' : '#ff5d5d';
-    g.fillRect(e.x - bw / 2, by, bw * ratio, 4.5);
+    drawBar(g, e.x, by, bw, 4.5, clamp(e.hp / e.maxHp, 0, 1));
     if (e.maxShield && e.shield > 0) {
-      g.fillStyle = '#4cc2ff';
-      g.fillRect(e.x - bw / 2, by - 5.5, bw * clamp(e.shield / e.maxShield, 0, 1), 3.5);
+      drawBar(g, e.x, by - 6.5, bw, 3.5, clamp(e.shield / e.maxShield, 0, 1), '#4cc2ff');
     }
   }
 }
@@ -2482,8 +2660,15 @@ function drawBeams() {
 }
 
 function drawBullets() {
+  g.save();
   for (const b of bullets) {
     const y = cellCy(b.row) - 8 + (b.dy || 0);
+    // 弹体光晕
+    g.shadowBlur = b.kind === 'rocket' ? 14 : 10;
+    g.shadowColor = b.kind === 'ice' || b.kind === 'frost' ? 'rgba(140,215,255,0.9)'
+      : b.kind === 'arc' ? 'rgba(199,123,255,0.9)'
+      : b.kind === 'rocket' ? 'rgba(255,140,60,0.9)'
+      : 'rgba(255,205,80,0.9)';
     if (b.kind === 'rocket') {
       // 尾焰
       g.fillStyle = 'rgba(255,157,46,0.7)';
@@ -2543,6 +2728,7 @@ function drawBullets() {
       g.beginPath(); g.arc(b.x, y, 4.5, 0, TAU); g.fill();
     }
   }
+  g.restore();
 }
 
 function drawZaps() {
@@ -2604,8 +2790,11 @@ function drawOrbs() {
     g.translate(o.x, o.y);
     g.scale(pulse, pulse);
     // 光晕
+    g.shadowBlur = 16;
+    g.shadowColor = 'rgba(255,197,49,0.85)';
     g.fillStyle = 'rgba(255,197,49,0.22)';
     g.beginPath(); g.arc(0, 0, 24, 0, TAU); g.fill();
+    g.shadowBlur = 0;
     // 电池
     g.fillStyle = '#ffc531';
     rr(g, -6, -13, 12, 5, 2); g.fill();
@@ -2644,9 +2833,19 @@ function drawFloats() {
   }
 }
 
-// 合成模式下高亮：已选机器（黄）+ 可配对机器（绿脉冲）
+// 合成/移动模式下高亮已选机器
 function drawFuseHints() {
-  if (state !== 'playing' || !sel || sel.mode !== 'fuse' || !sel.first) return;
+  if (state !== 'playing' || !sel) return;
+  if (sel.mode === 'move' && sel.from) {
+    const src = grid[sel.from.r][sel.from.c];
+    if (!src) { sel.from = null; return; }
+    const pulse2 = 0.55 + Math.sin(time * 6) * 0.25;
+    g.strokeStyle = 'rgba(76,194,255,' + pulse2 + ')';
+    g.lineWidth = 3;
+    g.strokeRect(GRID_X + sel.from.c * CELL_W + 2, GRID_Y + sel.from.r * CELL_H + 2, CELL_W - 4, CELL_H - 4);
+    return;
+  }
+  if (sel.mode !== 'fuse' || !sel.first) return;
   const a = grid[sel.first.r][sel.first.c];
   if (!a) { sel.first = null; return; }
   const pulse = 0.55 + Math.sin(time * 6) * 0.25;
@@ -2683,6 +2882,25 @@ function drawHoverGhost() {
     g.fillRect(x, y, CELL_W, CELL_H);
     return;
   }
+  if (sel.mode === 'move') {
+    if (sel.from && !occupied) {
+      const src = grid[sel.from.r][sel.from.c];
+      g.fillStyle = 'rgba(76,194,255,0.14)';
+      g.fillRect(x, y, CELL_W, CELL_H);
+      g.strokeStyle = 'rgba(76,194,255,0.7)';
+      g.lineWidth = 2;
+      g.strokeRect(x + 1, y + 1, CELL_W - 2, CELL_H - 2);
+      if (src) {
+        g.globalAlpha = 0.5;
+        drawMachine(g, src.type, cellCx(cell.c), cellCy(cell.r) + 6, 1.0, src);
+        g.globalAlpha = 1;
+      }
+    } else {
+      g.fillStyle = occupied ? 'rgba(76,194,255,0.16)' : 'rgba(255,255,255,0.05)';
+      g.fillRect(x, y, CELL_W, CELL_H);
+    }
+    return;
+  }
   if (sel.mode === 'card') {
     // 普通模式：选中机器的放置预览
     g.fillStyle = occupied ? 'rgba(255,93,93,0.22)' : 'rgba(88,214,139,0.16)';
@@ -2714,15 +2932,29 @@ function drawBanner() {
   if (bannerT <= 0) return;
   const alpha = bannerT > 2 ? (2.4 - bannerT) / 0.4 : clamp(bannerT / 0.5, 0, 1);
   g.globalAlpha = clamp(alpha, 0, 1);
-  g.fillStyle = 'rgba(8,12,18,0.55)';
+  g.fillStyle = 'rgba(8,12,18,0.6)';
   const y = GRID_Y + ROWS * CELL_H * 0.32;
   rr(g, W / 2 - 250, y - 34, 500, bannerSub ? 84 : 62, 14);
   g.fill();
-  g.fillStyle = '#ffc531';
+  g.strokeStyle = 'rgba(255,197,49,0.35)';
+  g.lineWidth = 1.5;
+  rr(g, W / 2 - 250, y - 34, 500, bannerSub ? 84 : 62, 14);
+  g.stroke();
+  const titleGrad = g.createLinearGradient(0, y - 18, 0, y + 14);
+  titleGrad.addColorStop(0, '#ffe9a8');
+  titleGrad.addColorStop(1, '#ffb52e');
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,0.7)';
+  g.shadowBlur = 6;
+  g.shadowOffsetY = 2;
+  g.fillStyle = titleGrad;
   g.font = '900 30px "PingFang SC","Microsoft YaHei",sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.fillText(bannerText, W / 2, y);
+  g.restore();
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
   if (bannerSub) {
     g.fillStyle = '#dce6f2';
     g.font = '600 15px "PingFang SC","Microsoft YaHei",sans-serif';
@@ -2746,6 +2978,16 @@ window.__game = {
   },
   get mode() { return mode; },
   get cooldowns() { return { ...classicCd }; },
+  get moveCooldown() { return moveCd; },
+  move: (r1, c1, r2, c2) => {
+    const src = grid[r1][c1];
+    if (!src || src.type === 'box' || grid[r2][c2] || moveCd > 0) return false;
+    grid[r1][c1] = null;
+    grid[r2][c2] = src;
+    src.row = r2; src.col = c2;
+    moveCd = MOVE_CD;
+    return true;
+  },
   // 花能量在场上放一个盲盒（模拟真实购买）
   buyBox: (r, c) => {
     if (state !== 'playing' || energy < BOX_COST) return false;
