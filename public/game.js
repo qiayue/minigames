@@ -36,6 +36,11 @@ const MACHINES = {
   mortar:    { name: '迫击炮台',   rarity: 'rare',   hp: 280,  desc: '曲射炮弹轰炸本行最远的敌人，范围溅射' },
   sniper:    { name: '狙击炮塔',   rarity: 'epic',   hp: 260,  desc: '跨行狙击全场血量最高的敌人，高额单体伤害' },
   repair:    { name: '维修工坊',   rarity: 'epic',   hp: 420,  desc: '持续修复周围 8 格内受损的机器' },
+  spikes:    { name: '钉刺地垫',   rarity: 'common', hp: 700,  desc: '敌人可以踩过，但会被钉刺持续割伤' },
+  shield:    { name: '护盾发生器', rarity: 'rare',   hp: 320,  desc: '定期给周围机器套上可再生的能量护盾' },
+  booster:   { name: '超频加速器', rarity: 'rare',   hp: 300,  desc: '光环：大幅提升周围 8 格机器的攻击频率' },
+  saw:       { name: '回旋锯',     rarity: 'rare',   hp: 300,  desc: '发射来回穿梭的锯片，反复切割本行敌人' },
+  emp:       { name: '电磁脉冲塔', rarity: 'epic',   hp: 320,  desc: '定期释放脉冲，让本行敌人瘫痪数秒' },
   // ---- 合成机型（只能通过合成获得，不进盲盒池） ----
   frostcannon: { name: '冰冻弹簧炮', rarity: 'fusion', hp: 420,  desc: '每 5 秒轰出冰冻炮弹，命中后冻结整行敌人 2 秒' },
   twinturret:  { name: '双管炮台',   rarity: 'fusion', hp: 420,  desc: '双管齐射，射速接近翻倍' },
@@ -47,18 +52,21 @@ const MACHINES = {
 
 // 普通模式：卡槽顺序、价格与冷却（秒）
 const CLASSIC_ORDER = [
-  'generator', 'turret', 'barricade', 'puncher', 'mine', 'fan', 'shredder',
-  'flame', 'poison', 'mortar', 'magnet', 'tesla', 'railgun', 'sniper', 'repair', 'rocket',
+  'generator', 'turret', 'barricade', 'spikes', 'puncher', 'mine', 'fan', 'shredder',
+  'flame', 'poison', 'mortar', 'magnet', 'shield', 'booster', 'saw',
+  'tesla', 'railgun', 'sniper', 'emp', 'repair', 'rocket',
 ];
 const CLASSIC_COST = {
-  generator: 50, turret: 100, barricade: 50, puncher: 100, mine: 100, fan: 150,
+  generator: 50, turret: 100, barricade: 50, spikes: 75, puncher: 100, mine: 100, fan: 150,
   shredder: 150, flame: 175, poison: 175, mortar: 200, magnet: 175,
-  tesla: 250, railgun: 250, sniper: 275, repair: 200, rocket: 200,
+  shield: 175, booster: 200, saw: 200,
+  tesla: 250, railgun: 250, sniper: 275, emp: 250, repair: 200, rocket: 200,
 };
 const CLASSIC_CD = {
-  generator: 5, turret: 5, barricade: 15, puncher: 5, mine: 8, fan: 8,
+  generator: 5, turret: 5, barricade: 15, spikes: 8, puncher: 5, mine: 8, fan: 8,
   shredder: 12, flame: 10, poison: 10, mortar: 12, magnet: 12,
-  tesla: 15, railgun: 15, sniper: 18, repair: 15, rocket: 20,
+  shield: 14, booster: 14, saw: 12,
+  tesla: 15, railgun: 15, sniper: 18, emp: 16, repair: 15, rocket: 20,
 };
 
 /* ========== 通用杂交系统 ==========
@@ -67,8 +75,9 @@ const CLASSIC_CD = {
  * 能力数量与等级都没有上限——理论上可以无限叠加。
  */
 const KIND_ORDER = [
-  'shot', 'laser', 'sniper', 'zap', 'rocket', 'mortar', 'shred', 'mine',
-  'flame', 'poison', 'magnet', 'melee', 'frost', 'armor', 'repair', 'energy',
+  'shot', 'laser', 'sniper', 'zap', 'rocket', 'mortar', 'saw', 'shred', 'mine',
+  'flame', 'poison', 'emp', 'magnet', 'melee', 'frost', 'spikes', 'armor',
+  'shield', 'booster', 'repair', 'energy',
 ];
 // 单模块机器的进阶命名（1/2/3 级，3 级以上沿用 3 级名 + Lv 后缀）
 const LADDER_NAME = {
@@ -88,6 +97,11 @@ const LADDER_NAME = {
   mortar: ['迫击炮台', '重型迫击炮', '轨道轰炸台'],
   sniper: ['狙击炮塔', '磁轨狙击炮', '湮灭狙击炮'],
   repair: ['维修工坊', '纳米维修站', '奇迹熔炉'],
+  spikes: ['钉刺地垫', '合金钉阵', '湮灭钉床'],
+  shield: ['护盾发生器', '力场发生器', '绝对领域'],
+  booster: ['超频加速器', '过载加速器', '奇点加速核'],
+  saw:    ['回旋锯', '双刃回旋锯', '湮灭锯轮'],
+  emp:    ['电磁脉冲塔', '过载脉冲塔', '瘫痪风暴塔'],
 };
 // 单模块机器的类型 id（1/2/3 级）
 const LADDER_TYPE = {
@@ -107,12 +121,18 @@ const LADDER_TYPE = {
   mortar: ['mortar', 'mortar2', 'mortar3'],
   sniper: ['sniper', 'sniper2', 'sniper3'],
   repair: ['repair', 'repair2', 'repair3'],
+  spikes: ['spikes', 'spikes2', 'spikes3'],
+  shield: ['shield', 'shield2', 'shield3'],
+  booster: ['booster', 'booster2', 'booster3'],
+  saw:    ['saw', 'saw2', 'saw3'],
+  emp:    ['emp', 'emp2', 'emp3'],
 };
 // 作为副模块时的修饰词（用于自动命名混合机）
 const KIND_ADJ = {
   shot: '机炮', energy: '充能', armor: '装甲', melee: '重拳', frost: '冰霜',
   shred: '绞碎', magnet: '磁暴', zap: '雷电', laser: '激光', rocket: '轰爆',
   mine: '布雷', flame: '烈焰', poison: '剧毒', mortar: '轰炸', sniper: '狙击', repair: '自愈',
+  spikes: '钉刺', shield: '护盾', booster: '超频', saw: '锯轮', emp: '脉冲',
 };
 const KIND_DESC = {
   shot: '发射能量弹', energy: '产出能量', armor: '高耐久装甲', melee: '近战铁拳（无视护盾）',
@@ -120,12 +140,15 @@ const KIND_DESC = {
   zap: '闪电链打击多个敌人', laser: '激光贯穿整行', rocket: '火箭轰击整行',
   mine: '前方埋设地雷', flame: '喷火灼烧近处敌人', poison: '毒液让敌人持续掉血',
   mortar: '曲射炮弹范围轰炸', sniper: '跨行狙击最肥的敌人', repair: '修复周围机器',
+  spikes: '钉刺割伤踩上来的敌人', shield: '给周围机器套护盾', booster: '加快周围机器攻速',
+  saw: '来回穿梭的锯片', emp: '脉冲瘫痪本行敌人',
 };
 // 各模块对血量的加成
 const KIND_HP = {
   shot: 0, energy: 0, armor: 1300, melee: 80, frost: 0,
   shred: 150, magnet: 20, zap: 50, laser: 0, rocket: -100,
   mine: 0, flame: 40, poison: 0, mortar: -20, sniper: -40, repair: 120,
+  spikes: 400, shield: 200, booster: 60, saw: 40, emp: 60,
 };
 // 经典组合的专属类型（保持原有名字和造型）
 const PAIR_TYPE = [
@@ -212,27 +235,36 @@ function kindLv(m, kind) {
 }
 
 const ENEMIES = {
-  scrap:     { name: '废铁机器人', hp: 100,  speed: 19, dmg: 45,  score: 10, w: 46 },
-  armored:   { name: '装甲机器人', hp: 320,  speed: 15, dmg: 55,  score: 25, w: 50 },
-  drone:     { name: '疾速无人机', hp: 70,   speed: 42, dmg: 30,  score: 15, w: 44, fly: true },
-  bomber:    { name: '自爆无人蜂', hp: 90,   speed: 34, dmg: 300, score: 20, w: 44, fly: true, suicide: true },
-  shieldbot: { name: '盾卫机器人', hp: 260,  speed: 13, dmg: 50,  score: 30, w: 52, shield: 220 },
-  runner:    { name: '冲刺机器人', hp: 150,  speed: 20, dmg: 40,  score: 20, w: 46, dash: true },
-  jumper:    { name: '弹跳机器人', hp: 170,  speed: 22, dmg: 45,  score: 30, w: 46, jumps: 2 },
-  healer:    { name: '维修无人机', hp: 200,  speed: 18, dmg: 20,  score: 40, w: 46, fly: true, heal: true },
-  crusher:   { name: '重型碾压车', hp: 1400, speed: 11, dmg: 240, score: 80, w: 86, heavy: true },
-  titan:     { name: '钢铁泰坦',   hp: 4200, speed: 8,  dmg: 420, score: 250, w: 104, shield: 600, boss: true, heavy: true, coldResist: 0.5 },
+  scrap:     { name: '废铁机器人', hp: 100,  speed: 14, dmg: 45,  score: 10, w: 46 },
+  armored:   { name: '装甲机器人', hp: 320,  speed: 11, dmg: 55,  score: 25, w: 50 },
+  drone:     { name: '疾速无人机', hp: 70,   speed: 30, dmg: 30,  score: 15, w: 44, fly: true },
+  bomber:    { name: '自爆无人蜂', hp: 90,   speed: 24, dmg: 300, score: 20, w: 44, fly: true, suicide: true },
+  shieldbot: { name: '盾卫机器人', hp: 260,  speed: 9,  dmg: 50,  score: 30, w: 52, shield: 220 },
+  runner:    { name: '冲刺机器人', hp: 150,  speed: 14, dmg: 40,  score: 20, w: 46, dash: true },
+  jumper:    { name: '弹跳机器人', hp: 170,  speed: 16, dmg: 45,  score: 30, w: 46, jumps: 2 },
+  healer:    { name: '维修无人机', hp: 200,  speed: 13, dmg: 20,  score: 40, w: 46, fly: true, heal: true },
+  crusher:   { name: '重型碾压车', hp: 1400, speed: 8,  dmg: 240, score: 80, w: 86, heavy: true },
+  titan:     { name: '钢铁泰坦',   hp: 4200, speed: 6,  dmg: 420, score: 250, w: 104, shield: 600, boss: true, heavy: true, coldResist: 0.5 },
+  // ---- 远程敌人：停在射程外炮击机器 ----
+  gunner:      { name: '炮击机器人', hp: 260, speed: 9,  dmg: 40, score: 45, w: 50, range: 3.0, rdmg: 34, rcd: 1.8, rkind: 'shell' },
+  spitter:     { name: '酸液喷吐者', hp: 300, speed: 8,  dmg: 45, score: 50, w: 52, range: 2.4, rdmg: 42, rcd: 2.4, rkind: 'acid' },
+  rocketdrone: { name: '导弹无人机', hp: 200, speed: 12, dmg: 35, score: 55, w: 48, fly: true, range: 4.0, rdmg: 78, rcd: 3.2, rkind: 'missile' },
+  // ---- 其它新兵种 ----
+  splitter:  { name: '分裂机器人', hp: 340,  speed: 10, dmg: 50, score: 40, w: 50, splits: 2 },
+  regenbot:  { name: '自愈机器人', hp: 420,  speed: 9,  dmg: 55, score: 55, w: 50, regen: 22 },
+  stealthbot:{ name: '隐匿机器人', hp: 230,  speed: 13, dmg: 48, score: 50, w: 46, cloak: true },
   // ---- 融合敌人：两种敌人特性合体 ----
-  shieldrunner: { name: '疾冲盾卫', hp: 280,  speed: 17, dmg: 60,  score: 50,  w: 50,  shield: 280, dash: true },
-  jumpbomber:   { name: '弹跳自爆蜂', hp: 140, speed: 25, dmg: 340, score: 45, w: 46,  jumps: 2, suicide: true },
-  medicrusher:  { name: '维修碾压车', hp: 1700, speed: 10, dmg: 230, score: 130, w: 88, heavy: true, heal: true },
-  titancrusher: { name: '碾压泰坦',  hp: 6200, speed: 7,  dmg: 520, score: 420, w: 118, shield: 900, boss: true, heavy: true, coldResist: 0.6 },
+  shieldrunner: { name: '疾冲盾卫', hp: 280,  speed: 12, dmg: 60,  score: 50,  w: 50,  shield: 280, dash: true },
+  jumpbomber:   { name: '弹跳自爆蜂', hp: 140, speed: 18, dmg: 340, score: 45, w: 46,  jumps: 2, suicide: true },
+  medicrusher:  { name: '维修碾压车', hp: 1700, speed: 7,  dmg: 230, score: 130, w: 88, heavy: true, heal: true },
+  titancrusher: { name: '碾压泰坦',  hp: 6200, speed: 5,  dmg: 520, score: 420, w: 118, shield: 900, boss: true, heavy: true, coldResist: 0.6 },
+  gunnertitan:  { name: '炮击泰坦',  hp: 5200, speed: 5,  dmg: 460, score: 380, w: 108, shield: 700, boss: true, heavy: true, coldResist: 0.5, range: 4.5, rdmg: 120, rcd: 2.2, rkind: 'shell' },
 };
 
 const BOX_POOL = {
-  common: [['turret', 18], ['generator', 18], ['barricade', 9], ['puncher', 10], ['mine', 9]],
-  rare:   [['shredder', 9], ['fan', 9], ['magnet', 8], ['flame', 8], ['poison', 8], ['mortar', 8]],
-  epic:   [['tesla', 5], ['rocket', 4], ['railgun', 5], ['sniper', 4], ['repair', 4]],
+  common: [['turret', 16], ['generator', 16], ['barricade', 8], ['puncher', 9], ['mine', 8], ['spikes', 8]],
+  rare:   [['shredder', 7], ['fan', 7], ['magnet', 6], ['flame', 7], ['poison', 6], ['mortar', 6], ['shield', 6], ['booster', 6], ['saw', 6]],
+  epic:   [['tesla', 4], ['rocket', 3], ['railgun', 4], ['sniper', 3], ['emp', 4], ['repair', 3]],
 };
 
 /* ========== 工具 ========== */
@@ -274,7 +306,7 @@ let wavesOn = true;        // 创造模式的敌潮开关
 const creative = () => mode === 'creative';
 const moveCd = 0;          // 手套没有冷却
 let energy, score, kills, wave, endless, pity, history;
-let grid, enemies, bullets, orbs, parts, floats, zaps, beams, mines, shells, tracers;
+let grid, enemies, bullets, orbs, parts, floats, zaps, beams, mines, shells, tracers, saws, ebullets;
 let waveState, waveTimer, queue, spawnT, skyT, lastRows;
 let bannerText, bannerSub, bannerT, shakeT, shakeAmp;
 let sel = null;            // {mode:'box'} | {mode:'shovel'}
@@ -287,7 +319,7 @@ function initGame() {
   endless = false; pity = 0; history = [];
   grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
   enemies = []; bullets = []; orbs = []; parts = []; floats = []; zaps = []; beams = [];
-  mines = []; shells = []; tracers = [];
+  mines = []; shells = []; tracers = []; saws = []; ebullets = [];
   waveState = 'pre'; waveTimer = 15; queue = []; spawnT = 0;
   skyT = 3; lastRows = [];
   bannerText = ''; bannerSub = ''; bannerT = 0; shakeT = 0; shakeAmp = 0;
@@ -553,6 +585,7 @@ function place(type, row, col, modules) {
     t: rand(0, 0.6), cd: 0, chew: 0, spin: rand(0, TAU),
     flash: 0, recoil: 0, pulse: 0, armed: true,
     mt: {}, mcd: {}, charge: 0, reload: 0,
+    sh: 0, maxSh: 0, haste: 0, shHit: 0,
   };
   spawnParts(cellCx(col), cellCy(row), '#9fb4c8', 10, 90, 0.4, 'spark');
   sfx('place');
@@ -588,8 +621,24 @@ function removeMachine(row, col, silent) {
   if (!silent) sfx('break');
 }
 function damageMachine(m, d) {
+  // 能量护盾优先承伤
+  if (m.sh > 0) {
+    const absorbed = Math.min(m.sh, d);
+    m.sh -= absorbed;
+    d -= absorbed;
+    m.shHit = 0.25;
+    if (m.sh <= 0) {
+      spawnParts(cellCx(m.col), cellCy(m.row), '#8fd0ff', 10, 120, 0.45, 'spark');
+      sfx('break');
+    }
+    if (d <= 0) return;
+  }
   m.hp -= d;
   if (m.hp <= 0) removeMachine(m.row, m.col);
+}
+// 纯钉刺地垫可以让敌人踩过去
+function isWalkable(m) {
+  return !!(m && m.modules && m.modules.length === 1 && m.modules[0].kind === 'spikes');
 }
 
 const cellCx = c => GRID_X + c * CELL_W + CELL_W / 2;
@@ -619,8 +668,11 @@ function spawnEnemy(type, row) {
     dash: !!info.dash, dashT: rand(1.5, 3.5), dashing: 0,
     jumpsLeft: info.jumps || 0, jumpT: 0, jumpFrom: 0, jumpTo: 0,
     heal: !!info.heal, healT: rand(1, 3),
-    burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0,
-    hitT: 0, slowT: 0, frozenT: 0, anim: rand(0, TAU), flash: 0,
+    range: info.range || 0, rdmg: info.rdmg || 0, rcd: info.rcd || 2, rt: rand(0.4, 1.4), rkind: info.rkind || 'shell',
+    splits: info.splits || 0, regen: info.regen || 0,
+    cloak: !!info.cloak, cloakT: 0, cloakCd: rand(2, 4),
+    burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0, stunT: 0,
+    hitT: 0, slowT: 0, frozenT: 0, anim: rand(0, TAU), flash: 0, firing: 0, recoil: 0,
   });
 }
 
@@ -640,20 +692,22 @@ function waveEnemies(n) {
   if (n === 1) { push('scrap', 2); }
   else if (n === 2) { push('scrap', 4); }
   else if (n === 3) { push('scrap', 4); push('armored', 2); push('runner', 1); }
-  else if (n === 4) { push('scrap', 5); push('armored', 2); push('drone', 2); push('runner', 2); }
-  else if (n === 5) { push('scrap', 5); push('armored', 3); push('drone', 2); push('bomber', 2); push('jumper', 1); }
-  else if (n === 6) { push('scrap', 5); push('armored', 3); push('drone', 2); push('bomber', 2); push('shieldbot', 1); push('jumper', 2); }
-  else if (n === 7) { push('scrap', 6); push('armored', 3); push('runner', 2); push('bomber', 2); push('shieldbot', 2); push('healer', 1); push('crusher', 1); }
-  else if (n === 8) { push('scrap', 6); push('armored', 4); push('drone', 3); push('jumper', 2); push('shieldbot', 2); push('healer', 1); push('shieldrunner', 1); push('crusher', 1); }
-  else if (n === 9) { push('scrap', 6); push('armored', 4); push('runner', 2); push('bomber', 2); push('shieldbot', 2); push('healer', 1); push('shieldrunner', 1); push('jumpbomber', 1); push('crusher', 2); }
+  else if (n === 4) { push('scrap', 5); push('armored', 2); push('drone', 2); push('runner', 2); push('gunner', 1); }
+  else if (n === 5) { push('scrap', 5); push('armored', 3); push('drone', 2); push('bomber', 2); push('jumper', 1); push('gunner', 1); push('splitter', 1); }
+  else if (n === 6) { push('scrap', 5); push('armored', 2); push('drone', 2); push('bomber', 2); push('shieldbot', 1); push('jumper', 2); push('gunner', 1); push('stealthbot', 1); }
+  else if (n === 7) { push('scrap', 5); push('armored', 3); push('runner', 2); push('bomber', 2); push('shieldbot', 2); push('healer', 1); push('crusher', 1); push('spitter', 1); push('regenbot', 1); }
+  else if (n === 8) { push('scrap', 5); push('armored', 3); push('drone', 2); push('jumper', 2); push('shieldbot', 2); push('healer', 1); push('shieldrunner', 1); push('crusher', 1); push('gunner', 2); push('splitter', 1); push('stealthbot', 1); }
+  else if (n === 9) { push('scrap', 6); push('armored', 4); push('runner', 2); push('bomber', 2); push('shieldbot', 2); push('healer', 1); push('shieldrunner', 1); push('jumpbomber', 1); push('crusher', 2); push('spitter', 2); push('rocketdrone', 1); push('regenbot', 1); push('gunner', 1); }
   else if (n === 10) {
-    push('scrap', 5); push('armored', 3); push('drone', 2); push('bomber', 2);
+    push('scrap', 6); push('armored', 4); push('drone', 3); push('bomber', 2);
     push('runner', 2); push('jumper', 2); push('shieldbot', 2); push('healer', 1);
+    push('gunner', 3); push('spitter', 2); push('rocketdrone', 1);
+    push('splitter', 2); push('stealthbot', 1); push('regenbot', 1);
     push('shieldrunner', 1); push('jumpbomber', 1); push('medicrusher', 1);
-    push('crusher', 1); push('titan', 1);
+    push('crusher', 2); push('titan', 1);
   } else {
     const k = n - TOTAL_WAVES;
-    push('scrap', 7 + k);
+    push('scrap', 6 + k);
     push('armored', 4 + k);
     push('drone', 3 + Math.floor(k * 0.5));
     push('bomber', 3 + Math.floor(k * 0.5));
@@ -661,15 +715,23 @@ function waveEnemies(n) {
     push('jumper', 3 + Math.floor(k * 0.4));
     push('shieldbot', 3 + Math.floor(k * 0.5));
     push('healer', 2 + Math.floor(k * 0.3));
+    push('gunner', 3 + Math.floor(k * 0.6));
+    push('spitter', 2 + Math.floor(k * 0.5));
+    push('rocketdrone', 1 + Math.floor(k * 0.5));
+    push('splitter', 2 + Math.floor(k * 0.5));
+    push('regenbot', 2 + Math.floor(k * 0.4));
+    push('stealthbot', 2 + Math.floor(k * 0.5));
     push('shieldrunner', 2 + Math.floor(k * 0.5));
     push('jumpbomber', 2 + Math.floor(k * 0.4));
     push('medicrusher', 1 + Math.floor(k / 3));
     push('crusher', 2 + Math.floor(k / 2));
     push('titan', 1 + Math.floor(k / 3));
     if (k >= 2) push('titancrusher', Math.floor(k / 2));
+    if (k >= 3) push('gunnertitan', Math.floor((k - 1) / 2));
   }
   // 洗牌，重型单位安排在后半段出场
-  const isHeavy = t => t === 'crusher' || t === 'titan' || t === 'medicrusher' || t === 'titancrusher';
+  const isHeavy = t => t === 'crusher' || t === 'titan' || t === 'medicrusher'
+    || t === 'titancrusher' || t === 'gunnertitan';
   const normal = shuffle(list.filter(t => !isHeavy(t)));
   const heavy = list.filter(isHeavy);
   for (const h of heavy) {
@@ -684,13 +746,14 @@ function startWave() {
   queue = waveEnemies(wave);
   waveState = 'spawn';
   spawnT = 0.6;
-  if (!endless && wave === TOTAL_WAVES) banner('⚠️ 最终决战！', '钢铁泰坦与融合军团压境——守住这一波就胜利了！');
+  if (!endless && wave === TOTAL_WAVES) banner('⚠️ 最终决战！', '钢铁泰坦、远程部队与融合军团压境——守住这一波就胜利了！');
   else if (wave === 3) banner('第 3 波来袭！', '冲刺机器人会突然加速冲锋！');
-  else if (wave === 5) banner('第 5 波来袭！', '自爆无人蜂和弹跳机器人登场，弹跳者能跳过一台机器！');
-  else if (wave === 6) banner('第 6 波来袭！', '盾卫机器人的护盾会挡住子弹，用近战机器对付它！');
-  else if (wave === 7) banner('第 7 波来袭！', '维修无人机会治疗同伴，优先集火它！');
+  else if (wave === 4) banner('第 4 波来袭！', '远程机枪兵登场：它会停在远处开火，需要射程更远的火力反制！');
+  else if (wave === 5) banner('第 5 波来袭！', '自爆无人蜂、弹跳机器人与分裂机器人登场！');
+  else if (wave === 6) banner('第 6 波来袭！', '盾卫护盾会挡子弹；潜行机器人开光学迷彩时免疫远程，用近战对付它们！');
+  else if (wave === 7) banner('第 7 波来袭！', '酸液喷射者的腐蚀弹会溅到上下行，维修机与自愈机器人需优先集火！');
   else if (wave === 8) banner('第 8 波来袭！', '融合敌人出现：疾冲盾卫带着护盾冲锋！');
-  else if (wave === 9) banner('第 9 波来袭！', '弹跳自爆蜂会跳过防线再引爆！');
+  else if (wave === 9) banner('第 9 波来袭！', '导弹无人机在超远处齐射，弹跳自爆蜂跳过防线再引爆！');
   else banner('第 ' + wave + ' 波来袭！', '');
   sfx('horn');
 }
@@ -707,7 +770,7 @@ function updateWaves(dt) {
     spawnT -= dt;
     if (spawnT <= 0 && queue.length) {
       spawnEnemy(queue.shift(), pickRow());
-      spawnT = Math.max(0.9, 2.3 - wave * 0.09) + rand(0, 0.8);
+      spawnT = Math.max(0.75, 2.05 - wave * 0.09) + rand(0, 0.7);
     }
     if (!queue.length) waveState = 'clear';
   } else if (waveState === 'clear') {
@@ -725,6 +788,11 @@ function updateWaves(dt) {
 // kind: 'ranged' 会先被护盾吸收；'melee' / 'true' 无视护盾
 // noFlash: 持续伤害（灼烧/中毒）每帧都会调用，不能每帧触发受击白闪
 function damageEnemy(e, d, kind, noFlash) {
+  // 隐匿状态免疫远程攻击
+  if (kind === 'ranged' && e.cloakT > 0) {
+    if (Math.random() < 0.08) addFloat(e.x, rowCy(e) - 40, '隐匿', '#c0a8f0');
+    return;
+  }
   if (kind === 'ranged' && e.shield > 0) {
     const absorbed = Math.min(e.shield, d);
     e.shield -= absorbed;
@@ -746,6 +814,17 @@ function damageEnemy(e, d, kind, noFlash) {
     spawnParts(e.x, rowCy(e), '#c8935a', 12, 130, 0.6, 'gear');
     spawnParts(e.x, rowCy(e), '#ffd764', 6, 100, 0.4, 'spark');
     if (e.heavy) { shake(e.boss ? 0.6 : 0.35, e.boss ? 8 : 5); sfx('boom'); }
+    // 分裂机器人：死亡时裂成两个小机器人
+    if (e.splits) {
+      for (let i = 0; i < e.splits; i++) {
+        spawnEnemy('scrap', e.row);
+        const ne = enemies[enemies.length - 1];
+        ne.x = clamp(e.x + (i === 0 ? -18 : 18), GRID_X + 10, W + 20);
+        ne.hp = ne.maxHp = Math.round(ne.maxHp * 0.9);
+      }
+      spawnParts(e.x, rowCy(e), '#9fb4c8', 12, 130, 0.5, 'gear');
+      addFloat(e.x, rowCy(e) - 44, '分裂！', '#c8d4e0');
+    }
     if (e.boss) { addFloat(e.x, rowCy(e) - 60, '泰坦倒下！', '#ffc531'); }
   }
 }
@@ -771,6 +850,11 @@ const MOD_STAT = {
   mortar: { cd: [3.2, 2.4, 1.8], dmg: [70, 95, 125], splash: [58, 68, 80] },
   sniper: { cd: [2.8, 2.1, 1.5], dmg: [150, 210, 300] },
   repair: { cd: [2.2, 1.6, 1.1], heal: [40, 70, 110] },
+  spikes: { interval: [0.5, 0.4, 0.3], dmg: [13, 20, 30] },
+  shield: { cd: [8, 6, 4.5], amount: [150, 260, 420] },
+  booster:{ haste: [0.4, 0.7, 1.05] },
+  saw:    { cd: [4.5, 3.4, 2.5], dmg: [48, 65, 88] },
+  emp:    { cd: [7.5, 5.8, 4.2], stun: [1.3, 1.9, 2.6] },
   armor:  {},
 };
 // 3 级以上的成长规则：等级无上限
@@ -784,6 +868,9 @@ const STAT_GROWTH = {
   dot:      { mul: 1.3 },
   burn:     { mul: 1.3 },
   targets:  { add: 1, max: 40 },
+  amount:   { mul: 1.35 },
+  haste:    { add: 0.3, max: 6 },
+  stun:     { add: 0.5, max: 12 },
   freeze:   { add: 0.35, max: 10 },
   range:    { add: 0.35, max: 9 },
   splash:   { add: 10, max: 260 },
@@ -816,11 +903,27 @@ function enemiesInRange(r, cx, cells) {
 }
 
 function updateMachines(dt) {
+  // 第一遍：超频光环（周围 8 格获得攻速加成）
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const m = grid[r][c]; if (m) m.haste = 0; }
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const b = grid[r][c];
+      if (!b || b.type === 'box' || !hasKind(b, 'booster')) continue;
+      const hv = modStat('booster', 'haste', kindLv(b, 'booster'));
+      for (let rr2 = Math.max(0, r - 1); rr2 <= Math.min(ROWS - 1, r + 1); rr2++) {
+        for (let cc = Math.max(0, c - 1); cc <= Math.min(COLS - 1, c + 1); cc++) {
+          const o = grid[rr2][cc];
+          if (o && o.type !== 'box') o.haste = Math.max(o.haste, hv);
+        }
+      }
+    }
+  }
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const m = grid[r][c];
       if (!m) continue;
       const cx = cellCx(c);
+      if (m.shHit > 0) m.shHit -= dt;
       m.spin += dt * (m.type === 'box' ? 10 : hasKind(m, 'frost') ? 9 : 1.2);
       if (m.flash > 0) m.flash -= dt;
       if (m.recoil > 0) m.recoil -= dt;
@@ -838,8 +941,10 @@ function updateMachines(dt) {
         continue;
       }
 
+      // 超频：模块计时加速（护盾/加速光环本身不受影响）
+      const mdt = dt * (1 + (m.haste || 0));
       for (const k in m.mcd) {
-        if (m.mcd[k] > 0) m.mcd[k] -= dt;
+        if (m.mcd[k] > 0) m.mcd[k] -= mdt;
       }
 
       for (const mod of m.modules) {
@@ -847,7 +952,7 @@ function updateMachines(dt) {
         const lv = mod.lv;
         const st = (prop) => modStat(kind, prop, lv);
         if (kind === 'shot') {
-          m.mt.shot = (m.mt.shot || 0) + dt;
+          m.mt.shot = (m.mt.shot || 0) + mdt;
           if (m.mt.shot >= st('interval') && enemyAhead(r, cx)) {
             m.mt.shot = 0;
             m.recoil = 0.12;
@@ -859,7 +964,7 @@ function updateMachines(dt) {
             sfx(bk === 'arc' ? 'zap' : bk === 'ice' ? 'ice' : 'shoot');
           }
         } else if (kind === 'energy') {
-          m.mt.energy = (m.mt.energy || 0) + dt;
+          m.mt.energy = (m.mt.energy || 0) + mdt;
           if (m.mt.energy >= st('interval')) {
             m.mt.energy = 0;
             m.pulse = 0.5;
@@ -870,7 +975,7 @@ function updateMachines(dt) {
             sfx('gen');
           }
         } else if (kind === 'melee') {
-          m.mt.melee = (m.mt.melee || 0) + dt;
+          m.mt.melee = (m.mt.melee || 0) + mdt;
           if (m.mt.melee >= st('interval')) {
             const left = GRID_X + c * CELL_W;
             const prey = enemies.find(e =>
@@ -887,7 +992,7 @@ function updateMachines(dt) {
             }
           }
         } else if (kind === 'frost') {
-          m.mt.frost = (m.mt.frost || 0) + dt;
+          m.mt.frost = (m.mt.frost || 0) + mdt;
           if (m.mt.frost >= st('interval') && enemyAhead(r, cx)) {
             m.mt.frost = 0;
             bullets.push({ kind: 'ice', row: r, x: cx + 30, dmg: 12, speed: 320 });
@@ -895,7 +1000,7 @@ function updateMachines(dt) {
           }
           // 2 级起：定期轰出冻结整行的冰冻炮弹
           if (lv >= 2) {
-            m.mt.frostShell = (m.mt.frostShell || 0) + dt;
+            m.mt.frostShell = (m.mt.frostShell || 0) + mdt;
             if (m.mt.frostShell >= st('shellCd') && enemyAhead(r, cx)) {
               m.mt.frostShell = 0;
               m.recoil = 0.25;
@@ -970,7 +1075,7 @@ function updateMachines(dt) {
             }
           }
         } else if (kind === 'zap') {
-          m.mt.zap = (m.mt.zap || 0) + dt;
+          m.mt.zap = (m.mt.zap || 0) + mdt;
           if (m.mt.zap >= st('cd')) {
             const targets = enemiesInRow(r)
               .filter(e => e.x > cx - 20 && e.x < W + 20)
@@ -989,7 +1094,7 @@ function updateMachines(dt) {
             }
           }
         } else if (kind === 'laser') {
-          m.mt.laser = (m.mt.laser || 0) + dt;
+          m.mt.laser = (m.mt.laser || 0) + mdt;
           m.charge = clamp(m.mt.laser / st('cd'), 0, 1);
           if (m.mt.laser >= st('cd')) {
             const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx);
@@ -1031,7 +1136,7 @@ function updateMachines(dt) {
             }
           }
         } else if (kind === 'flame') {
-          m.mt.flame = (m.mt.flame || 0) + dt;
+          m.mt.flame = (m.mt.flame || 0) + mdt;
           if (m.mt.flame >= st('interval')) {
             const targets = enemiesInRange(r, cx, st('range'));
             if (targets.length) {
@@ -1050,7 +1155,7 @@ function updateMachines(dt) {
             }
           }
         } else if (kind === 'poison') {
-          m.mt.poison = (m.mt.poison || 0) + dt;
+          m.mt.poison = (m.mt.poison || 0) + mdt;
           if (m.mt.poison >= st('interval') && enemyAhead(r, cx)) {
             m.mt.poison = 0;
             m.recoil = 0.14;
@@ -1112,6 +1217,79 @@ function updateMachines(dt) {
               spawnParts(cellCx(target.col), cellCy(target.row), '#58d68b', 5, 70, 0.4, 'spark');
             }
           }
+        } else if (kind === 'spikes') {
+          // 钉刺：割伤站在（或经过）本格的敌人
+          m.mt.spikes = (m.mt.spikes || 0) + dt;
+          if (m.mt.spikes >= st('interval')) {
+            const left = GRID_X + c * CELL_W;
+            let hit = false;
+            for (const e of enemies) {
+              if (e.dead || e.fly || e.row !== r) continue;
+              if (e.x > left - 6 && e.x < left + CELL_W + 6) {
+                damageEnemy(e, st('dmg'), 'true', true);
+                hit = true;
+              }
+            }
+            if (hit) {
+              m.mt.spikes = 0;
+              m.flash = 0.1;
+              spawnParts(cx + rand(-24, 24), cellCy(r) + 16, '#dbe4ee', 2, 60, 0.3, 'spark');
+            }
+          }
+        } else if (kind === 'shield') {
+          // 给周围机器补护盾
+          if ((m.mcd.shield || 0) <= 0) {
+            let target = null;
+            for (let rr2 = Math.max(0, r - 1); rr2 <= Math.min(ROWS - 1, r + 1); rr2++) {
+              for (let cc = Math.max(0, c - 1); cc <= Math.min(COLS - 1, c + 1); cc++) {
+                const o = grid[rr2][cc];
+                if (!o || o.type === 'box') continue;
+                if (o.sh >= st('amount')) continue;
+                if (!target || o.sh < target.sh) target = o;
+              }
+            }
+            if (target) {
+              m.mcd.shield = st('cd');
+              m.pulse = 0.45;
+              target.sh = st('amount');
+              target.maxSh = st('amount');
+              target.shHit = 0.3;
+              zaps.push({
+                pts: [{ x: cx, y: cellCy(r) - 24 }, { x: cellCx(target.col), y: cellCy(target.row) - 10 }],
+                t: 0.24, max: 0.24, color: '#8fd0ff',
+              });
+              spawnParts(cellCx(target.col), cellCy(target.row), '#8fd0ff', 6, 80, 0.4, 'spark');
+            }
+          }
+        } else if (kind === 'saw') {
+          // 发射来回穿梭的锯片
+          if ((m.mcd.saw || 0) <= 0 && saws.length < 24) {
+            if (enemyAhead(r, cx)) {
+              m.mcd.saw = st('cd');
+              saws.push({
+                row: r, x: cx + 26, dir: 1, speed: 210, dmg: st('dmg'),
+                homeX: cx + 26, spin: 0, passes: 2, cool: new Map(),
+              });
+              sfx('shoot');
+            }
+          }
+        } else if (kind === 'emp') {
+          // 脉冲瘫痪本行敌人
+          if ((m.mcd.emp || 0) <= 0) {
+            const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx - 20);
+            if (targets.length) {
+              m.mcd.emp = st('cd');
+              m.flash = 0.35;
+              for (const e of targets) {
+                e.stunT = Math.max(e.stunT, st('stun'));
+                damageEnemy(e, 20, 'true');
+                spawnParts(e.x, rowCy(e), '#9fc4ff', 5, 90, 0.4, 'spark');
+              }
+              beams.push({ row: r, x0: cx, t: 0.35, max: 0.35, kind: 'emp' });
+              addFloat(cx, cellCy(r) - 46, '瘫痪！', '#9fc4ff');
+              sfx('zap');
+            }
+          }
         }
       }
       // 冰冻弹簧炮的招牌技：每 5 秒冻结整行的冰冻炮
@@ -1126,6 +1304,63 @@ function updateMachines(dt) {
       }
       // 供旧绘制代码读取的状态镜像
       if (hasKind(m, 'shred')) m.cd = Math.max(m.mcd.shred || 0, 0);
+    }
+  }
+}
+
+// 敌人的远程弹药（向左飞，打中第一台机器）
+function updateEnemyBullets(dt) {
+  for (let i = ebullets.length - 1; i >= 0; i--) {
+    const b = ebullets[i];
+    b.x -= b.speed * dt;
+    const col = Math.floor((b.x - GRID_X) / CELL_W);
+    let hit = null;
+    if (col >= 0 && col < COLS) {
+      const o = grid[b.row][col];
+      if (o && !isWalkable(o) && Math.abs(b.x - cellCx(col)) < CELL_W * 0.46) hit = { o, col };
+    }
+    if (hit) {
+      damageMachine(hit.o, b.dmg);
+      if (b.kind === 'acid') {
+        // 酸液溅射：同时腐蚀上下相邻行的同列机器
+        for (const dr of [-1, 1]) {
+          const rr2 = b.row + dr;
+          if (rr2 < 0 || rr2 >= ROWS) continue;
+          const o2 = grid[rr2][hit.col];
+          if (o2 && !isWalkable(o2)) damageMachine(o2, b.dmg * 0.5);
+        }
+        spawnParts(b.x, cellCy(b.row), '#8be04a', 12, 130, 0.5, 'spark');
+      } else if (b.kind === 'missile') {
+        spawnParts(b.x, cellCy(b.row), '#ff9d2e', 14, 150, 0.5, 'spark');
+        shake(0.14, 2.5);
+        sfx('boom');
+      } else {
+        spawnParts(b.x, cellCy(b.row), '#ffd764', 6, 100, 0.35, 'spark');
+      }
+      ebullets.splice(i, 1);
+      continue;
+    }
+    if (b.x < GRID_X - 20) ebullets.splice(i, 1);
+  }
+}
+
+// 回旋锯片
+function updateSaws(dt) {
+  for (let i = saws.length - 1; i >= 0; i--) {
+    const sw = saws[i];
+    sw.x += sw.dir * sw.speed * dt;
+    sw.spin += dt * 18;
+    if (sw.x > W - 10) { sw.dir = -1; }
+    if (sw.dir < 0 && sw.x <= sw.homeX) { sw.passes--; sw.dir = 1; sw.cool.clear(); }
+    if (sw.passes <= 0) { saws.splice(i, 1); continue; }
+    for (const e of enemies) {
+      if (e.dead || e.row !== sw.row) continue;
+      if (Math.abs(e.x - sw.x) > e.w / 2 + 12) continue;
+      const t = sw.cool.get(e) || 0;
+      if (t > time) continue;
+      sw.cool.set(e, time + 0.45);
+      damageEnemy(e, sw.dmg, 'melee');
+      spawnParts(sw.x, rowCy(e), '#e6edf5', 6, 110, 0.35, 'spark');
     }
   }
 }
@@ -1261,6 +1496,12 @@ function updateEnemies(dt) {
       if (e.flash > 0) e.flash -= dt;
       continue;
     }
+    if (e.stunT > 0) {
+      // 电磁瘫痪：同样无法行动
+      e.stunT -= dt;
+      if (e.flash > 0) e.flash -= dt;
+      continue;
+    }
     e.anim += dt;
     if (e.flash > 0) e.flash -= dt;
     if (e.slowT > 0) e.slowT -= dt * (1 + (e.coldResist || 0));
@@ -1306,13 +1547,60 @@ function updateEnemies(dt) {
         }
       }
     }
+    // 自愈机器人：持续回血
+    if (e.regen && e.hp < e.maxHp) {
+      e.hp = Math.min(e.maxHp, e.hp + e.regen * dt);
+      if (Math.random() < dt * 3) spawnParts(e.x + rand(-10, 10), rowCy(e) - 8, '#58d68b', 1, 30, 0.4, 'spark');
+    }
+    // 隐匿机器人：周期性进入隐形（免疫远程）
+    if (e.cloak) {
+      if (e.cloakT > 0) {
+        e.cloakT -= dt;
+        if (e.cloakT <= 0) e.cloakCd = rand(2.5, 4);
+      } else {
+        e.cloakCd -= dt;
+        if (e.cloakCd <= 0) {
+          e.cloakT = 2.6;
+          spawnParts(e.x, rowCy(e), '#a98fd8', 8, 80, 0.4, 'smoke');
+        }
+      }
+    }
+    // 远程敌人：先走进战场，再在本行射程内找机器停下开火
+    if (e.range && e.x <= W - e.w * 0.5 - 8) {
+      const front = e.x - e.w / 2;
+      let tgt = null;
+      for (let cc = COLS - 1; cc >= 0; cc--) {
+        const o = grid[e.row][cc];
+        if (!o || isWalkable(o)) continue;
+        const ox = cellCx(cc);
+        if (ox < front && front - ox <= e.range * CELL_W) { tgt = { o, ox }; break; }
+      }
+      if (tgt) {
+        e.rt -= dt;
+        e.firing = 0.25;
+        if (e.rt <= 0) {
+          e.rt = e.rcd;
+          e.recoil = 0.22;
+          ebullets.push({
+            row: e.row, x: front - 6, y: rowCy(e) - 6,
+            speed: e.rkind === 'missile' ? 250 : e.rkind === 'acid' ? 200 : 320,
+            dmg: e.rdmg, kind: e.rkind,
+          });
+          sfx(e.rkind === 'acid' ? 'ice' : 'shoot');
+        }
+        if (e.recoil > 0) e.recoil -= dt;
+        continue;   // 开火时停止推进
+      }
+    }
+    if (e.firing > 0) e.firing -= dt;
+    if (e.recoil > 0) e.recoil -= dt;
     const mul = (e.slowT > 0 ? 0.45 : 1) * (e.dashing > 0 ? 3.4 : 1);
     const front = e.x - e.w / 2;
     const col = Math.floor((front - GRID_X) / CELL_W);
     let m = null;
     if (col >= 0 && col < COLS) {
       const cand = grid[e.row][col];
-      if (cand && front <= GRID_X + col * CELL_W + CELL_W * 0.62) m = cand;
+      if (cand && !isWalkable(cand) && front <= GRID_X + col * CELL_W + CELL_W * 0.62) m = cand;
     }
     if (m) {
       if (e.suicide) {
@@ -1447,6 +1735,8 @@ function update(dt) {
   }
   if (!creativeNoWaves()) updateWaves(dt);
   updateMachines(dt);
+  updateSaws(dt);
+  updateEnemyBullets(dt);
   updateShells(dt);
   updateBullets(dt);
   updateEnemies(dt);
@@ -1901,6 +2191,8 @@ function draw() {
   drawBeams();
   drawBullets();
   drawShells();
+  drawSaws();
+  drawEnemyBullets();
   drawTracers();
   drawZaps();
   drawParts();
@@ -2065,6 +2357,7 @@ const EMBLEM_COLOR = {
   laser: '#ff8c50', rocket: '#ff5d5d',
   mine: '#b0783c', flame: '#ff7a2e', poison: '#8be04a', mortar: '#d0a56a',
   sniper: '#ffe0a8', repair: '#58d68b',
+  spikes: '#dbe4ee', shield: '#8fd0ff', booster: '#ffd06b', saw: '#e6edf5', emp: '#9fc4ff',
 };
 // 徽章位置：先右侧一列，再左侧，最后上下（超出则汇总为 +N）
 const EMBLEM_POS = [
@@ -2187,6 +2480,11 @@ const KIND_THEME = {
   sniper: { tint: '#b39a68', amt: 0.32, accent: '#ffe9c0' },
   repair: { tint: '#3d9a63', amt: 0.42, accent: '#9df5c2' },
   shot:   { tint: '#b9932f', amt: 0.3,  accent: '#ffe08a' },
+  spikes: { tint: '#6b7280', amt: 0.32, accent: '#dbe4ee' },
+  shield: { tint: '#3f7fb5', amt: 0.42, accent: '#8fd0ff' },
+  booster:{ tint: '#c98a2a', amt: 0.4,  accent: '#ffd06b' },
+  saw:    { tint: '#8a8f99', amt: 0.34, accent: '#e6edf5' },
+  emp:    { tint: '#4a72c4', amt: 0.44, accent: '#9fc4ff' },
 };
 let curTheme = null;          // 当前正在绘制的机体主题
 const _mixCache = new Map();
@@ -2569,9 +2867,33 @@ function drawMachine(ctx, type, x, y, s, m) {
     ctx.restore();
   }
   ctx.restore();
+  // 能量护盾
+  if (m && m.sh > 0) {
+    const a = 0.42 + (m.shHit > 0 ? 0.45 : 0) + Math.sin(time * 4) * 0.08;
+    const flat = isWalkable(m);   // 地垫类只罩一层薄薄的力场
+    const rx = flat ? 36 * s : 29 * s;
+    const ry = flat ? 14 * s : 33 * s;
+    const cy = flat ? y + 16 * s : y - 8 * s;
+    ctx.save();
+    ctx.fillStyle = 'rgba(143,208,255,' + (0.045 + (m.shHit > 0 ? 0.11 : 0)) + ')';
+    ctx.beginPath();
+    ctx.ellipse(x, cy, rx, ry, 0, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(143,208,255,' + a + ')';
+    ctx.lineWidth = 1.8 * s;
+    ctx.stroke();
+    // 顶部高光弧，像一层玻璃罩
+    ctx.strokeStyle = 'rgba(220,245,255,' + (a * 0.65) + ')';
+    ctx.lineWidth = 2.4 * s;
+    ctx.beginPath();
+    ctx.ellipse(x, cy, rx * 0.94, ry * 0.94, 0, Math.PI * 1.18, Math.PI * 1.62);
+    ctx.stroke();
+    ctx.restore();
+  }
   // 血条
   if (m && m.maxHp && m.hp < m.maxHp) {
     drawBar(ctx, x, y - 52 * s, 44 * s, 5, clamp(m.hp / m.maxHp, 0, 1));
+    if (m.maxSh) drawBar(ctx, x, y - 59 * s, 44 * s, 3.5, clamp(m.sh / m.maxSh, 0, 1), '#8fd0ff');
   }
 }
 
@@ -2602,7 +2924,259 @@ function drawChassis(ctx, type, pri, m) {
     case 'mortar': return drawMortar(ctx, m, lv);
     case 'sniper': return drawSniper(ctx, m, lv);
     case 'repair': return drawRepair(ctx, m, lv);
+    case 'spikes': return drawSpikes(ctx, m, lv);
+    case 'shield': return drawShieldGen(ctx, m, lv);
+    case 'booster': return drawBooster(ctx, m, lv);
+    case 'saw': return drawSawTower(ctx, m, lv);
+    case 'emp': return drawEmpTower(ctx, m, lv);
   }
+}
+
+/* ===== 钉刺地垫（可踩过的地面陷阱） ===== */
+function drawSpikes(ctx, m, lv) {
+  const P = themed(pal(lv));
+  const flash = m && m.flash > 0;
+  // 地垫底板
+  ctx.fillStyle = cachedLG(ctx, 0, 14, 0, 36, [0, P.base, 1, P.dark]);
+  ctx.beginPath();
+  ctx.moveTo(-40, 18); ctx.lineTo(40, 18); ctx.lineTo(34, 36); ctx.lineTo(-34, 36);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+  // 网格纹
+  ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-40 + i * 20, 18); ctx.lineTo(-34 + i * 17, 36);
+    ctx.stroke();
+  }
+  // 钉刺（等级越高越多越长）
+  const rows = lv >= 3 ? 3 : 2;
+  const per = lv >= 3 ? 8 : lv === 2 ? 7 : 6;
+  for (let r2 = 0; r2 < rows; r2++) {
+    const yy = 20 + r2 * 7;
+    const len = (lv >= 3 ? 15 : lv === 2 ? 12 : 10) - r2 * 1.5;
+    for (let i = 0; i < per; i++) {
+      const px = -34 + (68 / (per - 1)) * i + (r2 % 2 ? 4 : 0);
+      ctx.fillStyle = cachedLG(ctx, px, yy - len, px, yy, [0, flash ? '#ffffff' : '#eef4fa', 1, '#7d8b99']);
+      ctx.beginPath();
+      ctx.moveTo(px - 3.4, yy);
+      ctx.lineTo(px, yy - len);
+      ctx.lineTo(px + 3.4, yy);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  // 三级：钉尖能量辉光
+  if (lv >= 3) {
+    emissive(ctx, 'rgba(199,123,255,0.85)', 9, () => {
+      ctx.fillStyle = '#d9b8ff';
+      for (let i = 0; i < 5; i++) {
+        ctx.beginPath(); ctx.arc(-28 + i * 14, 5, 2.2, 0, TAU); ctx.fill();
+      }
+    });
+  }
+  hazard(ctx, -40, 34, 80, 4, 2);
+}
+
+/* ===== 护盾发生器 ===== */
+function drawShieldGen(ctx, m, lv) {
+  const P = themed(pal(lv));
+  const pulse = m && m.pulse > 0 ? m.pulse * 2 : 0;
+  const spin = (m && m.spin ? m.spin : 0);
+  if (pulse > 0) {
+    ctx.fillStyle = 'rgba(143,208,255,' + (0.2 * pulse) + ')';
+    ctx.beginPath(); ctx.arc(0, -2, 44, 0, TAU); ctx.fill();
+  }
+  pedestal(ctx, P, 42, lv);
+  panel(ctx, -13, 0, 26, 22, 5, P);
+  // 三根发射柱
+  const arms = Math.min(lv + 1, 3);
+  for (let i = 0; i < arms; i++) {
+    const a = -0.6 + i * (1.2 / Math.max(arms - 1, 1));
+    ctx.save();
+    ctx.rotate(a);
+    panel(ctx, -4, -34, 8, 30, 3, P);
+    emissive(ctx, 'rgba(143,208,255,0.9)', 9, () => {
+      ctx.fillStyle = '#8fd0ff';
+      ctx.beginPath(); ctx.arc(0, -36, 4.2, 0, TAU); ctx.fill();
+    });
+    ctx.restore();
+  }
+  // 中央护盾核心
+  emissive(ctx, 'rgba(143,208,255,0.95)', 12 + pulse * 10, () => {
+    ctx.fillStyle = cachedRG(ctx, 0, -14, 1, 0, -14, 13, [0, '#eaf7ff', 0.45, '#8fd0ff', 1, 'rgba(60,130,190,0.2)']);
+    ctx.beginPath(); ctx.arc(0, -14, 10 + pulse * 2, 0, TAU); ctx.fill();
+  });
+  // 旋转护盾环
+  ctx.strokeStyle = 'rgba(180,225,255,0.8)';
+  ctx.lineWidth = 2;
+  ctx.save();
+  ctx.translate(0, -14);
+  ctx.rotate(spin * 0.6);
+  ctx.beginPath(); ctx.ellipse(0, 0, 19, 7, 0, 0, TAU); ctx.stroke();
+  ctx.restore();
+  // 盾形徽记
+  ctx.strokeStyle = '#dff0ff';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(0, -19); ctx.lineTo(6, -16); ctx.lineTo(6, -11);
+  ctx.quadraticCurveTo(6, -7, 0, -5);
+  ctx.quadraticCurveTo(-6, -7, -6, -11);
+  ctx.lineTo(-6, -16); ctx.closePath();
+  ctx.stroke();
+}
+
+/* ===== 超频加速器 ===== */
+function drawBooster(ctx, m, lv) {
+  const P = themed(pal(lv));
+  const spin = (m && m.spin ? m.spin : 0) * 3;
+  // 光环地面投影
+  ctx.strokeStyle = 'rgba(255,208,107,' + (0.3 + Math.sin(time * 4) * 0.1) + ')';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath(); ctx.ellipse(0, 30, 40, 12, 0, 0, TAU); ctx.stroke();
+  pedestal(ctx, P, 42, lv);
+  // 主体：涡轮塔
+  panel(ctx, -16, -18, 32, 38, 6, P);
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  rr(ctx, -12, -12, 24, 26, 4); ctx.fill();
+  // 旋转涡轮
+  const blades = lv >= 3 ? 6 : lv === 2 ? 5 : 4;
+  ctx.save();
+  ctx.translate(0, 0);
+  ctx.rotate(spin);
+  for (let i = 0; i < blades; i++) {
+    ctx.save();
+    ctx.rotate(i * TAU / blades);
+    ctx.fillStyle = '#ffd06b';
+    ctx.beginPath();
+    ctx.moveTo(0, -3);
+    ctx.quadraticCurveTo(9, -8, 13, -2);
+    ctx.quadraticCurveTo(9, 2, 0, 3);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+  emissive(ctx, 'rgba(255,208,107,0.9)', 10, () => {
+    ctx.fillStyle = '#fff0c4';
+    ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, TAU); ctx.fill();
+  });
+  // 顶部散热鳍
+  for (let i = 0; i < 3; i++) {
+    panel(ctx, -14 + i * 10, -30, 7, 13, 2, P);
+  }
+  // 上升的加速箭头
+  for (let i = 0; i < 3; i++) {
+    const ph = (time * 1.4 + i * 0.33) % 1;
+    ctx.globalAlpha = (1 - ph) * 0.85;
+    ctx.strokeStyle = '#ffd06b';
+    ctx.lineWidth = 2.4;
+    const ay = 6 - ph * 40;
+    ctx.beginPath();
+    ctx.moveTo(-7, ay + 6); ctx.lineTo(0, ay); ctx.lineTo(7, ay + 6);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ===== 回旋锯塔 ===== */
+function drawSawTower(ctx, m, lv) {
+  const P = themed(pal(lv));
+  const spin = (m && m.spin ? m.spin : 0) * 6;
+  const ready = !m || !m.mcd || (m.mcd.saw || 0) <= 0.4;
+  pedestal(ctx, P, 44, lv);
+  panel(ctx, -15, -6, 30, 26, 5, P);
+  // 锯片储备架
+  const stock = Math.min(lv, 3);
+  for (let i = 0; i < stock; i++) {
+    ctx.save();
+    ctx.translate(-22 + i * 5, -16 - i * 3);
+    ctx.rotate(spin * 0.15 + i);
+    ctx.fillStyle = '#9aa7b4';
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#cfd9e4';
+    for (let k = 0; k < 6; k++) {
+      const a = k * TAU / 6;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 7, Math.sin(a) * 7);
+      ctx.lineTo(Math.cos(a + 0.3) * 11, Math.sin(a + 0.3) * 11);
+      ctx.lineTo(Math.cos(a + 0.6) * 7, Math.sin(a + 0.6) * 7);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+  // 发射口的锯片
+  ctx.save();
+  ctx.translate(16, -12);
+  ctx.rotate(spin);
+  ctx.fillStyle = ready ? '#e6edf5' : '#77828e';
+  ctx.beginPath(); ctx.arc(0, 0, 12, 0, TAU); ctx.fill();
+  ctx.fillStyle = ready ? '#ffffff' : '#8d98a4';
+  for (let k = 0; k < 8; k++) {
+    const a = k * TAU / 8;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * 11, Math.sin(a) * 11);
+    ctx.lineTo(Math.cos(a + 0.24) * 17, Math.sin(a + 0.24) * 17);
+    ctx.lineTo(Math.cos(a + 0.48) * 11, Math.sin(a + 0.48) * 11);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = '#4c5b6d';
+  ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, TAU); ctx.fill();
+  ctx.restore();
+  // 导轨
+  ctx.fillStyle = P.dark;
+  rr(ctx, 6, -2, 28, 6, 3); ctx.fill();
+  emissive(ctx, ready ? 'rgba(230,237,245,0.9)' : 'rgba(120,130,140,0.6)', 7, () => {
+    ctx.fillStyle = ready ? '#e6edf5' : '#5a646e';
+    ctx.beginPath(); ctx.arc(-12, -14, 3, 0, TAU); ctx.fill();
+  });
+}
+
+/* ===== 电磁脉冲塔 ===== */
+function drawEmpTower(ctx, m, lv) {
+  const P = themed(pal(lv));
+  const flash = m && m.flash > 0 ? m.flash * 3 : 0;
+  const t = time;
+  pedestal(ctx, P, 44, lv);
+  // 塔身
+  ctx.fillStyle = cachedLG(ctx, 0, -22, 0, 22, [0, P.light, 1, P.dark]);
+  ctx.beginPath();
+  ctx.moveTo(-13, 20); ctx.lineTo(-8, -22); ctx.lineTo(8, -22); ctx.lineTo(13, 20);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 1.3;
+  ctx.stroke();
+  // 环形线圈
+  const rings = lv >= 3 ? 4 : lv === 2 ? 3 : 2;
+  for (let i = 0; i < rings; i++) {
+    const ry = 12 - i * (30 / rings);
+    const rw = 15 - i * 1.6;
+    ctx.strokeStyle = '#9fc4ff';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.ellipse(0, ry, rw, 4.6, 0, 0, TAU); ctx.stroke();
+  }
+  // 顶部脉冲球
+  emissive(ctx, 'rgba(159,196,255,0.95)', 12 + flash * 12, () => {
+    ctx.fillStyle = cachedRG(ctx, 0, -30, 1, 0, -28, 14, [0, '#f0f7ff', 0.4, '#9fc4ff', 1, '#3f63a8']);
+    ctx.beginPath(); ctx.arc(0, -28, 10 + flash * 3, 0, TAU); ctx.fill();
+  });
+  // 放射电弧
+  ctx.strokeStyle = 'rgba(200,225,255,' + (0.5 + flash * 0.5) + ')';
+  ctx.lineWidth = 1.6;
+  for (let i = 0; i < 4; i++) {
+    const a = t * 2.5 + i * TAU / 4;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * 11, -28 + Math.sin(a) * 11);
+    ctx.lineTo(Math.cos(a) * (18 + rand(0, 5)), -28 + Math.sin(a) * (18 + rand(0, 5)));
+    ctx.stroke();
+  }
+  // 脉冲扩散环
+  const ph = (t * 0.9) % 1;
+  ctx.strokeStyle = 'rgba(159,196,255,' + (1 - ph) * 0.55 + ')';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, -28, 12 + ph * 26, (12 + ph * 26) * 0.4, 0, 0, TAU); ctx.stroke();
 }
 
 // 等级光环：合成度越高越华丽
@@ -4212,6 +4786,7 @@ function drawEnemy(e) {
   // 体型微放大，让敌人与机器的视觉比重相称
   const esc = e.boss ? 1.04 : e.fly ? 1.08 : 1.14;
   g.scale(esc, esc);
+  if (e.cloakT > 0) g.globalAlpha = 0.32;
   const flash = e.flash > 0;
   const frozen = e.slowT > 0;
   // 地面接触阴影（飞行单位的影子留在地面上并缩小）
@@ -4239,6 +4814,13 @@ function drawEnemy(e) {
     case 'jumpbomber': drawJumpBomber(e, bob); break;
     case 'medicrusher': drawMediCrusher(e); break;
     case 'titancrusher': drawTitanCrusher(e); break;
+    case 'gunnertitan': drawGunnerTitan(e); break;
+    case 'gunner': drawGunner(e, bob); break;
+    case 'spitter': drawSpitter(e, bob); break;
+    case 'rocketdrone': drawRocketDrone(e); break;
+    case 'splitter': drawSplitter(e, bob); break;
+    case 'regenbot': drawRegenBot(e, bob); break;
+    case 'stealthbot': drawStealthBot(e, bob); break;
   }
   if (flash) {
     g.globalAlpha = 0.34;
@@ -4268,6 +4850,17 @@ function drawEnemy(e) {
     g.moveTo(-hw * 0.5, top + 4); g.lineTo(-hw * 0.1, top + hgt * 0.4);
     g.moveTo(hw * 0.4, top + 8); g.lineTo(hw * 0.1, top + hgt * 0.55);
     g.stroke();
+    g.globalAlpha = 1;
+  } else if (e.stunT > 0) {
+    // 电磁瘫痪：环绕电弧
+    g.strokeStyle = 'rgba(159,196,255,' + (0.6 + Math.sin(time * 20) * 0.25) + ')';
+    g.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const a = time * 6 + i * TAU / 3;
+      g.beginPath();
+      g.arc(0, -6, e.w * 0.45, a, a + 1.1);
+      g.stroke();
+    }
     g.globalAlpha = 1;
   } else if (frozen) {
     g.globalAlpha = 0.35;
@@ -4312,6 +4905,7 @@ function drawEnemy(e) {
     }
     g.globalAlpha = 1;
   }
+  g.globalAlpha = 1;
   g.restore();
   // 血条 + 护盾条
   if (e.hp < e.maxHp || (e.maxShield && e.shield < e.maxShield)) {
@@ -5557,6 +6151,495 @@ function drawTitanCrusher(e) {
   }
 }
 
+
+/* ===== 远程与特殊敌人 ===== */
+
+// 炮击机器人：架起炮管远程轰击
+function drawGunner(e, bob) {
+  const rec = e.recoil > 0 ? e.recoil * 26 : 0;
+  const firing = e.firing > 0;
+  // 液压支撑腿（开火时张开撑地）
+  const spread = firing ? 14 : 9;
+  for (const sgn of [-1, 1]) {
+    const fx = sgn * spread;
+    g.strokeStyle = '#2c353f';
+    g.lineWidth = 8; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(sgn * 4, 14); g.lineTo(fx, 32); g.stroke();
+    g.strokeStyle = '#6d7d8c';
+    g.lineWidth = 4;
+    g.beginPath(); g.moveTo(sgn * 4, 14); g.lineTo(fx, 32); g.stroke();
+    g.lineCap = 'butt';
+    // 液压筒
+    g.fillStyle = '#96a7b6';
+    g.save(); g.translate((sgn * 4 + fx) / 2, 23); g.rotate(Math.atan2(18, fx - sgn * 4) - Math.PI / 2);
+    rr(g, -3.5, -6, 7, 12, 3); g.fill();
+    g.restore();
+    // 履带式脚掌
+    eBody(fx - 8, 30, 16, 7, 3, '#5d6b78', '#252d36');
+    g.fillStyle = '#ffc531';
+    rr(g, fx - 6, 31.5, 12, 2, 1); g.fill();
+  }
+  // 躯干
+  eBody(-16, -10, 32, 28, 6, '#8a9aa8', '#59697a', '#333e4a');
+  eRim(-16, -10, 32, 28, 6, 0.28);
+  g.fillStyle = '#28323c';
+  rr(g, -10, -3, 20, 9, 2.5); g.fill();
+  emissive(g, 'rgba(255,140,80,0.75)', 6, () => {
+    g.fillStyle = '#ff9d6b';
+    for (let i = 0; i < 3; i++) { rr(g, -8, -1.5 + i * 2.6, 16, 1.4, 0.7); g.fill(); }
+  });
+  // 炮座（把炮管和躯干连起来）
+  eBody(-9, -22, 18, 14, 4, '#7c8b99', '#2f3a45');
+  g.fillStyle = '#3a4550';
+  g.beginPath(); g.arc(-2, -15, 6.5, 0, TAU); g.fill();
+  g.strokeStyle = '#b9c8d6'; g.lineWidth = 1.6;
+  g.beginPath(); g.arc(-2, -15, 6.5, 0, TAU); g.stroke();
+  // 肩上炮管（朝左，坐在炮座上）
+  g.save();
+  g.translate(-2 + rec, -16);
+  eBody(-30, -7, 26, 14, 5, '#a3b4c3', '#4a5865');
+  eRim(-30, -7, 26, 14, 5, 0.3);
+  // 散热片
+  g.fillStyle = '#6b7b8a';
+  for (let i = 0; i < 3; i++) { rr(g, -24 + i * 7, -10, 4, 4, 1.5); g.fill(); }
+  // 炮口制退器
+  g.fillStyle = '#2f3944';
+  rr(g, -38, -8.5, 10, 17, 3); g.fill();
+  g.fillStyle = '#151b21';
+  rr(g, -40, -4, 5, 8, 2); g.fill();
+  if (firing) {
+    emissive(g, 'rgba(255,180,90,0.95)', 14, () => {
+      g.fillStyle = 'rgba(255,220,150,0.9)';
+      g.beginPath(); g.arc(-42, 0, 5 + rec * 0.3, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(255,240,200,0.75)';
+      g.beginPath(); g.moveTo(-38, 0); g.lineTo(-52, -6); g.lineTo(-52, 6); g.closePath(); g.fill();
+    });
+  }
+  g.restore();
+  // 弹药箱
+  eBody(12, -6, 12, 20, 4, '#6f7f8d', '#333d47');
+  g.fillStyle = '#ffc531';
+  for (let i = 0; i < 3; i++) { rr(g, 14, -3 + i * 6, 8, 3, 1.2); g.fill(); }
+  // 头
+  eBody(-11, -32, 22, 16, 5, '#9db0c0', '#4c5b69');
+  g.fillStyle = '#080b0f';
+  rr(g, -8, -28, 16, 6, 2.5); g.fill();
+  emissive(g, 'rgba(255,140,80,0.95)', 9, () => {
+    g.fillStyle = '#ff8c50';
+    rr(g, -6, -27, 6, 4, 1.5); g.fill();
+  });
+}
+
+// 酸液喷吐者：驼背的化学罐机器人
+function drawSpitter(e, bob) {
+  const leg = Math.sin(e.anim * 6) * 4;
+  const firing = e.firing > 0;
+  // 金属腿 + 液压
+  for (const [lx, ph] of [[-13, 1], [4, -1]]) {
+    const k = leg * 0.4 * ph;
+    eBody(lx, 17, 10, 15 + k, 4, '#6b7a63', '#26301f');
+    g.fillStyle = '#96a88c';
+    rr(g, lx + 2, 20, 6, 7, 2.5); g.fill();
+    eBody(lx - 2, 31 + k, 15, 7, 3, '#5c6a55', '#1d251a');
+  }
+  // 背后酸液罐：金属箍 + 玻璃观察窗
+  eBody(5, -24, 23, 38, 9, '#7c8a72', '#2b3324');
+  g.fillStyle = 'rgba(10,18,8,0.85)';
+  rr(g, 9, -19, 15, 27, 6); g.fill();
+  g.fillStyle = cachedLG(g, 0, -6, 0, 8, [0, 'rgba(180,245,130,0.95)', 1, 'rgba(70,150,45,0.95)']);
+  rr(g, 9, -6 + Math.sin(time * 2) * 0.8, 15, 14, 5); g.fill();
+  emissive(g, 'rgba(139,224,74,0.6)', 9, () => {
+    g.strokeStyle = 'rgba(190,255,150,0.85)';
+    g.lineWidth = 1.4;
+    rr(g, 9, -19, 15, 27, 6); g.stroke();
+  });
+  g.fillStyle = 'rgba(225,255,200,0.75)';
+  for (let i = 0; i < 4; i++) {
+    const bt = (time * 26 + i * 15) % 30;
+    g.beginPath(); g.arc(12 + (i % 3) * 4.5, 6 - bt * 0.6, 1.5 + (i % 2) * 0.6, 0, TAU); g.fill();
+  }
+  // 罐箍
+  g.fillStyle = '#4a5642';
+  for (const ty of [-22, -4, 8]) { rr(g, 4, ty, 25, 3.5, 1.5); g.fill(); }
+  // 输液软管：罐 → 喷嘴
+  g.strokeStyle = '#3d4737';
+  g.lineWidth = 5.5; g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(8, -14);
+  g.quadraticCurveTo(-4, -2 + Math.sin(time * 3) * 1.5, -18, -14);
+  g.stroke();
+  g.strokeStyle = '#8be04a';
+  g.lineWidth = 1.6;
+  g.stroke();
+  g.lineCap = 'butt';
+  // 驼背躯干：装甲板
+  g.fillStyle = cachedLG(g, 0, -16, 0, 20, [0, '#9fb181', 0.45, '#647449', 1, '#333d26']);
+  g.beginPath();
+  g.moveTo(-16, 18);
+  g.quadraticCurveTo(-21, -6, -6, -15);
+  g.quadraticCurveTo(11, -19, 15, 2);
+  g.quadraticCurveTo(17, 16, 8, 18);
+  g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.45)';
+  g.lineWidth = 1.5; g.stroke();
+  // 胸甲 + 腐蚀警告标
+  eBody(-11, -6, 20, 18, 5, '#b3c398', '#3d4a2b');
+  g.fillStyle = '#e2c23a';
+  g.beginPath(); g.moveTo(-1, -3); g.lineTo(5.5, 8); g.lineTo(-7.5, 8); g.closePath(); g.fill();
+  g.fillStyle = '#20260f';
+  rr(g, -2, 0.5, 2, 4, 1); g.fill();
+  g.beginPath(); g.arc(-1, 6, 1.1, 0, TAU); g.fill();
+  eBolt(-13, -2, 1.5); eBolt(-13, 10, 1.5); eBolt(11, 0, 1.5);
+  // 头（防毒面具）
+  g.fillStyle = cachedLG(g, 0, -33, 0, -13, [0, '#b4c795', 1, '#57663d']);
+  g.beginPath(); g.ellipse(-8, -21, 14, 12, -0.2, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.42)'; g.lineWidth = 1.4; g.stroke();
+  // 双目镜
+  g.fillStyle = '#141a10';
+  g.beginPath(); g.ellipse(-11, -23, 9.5, 6, -0.15, 0, TAU); g.fill();
+  eEye(-15, -23.5, 3.6, '#c8f59a', 9);
+  eEye(-7, -22.5, 3.2, '#c8f59a', 8);
+  // 过滤罐
+  eBody(-6, -14, 9, 8, 3, '#6d7c56', '#2b3320');
+  // 喷嘴（朝左）
+  eBody(-30, -24, 15, 11, 4, '#93a37b', '#39432a');
+  g.fillStyle = '#3d4737';
+  rr(g, -33, -22, 5, 7, 2); g.fill();
+  emissive(g, 'rgba(139,224,74,' + (firing ? 0.98 : 0.6) + ')', firing ? 16 : 8, () => {
+    g.fillStyle = firing ? '#d9ffb0' : '#8be04a';
+    g.beginPath(); g.arc(-33, -18.5, firing ? 6 : 3.6, 0, TAU); g.fill();
+    if (firing) {
+      g.fillStyle = 'rgba(200,245,154,0.72)';
+      g.beginPath();
+      g.moveTo(-31, -18.5); g.lineTo(-46, -25); g.lineTo(-43, -18.5); g.lineTo(-46, -12);
+      g.closePath(); g.fill();
+    }
+  });
+  // 酸液滴落
+  const dp = (time * 1.1) % 1;
+  g.fillStyle = 'rgba(139,224,74,' + (1 - dp) * 0.85 + ')';
+  g.beginPath(); g.ellipse(-32, -13 + dp * 18, 2.1, 3.6, 0, 0, TAU); g.fill();
+}
+
+// 导弹无人机：挂载导弹巢的飞行器
+function drawRocketDrone(e) {
+  const spin = e.anim * 36;
+  const firing = e.firing > 0;
+  g.strokeStyle = '#414c59';
+  g.lineWidth = 3.4;
+  g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(-14, -8); g.lineTo(-25, -17);
+  g.moveTo(14, -8); g.lineTo(25, -17);
+  g.stroke();
+  g.lineCap = 'butt';
+  eRotor(-25, -19, 12, spin, 'rgba(230,200,190,0.32)');
+  eRotor(25, -19, 12, spin + 1.2, 'rgba(230,200,190,0.32)');
+  // 机身
+  g.fillStyle = cachedLG(g, 0, -16, 0, 10, [0, '#8a7268', 0.5, '#57453e', 1, '#2c2320']);
+  g.beginPath();
+  g.moveTo(-20, -2);
+  g.quadraticCurveTo(-16, -14, 0, -15);
+  g.quadraticCurveTo(16, -14, 20, -2);
+  g.quadraticCurveTo(14, 9, 0, 10);
+  g.quadraticCurveTo(-14, 9, -20, -2);
+  g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.45)';
+  g.lineWidth = 1.3;
+  g.stroke();
+  g.fillStyle = 'rgba(255,255,255,0.16)';
+  g.beginPath(); g.ellipse(-3, -9, 12, 4.5, -0.15, 0, TAU); g.fill();
+  // 挂载导弹巢
+  for (const sy of [4, 12]) {
+    g.fillStyle = '#3c454f';
+    rr(g, -16, sy, 30, 7, 3); g.fill();
+    g.fillStyle = '#d5dde6';
+    rr(g, -14, sy + 1, 22, 5, 2); g.fill();
+    g.fillStyle = '#ff5d5d';
+    g.beginPath();
+    g.moveTo(-14, sy + 1); g.lineTo(-21, sy + 3.5); g.lineTo(-14, sy + 6);
+    g.closePath(); g.fill();
+  }
+  // 瞄准眼
+  eEye(-9, -4, 4.4, firing ? '#ffd764' : '#ff5d5d', firing ? 13 : 10);
+  if (firing) {
+    emissive(g, 'rgba(255,157,46,0.9)', 12, () => {
+      g.fillStyle = 'rgba(255,200,120,0.8)';
+      g.beginPath(); g.arc(-22, 6, 4, 0, TAU); g.fill();
+    });
+  }
+}
+
+// 分裂机器人：左右半壳能裂开的胶囊机体，壳里能看见两个小机器
+function drawSplitter(e, bob) {
+  const leg = Math.sin(e.anim * 8) * 4;
+  const gap = 1.6 + Math.sin(e.anim * 2.2) * 1.6;   // 半壳呼吸式张合
+  for (const [lx, ph] of [[-13, 1], [4, -1]]) {
+    const k = leg * 0.4 * ph;
+    eBody(lx, 19, 10, 14 + k, 4, '#4a4f5c', '#232730');
+    eBody(lx - 2, 32 + k, 14, 6, 3, '#5d6474', '#1d212a');
+  }
+  // 壳内舱：两个待分裂的小机体
+  g.fillStyle = '#14121c';
+  g.beginPath(); g.ellipse(0, 2, 17, 20, 0, 0, TAU); g.fill();
+  emissive(g, 'rgba(190,150,255,0.55)', 10, () => {
+    for (const sx of [-6, 6]) {
+      g.fillStyle = '#6d5f8c';
+      rr(g, sx - 4.5, -6, 9, 13, 3.5); g.fill();
+      g.fillStyle = '#e2ccff';
+      g.beginPath(); g.arc(sx, -2, 1.9, 0, TAU); g.fill();
+    }
+  });
+  // 左右半壳
+  for (const sgn of [-1, 1]) {
+    g.save();
+    g.translate(sgn * gap, 0);
+    g.fillStyle = cachedLG(g, 0, -20, 0, 22,
+      sgn < 0 ? [0, '#c0b6da', 0.5, '#8479a3', 1, '#453e5c']
+              : [0, '#a99fc6', 0.5, '#6d6389', 1, '#38324a']);
+    g.beginPath();
+    g.moveTo(0, -19.5);
+    g.bezierCurveTo(sgn * 15, -19, sgn * 20, -8, sgn * 19, 3);
+    g.bezierCurveTo(sgn * 18, 15, sgn * 11, 22, 0, 22);
+    g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.5)';
+    g.lineWidth = 1.5; g.stroke();
+    eRim(-19, -19, 38, 41, 18, 0.16);
+    // 壳面板线
+    g.strokeStyle = 'rgba(255,255,255,0.13)';
+    g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(sgn * 4, -14); g.quadraticCurveTo(sgn * 16, 0, sgn * 6, 18); g.stroke();
+    // 危险条纹
+    g.fillStyle = 'rgba(226,194,58,0.9)';
+    for (let i = 0; i < 3; i++) { rr(g, sgn * 8 - 3, 6 + i * 4, 7, 2, 1); g.fill(); }
+    eBolt(sgn * 12, -8, 1.6);
+    eBolt(sgn * 12, 12, 1.6);
+    g.restore();
+  }
+  // 中央能量裂缝
+  emissive(g, 'rgba(210,180,255,0.9)', 11, () => {
+    g.strokeStyle = '#e6d0ff';
+    g.lineWidth = 2.2 + Math.sin(time * 6) * 0.5;
+    g.beginPath();
+    g.moveTo(0, -21);
+    g.lineTo(-2.5, -10); g.lineTo(2.5, 1); g.lineTo(-1.5, 11); g.lineTo(0.8, 22);
+    g.stroke();
+  });
+  // 头顶分裂指示灯
+  eBody(-9, -30, 18, 10, 4, '#8b81a8', '#3a3450');
+  for (let i = 0; i < 2; i++) {
+    const on = ((time * 2) | 0) % 2 === i;
+    emissive(g, 'rgba(217,184,255,' + (on ? 0.95 : 0.35) + ')', on ? 10 : 4, () => {
+      g.fillStyle = on ? '#f0e2ff' : '#8f7fb5';
+      g.beginPath(); g.arc(-4.5 + i * 9, -25, 2.6, 0, TAU); g.fill();
+    });
+  }
+  // 双眼
+  eEye(-7, -9, 3.9, '#d9b8ff', 9);
+  eEye(7, -9, 3.9, '#d9b8ff', 9);
+}
+
+function drawRegenBot(e, bob) {
+  const leg = Math.sin(e.anim * 7) * 4;
+  const hurt = e.hp < e.maxHp;
+  eBody(-13, 19, 11, 16 + leg * 0.4, 4, '#3f5a4a', '#1d2a22');
+  eBody(4, 19, 11, 16 - leg * 0.4, 4, '#3f5a4a', '#1d2a22');
+  // 躯干
+  eBody(-17, -11, 34, 32, 7, '#7fae93', '#4a7561', '#294338');
+  eRim(-17, -11, 34, 32, 7, 0.28);
+  // 纳米核心
+  emissive(g, 'rgba(88,214,139,' + (hurt ? 0.95 : 0.55) + ')', hurt ? 14 : 8, () => {
+    g.fillStyle = cachedRG(g, 0, 3, 1, 0, 3, 11, [0, '#e8fff2', 0.4, '#58d68b', 1, 'rgba(40,120,70,0.2)']);
+    g.beginPath(); g.arc(0, 3, 8.5 + (hurt ? Math.sin(time * 8) * 1.2 : 0), 0, TAU); g.fill();
+  });
+  g.strokeStyle = '#8ff2b6';
+  g.lineWidth = 1.8;
+  g.beginPath(); g.arc(0, 3, 11, 0, TAU); g.stroke();
+  // 背后修复臂
+  for (const sx of [-24, 17]) {
+    eBody(sx, -8, 8, 18, 3, '#a9d4bd', '#456e59');
+    emissive(g, 'rgba(143,242,182,0.8)', 6, () => {
+      g.fillStyle = '#8ff2b6';
+      g.beginPath(); g.arc(sx + 4, -11, 2.8, 0, TAU); g.fill();
+    });
+  }
+  // 修复粒子上浮
+  if (hurt) {
+    for (let i = 0; i < 3; i++) {
+      const ph = (time * 1.6 + i * 0.33) % 1;
+      g.globalAlpha = (1 - ph) * 0.85;
+      g.fillStyle = '#8ff2b6';
+      g.beginPath(); g.arc(-10 + i * 10, 8 - ph * 34, 2.2 - ph, 0, TAU); g.fill();
+    }
+    g.globalAlpha = 1;
+  }
+  // 头
+  eBody(-11, -32, 22, 17, 6, '#93c4a9', '#3f6653');
+  g.fillStyle = '#080f0b';
+  rr(g, -8, -28, 16, 6, 2.5); g.fill();
+  emissive(g, 'rgba(88,214,139,0.95)', 9, () => {
+    g.fillStyle = '#58d68b';
+    rr(g, -6, -27, 6, 4, 1.5); g.fill();
+  });
+}
+
+// 隐匿机器人：棱角分明的潜行者
+function drawStealthBot(e, bob) {
+  const leg = Math.sin(e.anim * 10) * 5;
+  const cloaked = e.cloakT > 0;
+  // 细长腿
+  for (const [sx, ph] of [[-8, 1], [7, -1]]) {
+    const k = leg * ph * 0.5;
+    g.strokeStyle = '#3b3348';
+    g.lineWidth = 4.5;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(sx, 14); g.lineTo(sx - 4 + k * 0.4, 24); g.lineTo(sx + 3 + k, 34);
+    g.stroke();
+    g.lineCap = 'butt';
+  }
+  // 背后的光学迷彩发生器
+  eBody(9, -14, 13, 24, 4, '#463a5f', '#231c33');
+  emissive(g, 'rgba(190,150,255,' + (cloaked ? 0.9 : 0.45) + ')', cloaked ? 12 : 6, () => {
+    g.fillStyle = cloaked ? '#e6d6ff' : '#9d86c9';
+    for (let i = 0; i < 3; i++) { rr(g, 11, -11 + i * 7, 9, 3, 1.4); g.fill(); }
+  });
+  // 棱角机体
+  g.fillStyle = cachedLG(g, 0, -16, 0, 20, [0, '#8878ad', 0.5, '#584a75', 1, '#2c2440']);
+  g.beginPath();
+  g.moveTo(0, -18);
+  g.lineTo(15, -8); g.lineTo(13, 12); g.lineTo(0, 20);
+  g.lineTo(-13, 12); g.lineTo(-15, -8);
+  g.closePath(); g.fill();
+  g.strokeStyle = cloaked ? 'rgba(200,170,255,0.9)' : 'rgba(0,0,0,0.45)';
+  g.lineWidth = 1.6;
+  g.stroke();
+  // 装甲切面高光
+  g.fillStyle = 'rgba(255,255,255,0.12)';
+  g.beginPath();
+  g.moveTo(0, -18); g.lineTo(15, -8); g.lineTo(0, -2); g.lineTo(-15, -8);
+  g.closePath(); g.fill();
+  // 折射纹
+  g.strokeStyle = 'rgba(216,190,255,0.5)';
+  g.lineWidth = 1.1;
+  g.beginPath(); g.moveTo(-9, -6); g.lineTo(4, 4); g.stroke();
+  g.beginPath(); g.moveTo(-4, 8); g.lineTo(9, -2); g.stroke();
+  // 肩甲 + 左臂的能量短刃
+  for (const sgn of [-1, 1]) {
+    g.fillStyle = cachedLG(g, 0, -14, 0, -2, [0, '#a493c9', 1, '#463a5f']);
+    g.beginPath();
+    g.moveTo(sgn * 12, -13); g.lineTo(sgn * 22, -8); g.lineTo(sgn * 19, 2); g.lineTo(sgn * 11, -1);
+    g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.4)'; g.lineWidth = 1.2; g.stroke();
+  }
+  emissive(g, 'rgba(200,170,255,' + (cloaked ? 0.9 : 0.6) + ')', cloaked ? 13 : 8, () => {
+    g.fillStyle = cloaked ? 'rgba(240,228,255,0.95)' : 'rgba(190,160,240,0.9)';
+    g.beginPath();
+    g.moveTo(-19, 0); g.lineTo(-34, 5); g.lineTo(-19, 6);
+    g.closePath(); g.fill();
+  });
+  // 隐形立场发生器
+  emissive(g, 'rgba(180,140,255,' + (cloaked ? 0.95 : 0.5) + ')', cloaked ? 14 : 7, () => {
+    g.fillStyle = cloaked ? '#e0ccff' : '#a98fd8';
+    g.beginPath(); g.arc(0, 0, 5, 0, TAU); g.fill();
+  });
+  // 头（尖锐）
+  g.fillStyle = cachedLG(g, 0, -34, 0, -18, [0, '#a493c9', 1, '#4c3f6b']);
+  g.beginPath();
+  g.moveTo(0, -34); g.lineTo(11, -25); g.lineTo(8, -17); g.lineTo(-8, -17); g.lineTo(-11, -25);
+  g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.42)';
+  g.lineWidth = 1.3;
+  g.stroke();
+  g.fillStyle = '#0b0812';
+  rr(g, -7, -27, 14, 5.5, 2); g.fill();
+  emissive(g, 'rgba(200,170,255,0.95)', 9, () => {
+    g.fillStyle = cloaked ? '#f0e4ff' : '#c0a8f0';
+    rr(g, -5, -26, 5.5, 3.6, 1.4); g.fill();
+  });
+  // 隐形波纹
+  if (cloaked) {
+    g.strokeStyle = 'rgba(200,170,255,0.4)';
+    g.lineWidth = 1.6;
+    const ph = (time * 1.5) % 1;
+    g.beginPath(); g.ellipse(0, 0, 16 + ph * 20, 20 + ph * 20, 0, 0, TAU); g.stroke();
+  }
+}
+
+// 炮击泰坦（钢铁泰坦 + 炮击机器人）：远程 Boss
+function drawGunnerTitan(e) {
+  const step = Math.sin(e.anim * 3.6) * 6;
+  const hasShield = e.shield > 0;
+  const rec = e.recoil > 0 ? e.recoil * 24 : 0;
+  const firing = e.firing > 0;
+  const t = time;
+  for (const [sx, ph] of [[-22, 1], [6, -1]]) {
+    const k = step * ph * 0.4;
+    eBody(sx, 14, 19, 27 + k, 6, '#5b6472', '#252a33');
+    eBody(sx - 2, 39 + k, 23, 9, 4, '#7a8494', '#333a45');
+  }
+  eBody(-18, 4, 38, 16, 5, '#4d5566', '#22262f');
+  // 躯干
+  g.fillStyle = cachedLG(g, -32, -34, 32, 20, [0, '#8f9cc0', 0.4, '#5a6484', 1, '#2b3044']);
+  rr(g, -32, -34, 64, 54, 11); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.5)';
+  g.lineWidth = 2;
+  rr(g, -32, -34, 64, 54, 11); g.stroke();
+  eRim(-32, -34, 64, 54, 11, 0.24);
+  // 胸口弹药舱
+  g.fillStyle = '#1a1d28';
+  rr(g, -20, -24, 40, 26, 6); g.fill();
+  emissive(g, 'rgba(255,140,80,0.85)', 10, () => {
+    g.fillStyle = '#ff9d6b';
+    for (let i = 0; i < 4; i++) { rr(g, -16, -20 + i * 6, 32, 3.2, 1.4); g.fill(); }
+  });
+  // 双肩重炮（朝左）
+  for (const oy of [-38, -18]) {
+    g.save();
+    g.translate(-30 + rec, oy);
+    eBody(-30, -7, 34, 14, 5, '#a3b4c3', '#404d5c');
+    g.fillStyle = '#2a333f';
+    rr(g, -38, -9, 10, 18, 3); g.fill();
+    if (firing) {
+      emissive(g, 'rgba(255,190,110,0.95)', 15, () => {
+        g.fillStyle = 'rgba(255,225,160,0.92)';
+        g.beginPath(); g.arc(-40, 0, 6 + rec * 0.3, 0, TAU); g.fill();
+      });
+    }
+    g.restore();
+  }
+  // 肩甲
+  for (const sx of [-52, 32]) {
+    eBody(sx, -40, 20, 26, 8, '#adbdd2', '#414f61');
+    g.fillStyle = '#ffc531';
+    rr(g, sx + 2, -36, 16, 4.5, 2); g.fill();
+  }
+  // 头
+  eBody(-15, -56, 30, 24, 7, '#8ba2b8', '#3f4d5c');
+  g.fillStyle = '#080b0f';
+  rr(g, -11, -50, 22, 9, 3); g.fill();
+  emissive(g, 'rgba(255,140,80,0.95)', 12, () => {
+    g.fillStyle = '#ff8c50';
+    rr(g, -8.5, -48.5, 7.5, 6, 2); g.fill();
+    rr(g, 1.5, -48.5, 7.5, 6, 2); g.fill();
+  });
+  // 背部弹药架
+  eBody(26, -58, 12, 26, 3, '#39424f', '#1d2229');
+  g.fillStyle = '#ffc531';
+  for (let i = 0; i < 3; i++) { rr(g, 28, -54 + i * 8, 8, 4, 1.5); g.fill(); }
+  // 护盾
+  if (hasShield) {
+    const sa = 0.42 + Math.sin(t * 4) * 0.12;
+    emissive(g, 'rgba(255,170,110,0.65)', 12, () => {
+      g.strokeStyle = 'rgba(255,200,150,' + sa + ')';
+      g.lineWidth = 3;
+      g.beginPath(); g.ellipse(-4, -12, 58, 54, 0, 0, TAU); g.stroke();
+    });
+    g.fillStyle = 'rgba(255,180,120,0.06)';
+    g.beginPath(); g.ellipse(-4, -12, 58, 54, 0, 0, TAU); g.fill();
+  }
+}
+
 function drawMines() {
   for (const mn of mines) {
     const armed = mn.arm <= 0;
@@ -5583,6 +6666,68 @@ function drawMines() {
     g.fillStyle = armed ? (blink ? '#ff5d5d' : '#7a2c2c') : '#8fa1b8';
     g.beginPath(); g.arc(0, -13, 2.4, 0, TAU); g.fill();
     g.restore();
+    g.restore();
+  }
+}
+
+// 敌人弹药
+function drawEnemyBullets() {
+  g.save();
+  for (const b of ebullets) {
+    const y = cellCy(b.row) - 6;
+    if (b.kind === 'missile') {
+      g.shadowBlur = 12; g.shadowColor = 'rgba(255,140,60,0.9)';
+      g.fillStyle = 'rgba(255,157,46,0.7)';
+      g.beginPath();
+      g.moveTo(b.x + 14, y); g.lineTo(b.x + 32 + rand(0, 6), y + rand(-3, 3)); g.lineTo(b.x + 14, y + 5);
+      g.closePath(); g.fill();
+      g.fillStyle = '#d5dde6';
+      rr(g, b.x - 6, y - 4, 22, 8, 3); g.fill();
+      g.fillStyle = '#ff5d5d';
+      g.beginPath();
+      g.moveTo(b.x - 6, y - 4); g.lineTo(b.x - 16, y); g.lineTo(b.x - 6, y + 4);
+      g.closePath(); g.fill();
+    } else if (b.kind === 'acid') {
+      g.shadowBlur = 10; g.shadowColor = 'rgba(139,224,74,0.9)';
+      g.fillStyle = 'rgba(139,224,74,0.35)';
+      g.beginPath(); g.arc(b.x + 7, y, 8, 0, TAU); g.fill();
+      g.fillStyle = '#a8f05a';
+      g.beginPath(); g.ellipse(b.x, y, 6.5, 5, 0.3, 0, TAU); g.fill();
+      g.fillStyle = 'rgba(220,255,180,0.8)';
+      g.beginPath(); g.arc(b.x - 2, y - 2, 2, 0, TAU); g.fill();
+    } else {
+      g.shadowBlur = 9; g.shadowColor = 'rgba(255,120,80,0.9)';
+      g.fillStyle = 'rgba(255,140,80,0.35)';
+      g.beginPath(); g.arc(b.x + 7, y, 6, 0, TAU); g.fill();
+      g.fillStyle = '#ff9d6b';
+      g.beginPath(); g.arc(b.x, y, 4.2, 0, TAU); g.fill();
+    }
+  }
+  g.restore();
+}
+
+// 回旋锯片
+function drawSaws() {
+  for (const sw of saws) {
+    const y = cellCy(sw.row) + 4;
+    g.save();
+    g.translate(sw.x, y);
+    g.rotate(sw.spin);
+    g.fillStyle = 'rgba(230,237,245,0.25)';
+    g.beginPath(); g.arc(0, 0, 17, 0, TAU); g.fill();
+    g.fillStyle = '#c8d4e0';
+    g.beginPath(); g.arc(0, 0, 11, 0, TAU); g.fill();
+    g.fillStyle = '#eef4fa';
+    for (let i = 0; i < 8; i++) {
+      const a = i * TAU / 8;
+      g.beginPath();
+      g.moveTo(Math.cos(a) * 10, Math.sin(a) * 10);
+      g.lineTo(Math.cos(a + 0.24) * 16, Math.sin(a + 0.24) * 16);
+      g.lineTo(Math.cos(a + 0.48) * 10, Math.sin(a + 0.48) * 10);
+      g.closePath(); g.fill();
+    }
+    g.fillStyle = '#5d7186';
+    g.beginPath(); g.arc(0, 0, 4, 0, TAU); g.fill();
     g.restore();
   }
 }
@@ -5633,7 +6778,19 @@ function drawBeams() {
   for (const b of beams) {
     const alpha = b.t / b.max;
     const y = cellCy(b.row) - 8;
-    if (b.kind === 'frost') {
+    if (b.kind === 'emp') {
+      g.fillStyle = 'rgba(159,196,255,' + (0.26 * alpha) + ')';
+      g.fillRect(b.x0, cellCy(b.row) - CELL_H / 2 + 4, W - b.x0, CELL_H - 8);
+      g.strokeStyle = 'rgba(200,225,255,' + (0.8 * alpha) + ')';
+      g.lineWidth = 2;
+      for (let k = 0; k < 3; k++) {
+        g.beginPath();
+        let px = b.x0;
+        g.moveTo(px, y);
+        while (px < W) { px += 26; g.lineTo(px, y + (k % 2 ? 1 : -1) * rand(4, 12)); }
+        g.stroke();
+      }
+    } else if (b.kind === 'frost') {
       // 整行冰封闪光
       g.fillStyle = 'rgba(159,220,255,' + (0.22 * alpha) + ')';
       g.fillRect(b.x0, cellCy(b.row) - CELL_H / 2 + 4, W - b.x0, CELL_H - 8);
@@ -6012,10 +7169,23 @@ window.__game = {
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) grid[r][c] = null;
     enemies.length = 0; bullets.length = 0; mines.length = 0;
     shells.length = 0; tracers.length = 0; orbs.length = 0;
+    saws.length = 0; ebullets.length = 0; zaps.length = 0; beams.length = 0;
   },
   setEnemyX: (i, x) => { if (enemies[i]) enemies[i].x = x; },
   get mineCount() { return mines.length; },
   get shellCount() { return shells.length; },
+  get sawCount() { return saws.length; },
+  get ebulletCount() { return ebullets.length; },
+  machineInfo: (r, c) => {
+    const m = grid[r][c];
+    if (!m) return null;
+    return {
+      type: m.type, name: machineName(m), hp: Math.round(m.hp), maxHp: m.maxHp,
+      sh: Math.round(m.sh || 0), maxSh: Math.round(m.maxSh || 0),
+      haste: +(m.haste || 0).toFixed(2),
+      mods: (m.modules || []).map(x => x.kind + x.lv),
+    };
+  },
   modulesAt: (r, c) => (grid[r][c] && grid[r][c].modules ? grid[r][c].modules.map(x => x.kind + x.lv) : null),
   collectAll: () => {
     let got = 0;
@@ -6035,6 +7205,8 @@ window.__game = {
       frozen: e.frozenT > 0, slowed: e.slowT > 0,
       burning: e.burnT > 0, poisoned: e.poisonT > 0,
       dashing: e.dashing > 0, jumping: e.jumpT > 0,
+      stunned: e.stunT > 0, cloaked: e.cloakT > 0,
+      firing: e.firing > 0, range: e.range || 0, fly: !!e.fly,
     }));
   },
   get score() { return score; },
