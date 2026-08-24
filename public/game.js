@@ -50,17 +50,123 @@ const CLASSIC_CD = {
   shredder: 12, magnet: 12, tesla: 15, railgun: 15, rocket: 20,
 };
 
-// 合成配方：[材料A, 材料B, 产物]（不分先后顺序）
-const RECIPES = [
-  ['puncher', 'fan', 'frostcannon'],
-  ['turret', 'turret', 'twinturret'],
-  ['generator', 'generator', 'powerplant'],
-  ['turret', 'tesla', 'arcturret'],
-  ['shredder', 'magnet', 'magshredder'],
-  ['barricade', 'fan', 'frostwall'],
+/* ========== 通用杂交系统 ==========
+ * 每台机器由 1~2 个"模块"组成：{kind, lv}，lv 1~3。
+ * 任意两台机器都能杂交：同类模块等级相加（上限 3 级），
+ * 不同模块并存（最多保留 2 个最强模块）。
+ */
+const KIND_ORDER = ['shot', 'laser', 'zap', 'rocket', 'shred', 'magnet', 'melee', 'frost', 'armor', 'energy'];
+// 单模块机器的进阶命名（1/2/3 级）
+const LADDER_NAME = {
+  shot:   ['自动炮台', '双管炮台', '加特林炮台'],
+  energy: ['能量发电机', '聚变电站', '核能核心'],
+  armor:  ['装甲路障', '合金壁垒', '千钧堡垒'],
+  melee:  ['弹簧拳机', '连环拳机', '狂怒拳机'],
+  frost:  ['冷冻风扇', '暴风冰扇', '极寒涡轮'],
+  shred:  ['碎纸机', '工业碎纸机', '湮灭粉碎机'],
+  magnet: ['磁力吊塔', '重力吊塔', '引力发生器'],
+  zap:    ['特斯拉线圈', '高压电塔', '雷暴中枢'],
+  laser:  ['轨道激光炮', '相位激光炮', '歼星激光'],
+  rocket: ['火箭发射井', '双联火箭井', '末日火箭井'],
+};
+// 单模块机器的类型 id（1/2/3 级）
+const LADDER_TYPE = {
+  shot:   ['turret', 'twinturret', 'gatling'],
+  energy: ['generator', 'powerplant', 'fusioncore'],
+  armor:  ['barricade', 'barricade2', 'barricade3'],
+  melee:  ['puncher', 'puncher2', 'puncher3'],
+  frost:  ['fan', 'fan2', 'fan3'],
+  shred:  ['shredder', 'shredder2', 'shredder3'],
+  magnet: ['magnet', 'magnet2', 'magnet3'],
+  zap:    ['tesla', 'tesla2', 'tesla3'],
+  laser:  ['railgun', 'railgun2', 'railgun3'],
+  rocket: ['rocket', 'rocket2', 'rocket3'],
+};
+// 作为副模块时的修饰词（用于自动命名混合机）
+const KIND_ADJ = {
+  shot: '机炮', energy: '充能', armor: '装甲', melee: '重拳', frost: '冰霜',
+  shred: '绞碎', magnet: '磁暴', zap: '雷电', laser: '激光', rocket: '轰爆',
+};
+const KIND_DESC = {
+  shot: '发射能量弹', energy: '产出能量', armor: '高耐久装甲', melee: '近战铁拳（无视护盾）',
+  frost: '冰弹减速敌人', shred: '粉碎靠近的敌人', magnet: '把敌人拖回后方',
+  zap: '闪电链打击多个敌人', laser: '激光贯穿整行', rocket: '火箭轰击整行',
+};
+// 各模块对血量的加成
+const KIND_HP = {
+  shot: 0, energy: 0, armor: 1300, melee: 80, frost: 0,
+  shred: 150, magnet: 20, zap: 50, laser: 0, rocket: -100,
+};
+// 经典组合的专属类型（保持原有名字和造型）
+const PAIR_TYPE = [
+  [['shot', 'zap'], 'arcturret', '电弧机炮'],
+  [['shred', 'magnet'], 'magshredder', '磁力碎纸机'],
+  [['armor', 'frost'], 'frostwall', '寒冰壁垒'],
+  [['melee', 'frost'], 'frostcannon', '冰冻弹簧炮'],
 ];
-function findRecipe(a, b) {
-  return RECIPES.find(r => (r[0] === a && r[1] === b) || (r[0] === b && r[1] === a));
+
+function modulesOfType(type) {
+  for (const kind in LADDER_TYPE) {
+    const i = LADDER_TYPE[kind].indexOf(type);
+    if (i >= 0) return [{ kind, lv: i + 1 }];
+  }
+  const pair = PAIR_TYPE.find(p => p[1] === type);
+  if (pair) return [{ kind: pair[0][0], lv: 1 }, { kind: pair[0][1], lv: 1 }];
+  return null;
+}
+function sortModules(mods) {
+  return mods.slice().sort((a, b) =>
+    b.lv - a.lv || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
+}
+// 杂交：合并两台机器的模块
+function mergeModules(a, b) {
+  const map = {};
+  for (const mod of [...a, ...b]) {
+    map[mod.kind] = Math.min(3, (map[mod.kind] || 0) + mod.lv);
+  }
+  const merged = sortModules(Object.keys(map).map(k => ({ kind: k, lv: map[k] })));
+  return merged.slice(0, 2); // 最多保留 2 个最强模块
+}
+function typeOfModules(mods) {
+  if (mods.length === 1) return LADDER_TYPE[mods[0].kind][mods[0].lv - 1];
+  if (mods[0].lv === 1 && mods[1].lv === 1) {
+    const kinds = [mods[0].kind, mods[1].kind];
+    const pair = PAIR_TYPE.find(p => p[0].every(k => kinds.includes(k)));
+    if (pair) return pair[1];
+  }
+  return 'hybrid';
+}
+function totalLv(mods) { return mods.reduce((s, mod) => s + mod.lv, 0); }
+function nameOfModules(mods) {
+  if (mods.length === 1) return LADDER_NAME[mods[0].kind][mods[0].lv - 1];
+  if (mods[0].lv === 1 && mods[1].lv === 1) {
+    const kinds = [mods[0].kind, mods[1].kind];
+    const pair = PAIR_TYPE.find(p => p[0].every(k => kinds.includes(k)));
+    if (pair) return pair[2];
+  }
+  const name = KIND_ADJ[mods[1].kind] + LADDER_NAME[mods[0].kind][mods[0].lv - 1];
+  const t = totalLv(mods);
+  return t > 2 ? name + ' Lv' + t : name;
+}
+function descOfModules(mods) {
+  return mods.map(mod => KIND_DESC[mod.kind] + (mod.lv > 1 ? '×' + mod.lv : '')).join('，');
+}
+function hpOfModules(mods) {
+  let hp = 300;
+  for (const mod of mods) hp += KIND_HP[mod.kind] * mod.lv;
+  hp += 60 * (totalLv(mods) - 1);
+  return Math.max(hp, 120);
+}
+function machineName(m) {
+  if (m.type === 'box') return '盲盒';
+  return m.modules ? nameOfModules(m.modules) : (MACHINES[m.type] ? MACHINES[m.type].name : m.type);
+}
+function hasKind(m, kind) {
+  return !!(m.modules && m.modules.some(mod => mod.kind === kind));
+}
+function kindLv(m, kind) {
+  const mod = m.modules && m.modules.find(x => x.kind === kind);
+  return mod ? mod.lv : 0;
 }
 
 const ENEMIES = {
@@ -298,12 +404,8 @@ function openBoxOnField(m) {
   history.unshift(type);
   if (history.length > 8) history.pop();
   const { row, col } = m;
-  grid[row][col] = {
-    type, row, col,
-    hp: info.hp, maxHp: info.hp,
-    t: rand(0, 0.6), cd: 0, chew: 0, spin: rand(0, TAU),
-    flash: 0, recoil: 0, pulse: 0, armed: true,
-  };
+  grid[row][col] = null;
+  place(type, row, col);
   // 彩带 + 揭示
   spawnParts(cellCx(col), cellCy(row), '#ffc531', 10, 150, 0.6, 'paper');
   spawnParts(cellCx(col), cellCy(row), '#ff5d5d', 8, 140, 0.6, 'paper');
@@ -354,53 +456,70 @@ function renderTray() {
 }
 
 let revealTimer = null;
-function showReveal(type) {
+// 支持传类型 id（盲盒开出）或机器对象（杂交产物）
+function showReveal(typeOrMachine) {
+  const isMachine = typeof typeOrMachine === 'object';
+  const type = isMachine ? typeOrMachine.type : typeOrMachine;
+  const mods = isMachine ? typeOrMachine.modules : modulesOfType(type);
   const info = MACHINES[type];
+  const rarity = isMachine && (typeOrMachine.modules.length > 1 || totalLv(typeOrMachine.modules) > 1)
+    ? 'fusion'
+    : (info ? info.rarity : 'fusion');
   const ov = $('reveal');
   const card = $('revealCard');
-  card.className = 'r-' + info.rarity;
+  card.className = 'r-' + (rarity === 'fusion' ? 'epic' : rarity);
   const ic = $('revealIcon');
   const rg = ic.getContext('2d');
   rg.setTransform(1, 0, 0, 1, 0, 0);
   rg.clearRect(0, 0, 192, 192);
-  drawMachine(rg, type, 96, 104, 1.9, {});
-  $('revealName').textContent = info.name;
-  $('revealRarity').textContent = '【' + RARITY_NAME[info.rarity] + '】';
-  $('revealRarity').style.color = RARITY_COLOR[info.rarity];
-  $('revealDesc').textContent = info.desc;
+  drawMachine(rg, type, 96, 104, 1.9, isMachine ? typeOrMachine : {});
+  $('revealName').textContent = mods ? nameOfModules(mods) : (info ? info.name : type);
+  $('revealRarity').textContent = '【' + RARITY_NAME[rarity] + '】';
+  $('revealRarity').style.color = RARITY_COLOR[rarity];
+  $('revealDesc').textContent = mods ? descOfModules(mods) : (info ? info.desc : '');
   ov.classList.add('show');
   clearTimeout(revealTimer);
   revealTimer = setTimeout(() => ov.classList.remove('show'), 1000);
 }
 
 /* ========== 部署 ========== */
-function place(type, row, col) {
+function place(type, row, col, modules) {
   if (row < 0 || row >= ROWS || col < 0 || col >= COLS || grid[row][col]) return false;
-  const info = MACHINES[type];
+  const mods = modules || modulesOfType(type);
+  if (!mods) return false;
+  const hp = hpOfModules(mods);
   grid[row][col] = {
     type, row, col,
-    hp: info.hp, maxHp: info.hp,
+    modules: sortModules(mods),
+    hp, maxHp: hp,
     t: rand(0, 0.6), cd: 0, chew: 0, spin: rand(0, TAU),
     flash: 0, recoil: 0, pulse: 0, armed: true,
+    mt: {}, mcd: {}, charge: 0, reload: 0,
   };
   spawnParts(cellCx(col), cellCy(row), '#9fb4c8', 10, 90, 0.4, 'spark');
   sfx('place');
   return true;
 }
-// 执行合成：两台机器融合，产物出现在第二台的位置
-function doFuse(r1, c1, r2, c2, result) {
+// 执行杂交：两台机器融合，产物出现在第二台的位置（任意组合皆可）
+function doFuse(r1, c1, r2, c2) {
+  const a = grid[r1][c1], b = grid[r2][c2];
+  if (!a || !b) return null;
+  const mods = mergeModules(a.modules, b.modules);
+  const type = typeOfModules(mods);
   const x1 = cellCx(c1), y1 = cellCy(r1);
   const x2 = cellCx(c2), y2 = cellCy(r2);
   grid[r1][c1] = null;
   grid[r2][c2] = null;
-  place(result, r2, c2);
+  place(type, r2, c2, mods);
+  const result = grid[r2][c2];
   zaps.push({ pts: [{ x: x1, y: y1 }, { x: x2, y: y2 }], t: 0.35, max: 0.35, color: '#ff9d2e' });
   spawnParts(x1, y1, '#ff9d2e', 12, 140, 0.6, 'spark');
   spawnParts(x2, y2, '#ffc531', 16, 170, 0.7, 'spark');
   spawnParts(x2, y2, '#c77bff', 10, 150, 0.6, 'paper');
-  addFloat(x2, y2 - 52, '合成：' + MACHINES[result].name + '！', '#ff9d2e');
+  addFloat(x2, y2 - 52, '杂交：' + machineName(result) + '！', '#ff9d2e');
   showReveal(result);
   sfx('fuse');
+  return result;
 }
 
 function removeMachine(row, col, silent) {
@@ -553,13 +672,31 @@ function shake(t, amp) { shakeT = t; shakeAmp = amp; }
 
 function enemiesInRow(row) { return enemies.filter(e => e.row === row); }
 
+// 模块参数表：每种模块 1/2/3 级的数值
+const MOD_STAT = {
+  shot:   { interval: [1.15, 0.6, 0.32], dmg: [25, 28, 30] },
+  energy: { interval: [7, 5, 3.5], val: [25, 40, 60] },
+  melee:  { interval: [0.9, 0.6, 0.42], dmg: [45, 55, 68] },
+  frost:  { interval: [1.3, 0.9, 0.6], shellCd: [0, 6.5, 5], freeze: [0, 1.6, 2.2] },
+  shred:  { cd: [9, 6.5, 4.5], dmg: [550, 650, 800] },
+  magnet: { cd: [6.5, 5, 3.5] },
+  zap:    { cd: [2.6, 1.9, 1.3], dmg: [55, 65, 75], targets: [4, 5, 6] },
+  laser:  { cd: [3.8, 2.9, 2.1], dmg: [60, 72, 85] },
+  rocket: { cd: [15, 11, 8] },
+  armor:  {},
+};
+
+function enemyAhead(r, cx) {
+  return enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
+}
+
 function updateMachines(dt) {
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const m = grid[r][c];
       if (!m) continue;
       const cx = cellCx(c);
-      m.spin += dt * (m.type === 'fan' ? 9 : m.type === 'box' ? 10 : 1.2);
+      m.spin += dt * (m.type === 'box' ? 10 : hasKind(m, 'frost') ? 9 : 1.2);
       if (m.flash > 0) m.flash -= dt;
       if (m.recoil > 0) m.recoil -= dt;
       if (m.pulse > 0) m.pulse -= dt;
@@ -572,197 +709,196 @@ function updateMachines(dt) {
           spawnParts(cx + rand(-24, 24), cellCy(r) + rand(-30, 20), '#ffd764', 1, 40, 0.35, 'spark');
         }
         if (m.openT <= 0) openBoxOnField(m);
-      } else if (m.type === 'turret') {
-        m.t += dt;
-        if (m.t >= 1.15) {
-          const target = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
-          if (target) {
-            m.t = 0; m.recoil = 0.12;
-            bullets.push({ kind: 'shot', row: r, x: cx + 34, dmg: 25, speed: 340 });
-            sfx('shoot');
-          }
-        }
-      } else if (m.type === 'twinturret') {
-        m.t += dt;
-        if (m.t >= 0.6) {
-          const target = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
-          if (target) {
-            m.t = 0; m.recoil = 0.12;
+        continue;
+      }
+
+      for (const k in m.mcd) {
+        if (m.mcd[k] > 0) m.mcd[k] -= dt;
+      }
+
+      for (const mod of m.modules) {
+        const S = MOD_STAT[mod.kind];
+        const i = mod.lv - 1;
+        if (mod.kind === 'shot') {
+          m.mt.shot = (m.mt.shot || 0) + dt;
+          if (m.mt.shot >= S.interval[i] && enemyAhead(r, cx)) {
+            m.mt.shot = 0;
+            m.recoil = 0.12;
             m.altBarrel = !m.altBarrel;
-            bullets.push({ kind: 'shot', row: r, x: cx + 34, dmg: 28, speed: 340, dy: m.altBarrel ? -12 : 2 });
-            sfx('shoot');
+            // 模块协同：带雷电→电弧弹跳，带冰霜→冰弹减速
+            const kind = hasKind(m, 'zap') ? 'arc' : hasKind(m, 'frost') ? 'ice' : 'shot';
+            const dy = mod.lv >= 2 ? (m.altBarrel ? -12 : 2) : 0;
+            bullets.push({ kind, row: r, x: cx + 34, dmg: S.dmg[i], speed: 340, dy });
+            sfx(kind === 'arc' ? 'zap' : kind === 'ice' ? 'ice' : 'shoot');
           }
-        }
-      } else if (m.type === 'arcturret') {
-        m.t += dt;
-        if (m.t >= 1.2) {
-          const target = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
-          if (target) {
-            m.t = 0; m.recoil = 0.12;
-            bullets.push({ kind: 'arc', row: r, x: cx + 34, dmg: 25, speed: 340 });
-            sfx('zap');
+        } else if (mod.kind === 'energy') {
+          m.mt.energy = (m.mt.energy || 0) + dt;
+          if (m.mt.energy >= S.interval[i]) {
+            m.mt.energy = 0;
+            m.pulse = 0.5;
+            orbs.push({
+              x: cx + rand(-18, 22), y: cellCy(r) + rand(-8, 16),
+              ty: 0, vy: 0, val: S.val[i], life: 10, falling: false,
+            });
+            sfx('gen');
           }
-        }
-      } else if (m.type === 'frostcannon') {
-        m.t += dt;
-        if (m.t >= 5) {
-          const target = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
-          if (target) {
-            m.t = 0; m.recoil = 0.25;
-            bullets.push({ kind: 'frost', row: r, x: cx + 34, dmg: 60, speed: 300 });
-            sfx('ice');
+        } else if (mod.kind === 'melee') {
+          m.mt.melee = (m.mt.melee || 0) + dt;
+          if (m.mt.melee >= S.interval[i]) {
+            const left = GRID_X + c * CELL_W;
+            const prey = enemies.find(e =>
+              e.row === r && !e.dead &&
+              e.x - e.w / 2 <= left + CELL_W + 26 &&
+              e.x > left - 10
+            );
+            if (prey) {
+              m.mt.melee = 0;
+              m.recoil = 0.25;
+              damageEnemy(prey, S.dmg[i], 'melee');
+              spawnParts(prey.x - 6, rowCy(prey), '#ffd764', 5, 100, 0.3, 'spark');
+              sfx('punch');
+            }
           }
-        }
-      } else if (m.type === 'fan') {
-        m.t += dt;
-        if (m.t >= 1.3) {
-          const target = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
-          if (target) {
-            m.t = 0;
+        } else if (mod.kind === 'frost') {
+          m.mt.frost = (m.mt.frost || 0) + dt;
+          if (m.mt.frost >= S.interval[i] && enemyAhead(r, cx)) {
+            m.mt.frost = 0;
             bullets.push({ kind: 'ice', row: r, x: cx + 30, dmg: 12, speed: 320 });
             sfx('ice');
           }
-        }
-      } else if (m.type === 'generator' || m.type === 'powerplant') {
-        const interval = m.type === 'powerplant' ? 5 : 7;
-        const val = m.type === 'powerplant' ? 40 : 25;
-        m.t += dt;
-        if (m.t >= interval) {
-          m.t = 0; m.pulse = 0.5;
-          orbs.push({
-            x: cx + rand(-18, 22), y: cellCy(r) + rand(-8, 16),
-            ty: 0, vy: 0, val, life: 10, falling: false,
-          });
-          sfx('gen');
-        }
-      } else if (m.type === 'frostwall') {
-        // 寒气光环：靠近的敌人持续减速
-        for (const e of enemies) {
-          if (e.row === r && !e.dead && Math.abs(e.x - cx) < CELL_W * 1.45) {
-            e.slowT = Math.max(e.slowT, 0.6);
-          }
-        }
-        if (Math.random() < dt * 2.5) {
-          spawnParts(cx + rand(-30, 30), cellCy(r) + rand(-30, 20), '#bfe9ff', 1, 25, 0.6, 'smoke');
-        }
-      } else if (m.type === 'magshredder') {
-        if (m.cd <= 0) {
-          const targets = enemiesInRow(r).filter(e =>
-            !e.dead && e.type !== 'crusher' && e.x > cx + 20 && e.x < W + 20
-          );
-          if (targets.length) {
-            const prey = targets.reduce((a, b) => (a.x < b.x ? a : b));
-            m.cd = 11; m.chew = 0.7;
-            zaps.push({
-              pts: [{ x: cx + 10, y: cellCy(r) - 34 }, { x: prey.x, y: rowCy(prey) }],
-              t: 0.3, max: 0.3, color: '#ff9d2e',
-            });
-            spawnParts(prey.x, rowCy(prey), '#ff9d2e', 8, 90, 0.4, 'spark');
-            prey.x = cx + 12;
-            damageEnemy(prey, 550, 'true');
-            spawnParts(cx + 20, cellCy(r), '#e8edf4', 16, 150, 0.7, 'paper');
-            addFloat(cx, cellCy(r) - 50, '隔空咔嚓！', '#ff9d2e');
-            sfx('grab');
-            sfx('shred');
-          }
-        }
-      } else if (m.type === 'puncher') {
-        m.t += dt;
-        if (m.t >= 0.9) {
-          const left = GRID_X + c * CELL_W;
-          const prey = enemies.find(e =>
-            e.row === r && !e.dead &&
-            e.x - e.w / 2 <= left + CELL_W + 26 &&
-            e.x > left - 10
-          );
-          if (prey) {
-            m.t = 0; m.recoil = 0.25;
-            damageEnemy(prey, 45, 'melee');
-            spawnParts(prey.x - 6, rowCy(prey), '#ffd764', 5, 100, 0.3, 'spark');
-            sfx('punch');
-          }
-        }
-      } else if (m.type === 'magnet') {
-        m.t += dt;
-        if (m.t >= 6.5) {
-          const targets = enemiesInRow(r).filter(e =>
-            !e.dead && e.type !== 'crusher' &&
-            e.x > cx - 10 && e.x < cx + 5 * CELL_W
-          );
-          if (targets.length) {
-            const prey = targets.reduce((a, b) => (a.x < b.x ? a : b));
-            m.t = 0; m.flash = 0.3;
-            const oldX = prey.x;
-            prey.x = Math.min(prey.x + 2.2 * CELL_W, W - 12);
-            damageEnemy(prey, 30, 'true');
-            zaps.push({
-              pts: [{ x: cx + 14, y: cellCy(r) - 30 }, { x: oldX, y: rowCy(prey) }],
-              t: 0.25, max: 0.25, color: '#ffca6b',
-            });
-            spawnParts(oldX, rowCy(prey), '#ffca6b', 8, 90, 0.4, 'spark');
-            spawnParts(prey.x, rowCy(prey), '#ffca6b', 8, 90, 0.4, 'spark');
-            addFloat(prey.x, rowCy(prey) - 40, '被拖回！', '#ffca6b');
-            sfx('grab');
-          }
-        }
-      } else if (m.type === 'tesla') {
-        m.t += dt;
-        if (m.t >= 2.6) {
-          const targets = enemiesInRow(r)
-            .filter(e => e.x > cx - 20 && e.x < W + 20)
-            .sort((a, b) => a.x - b.x)
-            .slice(0, 4);
-          if (targets.length) {
-            m.t = 0; m.flash = 0.25;
-            const pts = [{ x: cx, y: cellCy(r) - 26 }];
-            for (const e of targets) {
-              pts.push({ x: e.x, y: rowCy(e) });
-              damageEnemy(e, 55, 'ranged');
+          // 2 级起：定期轰出冻结整行的冰冻炮弹
+          if (mod.lv >= 2) {
+            m.mt.frostShell = (m.mt.frostShell || 0) + dt;
+            if (m.mt.frostShell >= S.shellCd[i] && enemyAhead(r, cx)) {
+              m.mt.frostShell = 0;
+              m.recoil = 0.25;
+              bullets.push({ kind: 'frost', row: r, x: cx + 34, dmg: 60, speed: 300, freeze: S.freeze[i] });
+              sfx('ice');
             }
-            zaps.push({ pts, t: 0.22, max: 0.22 });
-            sfx('zap');
           }
-        }
-      } else if (m.type === 'railgun') {
-        m.t += dt;
-        if (m.t >= 3.8) {
-          const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx);
-          if (targets.length) {
-            m.t = 0; m.flash = 0.3;
-            for (const e of targets) damageEnemy(e, 60, 'ranged');
-            beams.push({ row: r, x0: cx + 26, t: 0.28, max: 0.28 });
-            sfx('laser');
+          // 寒气光环：2 级起、或与装甲组合（寒冰壁垒）
+          if (mod.lv >= 2 || hasKind(m, 'armor')) {
+            for (const e of enemies) {
+              if (e.row === r && !e.dead && Math.abs(e.x - cx) < CELL_W * 1.45) {
+                e.slowT = Math.max(e.slowT, 0.6);
+              }
+            }
+            if (Math.random() < dt * 2.5) {
+              spawnParts(cx + rand(-30, 30), cellCy(r) + rand(-30, 20), '#bfe9ff', 1, 25, 0.6, 'smoke');
+            }
           }
-        }
-      } else if (m.type === 'shredder') {
-        if (m.cd <= 0) {
-          const left = GRID_X + c * CELL_W;
-          const prey = enemies.find(e =>
-            e.row === r && !e.dead &&
-            e.x - e.w / 2 <= left + CELL_W - 24 &&
-            e.x >= left - 8
-          );
-          if (prey) {
-            m.cd = 9; m.chew = 0.7;
-            damageEnemy(prey, 550, 'true');
-            spawnParts(cx + 20, cellCy(r), '#e8edf4', 16, 150, 0.7, 'paper');
-            addFloat(cx, cellCy(r) - 46, '咔嚓！', '#ff9d2e');
-            sfx('shred');
+        } else if (mod.kind === 'shred') {
+          if ((m.mcd.shred || 0) <= 0) {
+            const left = GRID_X + c * CELL_W;
+            // 与磁力组合：隔空把整行最前的敌人拖进纸箱
+            const magRange = hasKind(m, 'magnet');
+            let prey = null;
+            if (magRange) {
+              const targets = enemiesInRow(r).filter(e =>
+                !e.dead && e.type !== 'crusher' && e.x > cx + 20 && e.x < W + 20);
+              if (targets.length) prey = targets.reduce((a, b) => (a.x < b.x ? a : b));
+            } else {
+              prey = enemies.find(e =>
+                e.row === r && !e.dead &&
+                e.x - e.w / 2 <= left + CELL_W - 24 &&
+                e.x >= left - 8);
+            }
+            if (prey) {
+              m.mcd.shred = S.cd[i];
+              m.chew = 0.7;
+              if (magRange) {
+                zaps.push({
+                  pts: [{ x: cx + 10, y: cellCy(r) - 34 }, { x: prey.x, y: rowCy(prey) }],
+                  t: 0.3, max: 0.3, color: '#ff9d2e',
+                });
+                prey.x = cx + 12;
+              }
+              damageEnemy(prey, S.dmg[i], 'true');
+              spawnParts(cx + 20, cellCy(r), '#e8edf4', 16, 150, 0.7, 'paper');
+              addFloat(cx, cellCy(r) - 46, magRange ? '隔空咔嚓！' : '咔嚓！', '#ff9d2e');
+              sfx('shred');
+            }
           }
-        }
-      } else if (m.type === 'rocket') {
-        // 装填完毕后有敌人进入本行即发射，随后重新装填
-        if (m.cd <= 0) {
-          const incoming = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2);
-          if (incoming) {
-            m.cd = 15;
-            bullets.push({ kind: 'rocket', row: r, x: cx + 20, dmg: 900, speed: 430, hit: new Set() });
-            spawnParts(cx, cellCy(r) + 10, '#aab7c4', 14, 90, 0.8, 'smoke');
-            shake(0.25, 4);
-            sfx('boom');
+        } else if (mod.kind === 'magnet') {
+          if ((m.mcd.magnet || 0) <= 0 && !hasKind(m, 'shred')) {
+            const targets = enemiesInRow(r).filter(e =>
+              !e.dead && e.type !== 'crusher' &&
+              e.x > cx - 10 && e.x < cx + 5 * CELL_W
+            );
+            if (targets.length) {
+              const prey = targets.reduce((a, b) => (a.x < b.x ? a : b));
+              m.mcd.magnet = S.cd[i];
+              m.flash = 0.3;
+              const oldX = prey.x;
+              prey.x = Math.min(prey.x + 2.2 * CELL_W, W - 12);
+              damageEnemy(prey, 30, 'true');
+              zaps.push({
+                pts: [{ x: cx + 14, y: cellCy(r) - 30 }, { x: oldX, y: rowCy(prey) }],
+                t: 0.25, max: 0.25, color: '#ffca6b',
+              });
+              spawnParts(oldX, rowCy(prey), '#ffca6b', 8, 90, 0.4, 'spark');
+              spawnParts(prey.x, rowCy(prey), '#ffca6b', 8, 90, 0.4, 'spark');
+              addFloat(prey.x, rowCy(prey) - 40, '被拖回！', '#ffca6b');
+              sfx('grab');
+            }
           }
+        } else if (mod.kind === 'zap') {
+          m.mt.zap = (m.mt.zap || 0) + dt;
+          if (m.mt.zap >= S.cd[i]) {
+            const targets = enemiesInRow(r)
+              .filter(e => e.x > cx - 20 && e.x < W + 20)
+              .sort((a, b) => a.x - b.x)
+              .slice(0, S.targets[i]);
+            if (targets.length) {
+              m.mt.zap = 0;
+              m.flash = 0.25;
+              const pts = [{ x: cx, y: cellCy(r) - 26 }];
+              for (const e of targets) {
+                pts.push({ x: e.x, y: rowCy(e) });
+                damageEnemy(e, S.dmg[i], 'ranged');
+              }
+              zaps.push({ pts, t: 0.22, max: 0.22 });
+              sfx('zap');
+            }
+          }
+        } else if (mod.kind === 'laser') {
+          m.mt.laser = (m.mt.laser || 0) + dt;
+          m.charge = clamp(m.mt.laser / S.cd[i], 0, 1);
+          if (m.mt.laser >= S.cd[i]) {
+            const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx);
+            if (targets.length) {
+              m.mt.laser = 0;
+              m.flash = 0.3;
+              for (const e of targets) damageEnemy(e, S.dmg[i], 'ranged');
+              beams.push({ row: r, x0: cx + 26, t: 0.28, max: 0.28 });
+              sfx('laser');
+            }
+          }
+        } else if (mod.kind === 'rocket') {
+          if ((m.mcd.rocket || 0) <= 0) {
+            if (enemyAhead(r, cx)) {
+              m.mcd.rocket = S.cd[i];
+              bullets.push({ kind: 'rocket', row: r, x: cx + 20, dmg: 900, speed: 430, hit: new Set() });
+              spawnParts(cx, cellCy(r) + 10, '#aab7c4', 14, 90, 0.8, 'smoke');
+              shake(0.25, 4);
+              sfx('boom');
+            }
+          }
+          m.reload = clamp((m.mcd.rocket || 0) / S.cd[i], 0, 1);
         }
       }
+      // 冰冻弹簧炮的招牌技：每 5 秒冻结整行的冰冻炮
+      if (m.type === 'frostcannon') {
+        m.mt.fcShell = (m.mt.fcShell || 0) + dt;
+        if (m.mt.fcShell >= 5 && enemyAhead(r, cx)) {
+          m.mt.fcShell = 0;
+          m.recoil = 0.25;
+          bullets.push({ kind: 'frost', row: r, x: cx + 34, dmg: 60, speed: 300, freeze: 2 });
+          sfx('ice');
+        }
+      }
+      // 供旧绘制代码读取的状态镜像
+      if (hasKind(m, 'shred')) m.cd = Math.max(m.mcd.shred || 0, 0);
     }
   }
 }
@@ -792,10 +928,11 @@ function updateBullets(dt) {
         hitEnemy.slowT = 3;
         spawnParts(b.x, rowCy(hitEnemy), '#9fdcff', 5, 80, 0.35, 'spark');
       } else if (b.kind === 'frost') {
-        // 冰冻炮弹：冻结整行敌人 2 秒
+        // 冰冻炮弹：冻结整行敌人
+        const fdur = b.freeze || 2;
         for (const t of enemies) {
           if (t.row === b.row && !t.dead) {
-            t.frozenT = Math.max(t.frozenT, 2);
+            t.frozenT = Math.max(t.frozenT, fdur);
             spawnParts(t.x, rowCy(t), '#bfe9ff', 4, 60, 0.5, 'spark');
           }
         }
@@ -1244,14 +1381,7 @@ cv.addEventListener('pointerdown', ev => {
     if (sel.first.r === cell.r && sel.first.c === cell.c) { sel.first = null; return; }
     const a = grid[sel.first.r][sel.first.c];
     if (!a) { sel.first = { r: cell.r, c: cell.c }; return; }
-    const rec = findRecipe(a.type, m.type);
-    if (!rec) {
-      addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '这两台无法合成', '#ff5d5d');
-      sfx('error');
-      sel.first = null;
-      return;
-    }
-    doFuse(sel.first.r, sel.first.c, cell.r, cell.c, rec[2]);
+    doFuse(sel.first.r, sel.first.c, cell.r, cell.c);
     sel = null;
     renderTray();
     return;
@@ -1563,39 +1693,162 @@ function drawVignette() {
 }
 
 /* ---- 机器绘制 ---- */
+const EMBLEM_COLOR = {
+  shot: '#ffd764', energy: '#ffc531', armor: '#8fb0cc', melee: '#e04848',
+  frost: '#7fd7ff', shred: '#c8d4e0', magnet: '#ff9d2e', zap: '#c77bff',
+  laser: '#ff8c50', rocket: '#ff5d5d',
+};
+
 function drawMachine(ctx, type, x, y, s, m) {
+  const mods = (m && m.modules) ? m.modules : (modulesOfType(type) || []);
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(s, s);
   // 阴影
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
   ctx.beginPath();
   ctx.ellipse(0, 36, 30, 7, 0, 0, TAU);
   ctx.fill();
-  switch (type) {
-    case 'box': drawGiftBox(ctx, m); break;
-    case 'turret': drawTurret(ctx, m); break;
-    case 'generator': drawGenerator(ctx, m); break;
-    case 'barricade': drawBarricade(ctx, m); break;
-    case 'puncher': drawPuncher(ctx, m); break;
-    case 'shredder': drawShredder(ctx, m); break;
-    case 'fan': drawFan(ctx, m); break;
-    case 'magnet': drawMagnet(ctx, m); break;
-    case 'tesla': drawTesla(ctx, m); break;
-    case 'railgun': drawRailgun(ctx, m); break;
-    case 'rocket': drawRocket(ctx, m); break;
-    case 'frostcannon': drawFrostcannon(ctx, m); break;
-    case 'twinturret': drawTwinturret(ctx, m); break;
-    case 'powerplant': drawPowerplant(ctx, m); break;
-    case 'arcturret': drawArcturret(ctx, m); break;
-    case 'magshredder': drawMagshredder(ctx, m); break;
-    case 'frostwall': drawFrostwall(ctx, m); break;
+  if (type === 'box') {
+    drawGiftBox(ctx, m);
+    ctx.restore();
+    if (m && m.maxHp && m.hp < m.maxHp) {
+      drawBar(ctx, x, y - 52 * s, 44 * s, 5, clamp(m.hp / m.maxHp, 0, 1));
+    }
+    return;
   }
+  const pri = mods[0], sec = mods[1];
+  if (pri) drawLevelDecor(ctx, totalLv(mods));
+  drawChassis(ctx, type, pri, m);
+  if (sec) drawEmblem(ctx, sec);
   ctx.restore();
   // 血条
   if (m && m.maxHp && m.hp < m.maxHp) {
     drawBar(ctx, x, y - 52 * s, 44 * s, 5, clamp(m.hp / m.maxHp, 0, 1));
   }
+}
+
+// 机体造型分发：经典组合有专属造型，其余按主模块+等级
+function drawChassis(ctx, type, pri, m) {
+  switch (type) {
+    case 'arcturret': return drawArcturret(ctx, m);
+    case 'magshredder': return drawMagshredder(ctx, m);
+    case 'frostwall': return drawFrostwall(ctx, m);
+    case 'frostcannon': return drawFrostcannon(ctx, m);
+  }
+  if (!pri) return;
+  switch (pri.kind) {
+    case 'shot': return pri.lv >= 3 ? drawGatling(ctx, m) : pri.lv === 2 ? drawTwinturret(ctx, m) : drawTurret(ctx, m);
+    case 'energy': return pri.lv >= 2 ? drawPowerplant(ctx, m) : drawGenerator(ctx, m);
+    case 'armor': return drawBarricade(ctx, m);
+    case 'melee': return drawPuncher(ctx, m);
+    case 'frost': return drawFan(ctx, m);
+    case 'shred': return drawShredder(ctx, m);
+    case 'magnet': return drawMagnet(ctx, m);
+    case 'zap': return drawTesla(ctx, m);
+    case 'laser': return drawRailgun(ctx, m);
+    case 'rocket': return drawRocket(ctx, m);
+  }
+}
+
+// 等级光环：合成度越高越华丽
+function drawLevelDecor(ctx, tl) {
+  if (tl <= 1) return;
+  const pulse = Math.sin(time * 4) * 0.05;
+  if (tl >= 4) {
+    ctx.fillStyle = 'rgba(199,123,255,' + (0.14 + pulse) + ')';
+    ctx.beginPath(); ctx.ellipse(0, 34, 36, 10, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(199,123,255,' + (0.55 + pulse) + ')';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.ellipse(0, 34, 36, 10, 0, 0, TAU); ctx.stroke();
+  } else if (tl === 3) {
+    ctx.fillStyle = 'rgba(255,157,46,' + (0.12 + pulse) + ')';
+    ctx.beginPath(); ctx.ellipse(0, 34, 34, 9, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,157,46,' + (0.5 + pulse) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 34, 34, 9, 0, 0, TAU); ctx.stroke();
+  } else {
+    ctx.strokeStyle = 'rgba(255,197,49,' + (0.45 + pulse) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 34, 32, 8, 0, 0, TAU); ctx.stroke();
+  }
+}
+
+// 副模块徽章（机体右上角小圆标）
+function drawEmblem(ctx, mod) {
+  const col = EMBLEM_COLOR[mod.kind] || '#8fa1b8';
+  ctx.save();
+  ctx.translate(29, -36);
+  ctx.fillStyle = 'rgba(14,20,28,0.94)';
+  ctx.beginPath(); ctx.arc(0, 0, 11, 0, TAU); ctx.fill();
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, 11, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = col;
+  ctx.fillStyle = col;
+  ctx.lineWidth = 1.8;
+  switch (mod.kind) {
+    case 'shot':
+      ctx.beginPath(); ctx.arc(-2, 0, 3.4, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(1, 0); ctx.lineTo(7, 0); ctx.stroke();
+      break;
+    case 'energy':
+    case 'zap':
+      ctx.beginPath();
+      ctx.moveTo(2, -6); ctx.lineTo(-3, 1); ctx.lineTo(0, 1); ctx.lineTo(-2, 6); ctx.lineTo(3, -1); ctx.lineTo(0, -1);
+      ctx.closePath(); ctx.fill();
+      break;
+    case 'armor':
+      ctx.beginPath();
+      ctx.moveTo(0, -6); ctx.lineTo(5, -3); ctx.lineTo(5, 2); ctx.quadraticCurveTo(5, 6, 0, 7);
+      ctx.quadraticCurveTo(-5, 6, -5, 2); ctx.lineTo(-5, -3); ctx.closePath(); ctx.stroke();
+      break;
+    case 'melee':
+      ctx.beginPath(); ctx.arc(1, 0, 4.2, 0, TAU); ctx.fill();
+      ctx.fillRect(-7, -2, 5, 4);
+      break;
+    case 'frost':
+      for (let i = 0; i < 3; i++) {
+        const a = i * Math.PI / 3;
+        ctx.beginPath();
+        ctx.moveTo(-Math.cos(a) * 6, -Math.sin(a) * 6);
+        ctx.lineTo(Math.cos(a) * 6, Math.sin(a) * 6);
+        ctx.stroke();
+      }
+      break;
+    case 'shred':
+      ctx.beginPath();
+      ctx.moveTo(-6, -2);
+      for (let i = 0; i < 4; i++) {
+        ctx.lineTo(-4.5 + i * 3, 3);
+        ctx.lineTo(-3 + i * 3, -2);
+      }
+      ctx.stroke();
+      break;
+    case 'magnet':
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 1, 4.5, Math.PI, 0); ctx.stroke();
+      ctx.fillRect(-6, 1, 3, 4); ctx.fillRect(3, 1, 3, 4);
+      break;
+    case 'laser':
+      ctx.beginPath(); ctx.moveTo(-6, -2); ctx.lineTo(6, -2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-6, 2); ctx.lineTo(6, 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(6, 0, 2, 0, TAU); ctx.fill();
+      break;
+    case 'rocket':
+      ctx.beginPath();
+      ctx.moveTo(0, -7); ctx.lineTo(4, 3); ctx.lineTo(0, 1); ctx.lineTo(-4, 3);
+      ctx.closePath(); ctx.fill();
+      break;
+  }
+  // 等级点
+  if (mod.lv > 1) {
+    ctx.fillStyle = '#ffc531';
+    for (let i = 0; i < mod.lv; i++) {
+      ctx.beginPath(); ctx.arc(-6 + i * 6, 14, 2, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 // 圆角血条（带底槽和描边）
@@ -1611,6 +1864,61 @@ function drawBar(ctx, cx, by, bw, bh, ratio, color) {
     rr(ctx, cx - bw / 2, by, Math.max(bw * ratio, 2), bh / 2.4, 2);
     ctx.fill();
   }
+}
+
+// 加特林炮台：旋转三管机炮
+function drawGatling(ctx, m) {
+  const rec = (m && m.recoil > 0) ? m.recoil * 22 : 0;
+  const spin = (m && m.spin ? m.spin : 0) * 7;
+  // 重型底座
+  const ped = ctx.createLinearGradient(0, 10, 0, 38);
+  ped.addColorStop(0, '#3d4d61');
+  ped.addColorStop(1, '#25313f');
+  ctx.fillStyle = ped;
+  rr(ctx, -24, 14, 48, 22, 6); ctx.fill();
+  ctx.fillStyle = '#243141';
+  rr(ctx, -16, 4, 32, 16, 5); ctx.fill();
+  // 弹链箱
+  ctx.fillStyle = '#4c5b6d';
+  rr(ctx, -30, -18, 14, 26, 4); ctx.fill();
+  ctx.fillStyle = '#ffc531';
+  for (let i = 0; i < 3; i++) {
+    rr(ctx, -27, -14 + i * 7, 8, 4, 1.5); ctx.fill();
+  }
+  // 炮塔主体
+  const dome = ctx.createRadialGradient(-8, -16, 3, -4, -10, 22);
+  dome.addColorStop(0, '#93a9c0');
+  dome.addColorStop(1, '#5a6c80');
+  ctx.fillStyle = dome;
+  ctx.beginPath();
+  ctx.arc(-4, -10, 18, 0, TAU);
+  ctx.fill();
+  // 旋转三管
+  for (let i = 0; i < 3; i++) {
+    const dy = Math.sin(spin + i * TAU / 3) * 5.5;
+    const front = Math.cos(spin + i * TAU / 3) > 0;
+    ctx.fillStyle = front ? '#6d8095' : '#49596b';
+    rr(ctx, 6 - rec, -14 + dy, 34, 6, 3); ctx.fill();
+  }
+  // 炮管箍环
+  ctx.fillStyle = '#38465699';
+  rr(ctx, 20 - rec, -18, 6, 20, 2); ctx.fill();
+  ctx.fillStyle = '#2f3b49';
+  rr(ctx, 36 - rec, -17, 6, 18, 2); ctx.fill();
+  // 开火焰光
+  if (rec > 0) {
+    ctx.save();
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = 'rgba(255,200,90,0.9)';
+    ctx.fillStyle = 'rgba(255,220,130,0.9)';
+    ctx.beginPath();
+    ctx.arc(46 - rec, -8, 5 + rec * 0.4, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+  // 指示灯
+  ctx.fillStyle = '#ff9d2e';
+  ctx.beginPath(); ctx.arc(-4, -26, 3, 0, TAU); ctx.fill();
 }
 
 function drawGiftBox(ctx, m) {
@@ -1649,24 +1957,34 @@ function drawGiftBox(ctx, m) {
 
 function drawTurret(ctx, m) {
   const rec = (m && m.recoil > 0) ? m.recoil * 30 : 0;
-  // 底座
-  ctx.fillStyle = '#2f3d4e';
+  // 底座（金属渐变）
+  const ped = ctx.createLinearGradient(0, 6, 0, 36);
+  ped.addColorStop(0, '#3b4a5d');
+  ped.addColorStop(1, '#232f3d');
+  ctx.fillStyle = ped;
   rr(ctx, -20, 16, 40, 20, 5); ctx.fill();
   ctx.fillStyle = '#243141';
   rr(ctx, -14, 6, 28, 14, 4); ctx.fill();
-  // 炮管
-  ctx.fillStyle = '#57687c';
+  // 炮管（上亮下暗）
+  const barrel = ctx.createLinearGradient(0, -16, 0, -4);
+  barrel.addColorStop(0, '#6e8296');
+  barrel.addColorStop(1, '#48586a');
+  ctx.fillStyle = barrel;
   rr(ctx, 2 - rec, -16, 36, 12, 4); ctx.fill();
   ctx.fillStyle = '#3c4b5d';
   rr(ctx, 30 - rec, -18, 8, 16, 3); ctx.fill();
-  // 炮塔
-  ctx.fillStyle = '#71859b';
+  // 炮塔（球面高光）
+  const dome = ctx.createRadialGradient(-9, -14, 2, -4, -8, 19);
+  dome.addColorStop(0, '#a3b8cd');
+  dome.addColorStop(0.55, '#71859b');
+  dome.addColorStop(1, '#54677c');
+  ctx.fillStyle = dome;
   ctx.beginPath();
   ctx.arc(-4, -8, 17, 0, TAU);
   ctx.fill();
-  ctx.fillStyle = '#8ba1b8';
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
   ctx.beginPath();
-  ctx.arc(-7, -11, 9, 0, TAU);
+  ctx.ellipse(-9, -14, 6, 4, -0.6, 0, TAU);
   ctx.fill();
   // 指示灯
   ctx.fillStyle = '#ffc531';
@@ -1686,18 +2004,31 @@ function drawGenerator(ctx, m) {
     ctx.fillStyle = 'rgba(255,197,49,' + (0.25 * glow) + ')';
     ctx.beginPath(); ctx.arc(0, 0, 40, 0, TAU); ctx.fill();
   }
-  // 电池外壳
-  ctx.fillStyle = '#2b3a4a';
+  // 电池外壳（圆柱高光）
+  const shell = ctx.createLinearGradient(-20, 0, 20, 0);
+  shell.addColorStop(0, '#243342');
+  shell.addColorStop(0.3, '#3a4d61');
+  shell.addColorStop(0.55, '#2b3a4a');
+  shell.addColorStop(1, '#1f2c39');
+  ctx.fillStyle = shell;
   rr(ctx, -20, -24, 40, 58, 8); ctx.fill();
   ctx.strokeStyle = '#4a5c70';
   ctx.lineWidth = 2;
   rr(ctx, -20, -24, 40, 58, 8); ctx.stroke();
   // 正极头
-  ctx.fillStyle = '#ffc531';
+  const cap = ctx.createLinearGradient(0, -32, 0, -23);
+  cap.addColorStop(0, '#ffe084');
+  cap.addColorStop(1, '#e8a20f');
+  ctx.fillStyle = cap;
   rr(ctx, -8, -32, 16, 9, 3); ctx.fill();
-  // 电量条
-  ctx.fillStyle = '#39506b';
+  // 电量窗（玻璃感）
+  const win = ctx.createLinearGradient(-13, -16, 13, 26);
+  win.addColorStop(0, '#46648a');
+  win.addColorStop(1, '#2e415a');
+  ctx.fillStyle = win;
   rr(ctx, -13, -16, 26, 42, 4); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  rr(ctx, -11, -14, 8, 38, 3); ctx.fill();
   // 闪电标
   ctx.fillStyle = '#ffc531';
   ctx.beginPath();
@@ -1713,11 +2044,17 @@ function drawGenerator(ctx, m) {
 
 function drawBarricade(ctx, m) {
   const dmg = m && m.maxHp ? 1 - m.hp / m.maxHp : 0;
-  // 主体钢板
-  ctx.fillStyle = '#5d7186';
+  // 主体钢板（拉丝金属渐变）
+  const plate = ctx.createLinearGradient(-26, -34, 26, 36);
+  plate.addColorStop(0, '#71879e');
+  plate.addColorStop(0.5, '#5d7186');
+  plate.addColorStop(1, '#4a5c70');
+  ctx.fillStyle = plate;
   rr(ctx, -26, -34, 52, 70, 7); ctx.fill();
   ctx.fillStyle = '#6d8299';
   rr(ctx, -26, -34, 52, 14, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  rr(ctx, -24, -32, 10, 66, 5); ctx.fill();
   // 警戒条
   ctx.save();
   rr(ctx, -26, -34, 52, 12, 6);
@@ -1806,8 +2143,12 @@ function drawShredder(ctx, m) {
   const jy = chew > 0 ? rand(-1.5, 1.5) : 0;
   ctx.save();
   ctx.translate(jx, jy);
-  // 纸箱主体（收集桶）
-  ctx.fillStyle = '#37475a';
+  // 纸箱主体（收集桶，金属渐变）
+  const bin = ctx.createLinearGradient(-22, 0, 22, 0);
+  bin.addColorStop(0, '#425468');
+  bin.addColorStop(0.5, '#37475a');
+  bin.addColorStop(1, '#2c3a4b');
+  ctx.fillStyle = bin;
   rr(ctx, -22, -4, 44, 40, 6); ctx.fill();
   // 透明窗 + 纸条
   ctx.fillStyle = '#22303f';
@@ -1851,12 +2192,19 @@ function drawFan(ctx, m) {
   rr(ctx, -5, 8, 10, 26, 3); ctx.fill();
   rr(ctx, -16, 30, 32, 7, 3); ctx.fill();
   // 外框
+  ctx.save();
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = 'rgba(127,215,255,0.6)';
   ctx.strokeStyle = '#7fd7ff';
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.arc(0, -8, 24, 0, TAU);
   ctx.stroke();
-  ctx.fillStyle = 'rgba(38,66,88,0.85)';
+  ctx.restore();
+  const glass = ctx.createRadialGradient(-7, -15, 2, 0, -8, 24);
+  glass.addColorStop(0, 'rgba(90,140,175,0.9)');
+  glass.addColorStop(1, 'rgba(30,55,76,0.9)');
+  ctx.fillStyle = glass;
   ctx.beginPath();
   ctx.arc(0, -8, 22, 0, TAU);
   ctx.fill();
@@ -1989,7 +2337,7 @@ function drawTesla(ctx, m) {
 }
 
 function drawRailgun(ctx, m) {
-  const charge = m ? clamp((m.t || 0) / 3.8, 0, 1) : 0.6;
+  const charge = m && m.charge !== undefined ? clamp(m.charge, 0, 1) : 0.6;
   const flash = m && m.flash > 0 ? m.flash : 0;
   // 平台
   ctx.fillStyle = '#2f3d4e';
@@ -2025,7 +2373,7 @@ function drawRailgun(ctx, m) {
 
 function drawRocket(ctx, m) {
   const blink = Math.sin((m && m.spin ? m.spin : 0) * 5) > 0;
-  const reload = m && m.cd > 0 ? clamp(m.cd / 15, 0, 1) : 0; // 1=刚发射
+  const reload = m && m.reload ? clamp(m.reload, 0, 1) : 0; // 1=刚发射
   const sink = reload * 30; // 装填时火箭下沉
   // 发射井
   ctx.fillStyle = '#3a4656';
@@ -2853,15 +3201,14 @@ function drawFuseHints() {
   g.strokeStyle = 'rgba(255,197,49,' + pulse + ')';
   g.lineWidth = 3;
   g.strokeRect(fx + 2, fy + 2, CELL_W - 4, CELL_H - 4);
+  // 任意机器都可杂交：其余机器全部亮绿框
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const m = grid[r][c];
       if (!m || m.type === 'box') continue;
       if (r === sel.first.r && c === sel.first.c) continue;
-      if (findRecipe(a.type, m.type)) {
-        g.strokeStyle = 'rgba(88,214,139,' + pulse + ')';
-        g.strokeRect(GRID_X + c * CELL_W + 2, GRID_Y + r * CELL_H + 2, CELL_W - 4, CELL_H - 4);
-      }
+      g.strokeStyle = 'rgba(88,214,139,' + pulse + ')';
+      g.strokeRect(GRID_X + c * CELL_W + 2, GRID_Y + r * CELL_H + 2, CELL_W - 4, CELL_H - 4);
     }
   }
 }
@@ -3008,13 +3355,12 @@ window.__game = {
   machineAt: (r, c) => (grid[r][c] ? grid[r][c].type : null),
   fuse: (r1, c1, r2, c2) => {
     const a = grid[r1][c1], b = grid[r2][c2];
-    if (!a || !b || a === b) return false;
-    const rec = findRecipe(a.type, b.type);
-    if (!rec) return false;
-    doFuse(r1, c1, r2, c2, rec[2]);
-    return true;
+    if (!a || !b || a === b || a.type === 'box' || b.type === 'box') return false;
+    const result = doFuse(r1, c1, r2, c2);
+    return result ? result.type : false;
   },
-  get recipes() { return RECIPES.map(r => r.slice()); },
+  nameAt: (r, c) => (grid[r][c] ? machineName(grid[r][c]) : null),
+  modulesAt: (r, c) => (grid[r][c] && grid[r][c].modules ? grid[r][c].modules.map(x => x.kind + x.lv) : null),
   collectAll: () => {
     let got = 0;
     for (let i = orbs.length - 1; i >= 0; i--) {
