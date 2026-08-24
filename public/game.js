@@ -711,12 +711,13 @@ function updateWaves(dt) {
 
 /* ========== 战斗 ========== */
 // kind: 'ranged' 会先被护盾吸收；'melee' / 'true' 无视护盾
-function damageEnemy(e, d, kind) {
+// noFlash: 持续伤害（灼烧/中毒）每帧都会调用，不能每帧触发受击白闪
+function damageEnemy(e, d, kind, noFlash) {
   if (kind === 'ranged' && e.shield > 0) {
     const absorbed = Math.min(e.shield, d);
     e.shield -= absorbed;
     d -= absorbed;
-    e.flash = 0.12;
+    if (!noFlash) e.flash = 0.12;
     if (e.shield <= 0) {
       spawnParts(e.x - e.w / 2, rowCy(e), '#9fdcff', 12, 140, 0.5, 'gear');
       addFloat(e.x, rowCy(e) - 40, '护盾破碎！', '#4cc2ff');
@@ -725,7 +726,7 @@ function damageEnemy(e, d, kind) {
     if (d <= 0) return;
   }
   e.hp -= d;
-  e.flash = 0.12;
+  if (!noFlash) e.flash = 0.12;
   if (e.hp <= 0 && !e.dead) {
     e.dead = true;
     kills++;
@@ -1023,9 +1024,10 @@ function updateMachines(dt) {
             const targets = enemiesInRange(r, cx, st('range'));
             if (targets.length) {
               m.mt.flame = 0;
-              m.flameT = 0.22;
+              // 火舌持续到下一次伤害判定，视觉上是一条不断的火焰
+              m.flameT = st('interval') + 0.14;
               for (const e of targets) {
-                damageEnemy(e, st('dmg'), 'melee');
+                damageEnemy(e, st('dmg'), 'melee', true);
                 e.burnT = Math.max(e.burnT, 3);
                 e.burnDps = Math.max(e.burnDps, st('burn'));
               }
@@ -1232,12 +1234,12 @@ function updateEnemies(dt) {
     // 持续伤害：灼烧 / 中毒（冻结状态下依然生效）
     if (e.burnT > 0) {
       e.burnT -= dt;
-      damageEnemy(e, e.burnDps * dt, 'true');
+      damageEnemy(e, e.burnDps * dt, 'true', true);
       if (Math.random() < dt * 5) spawnParts(e.x + rand(-10, 10), rowCy(e) - 10, '#ff9d2e', 1, 40, 0.4, 'smoke');
     }
     if (e.poisonT > 0) {
       e.poisonT -= dt;
-      damageEnemy(e, e.poisonDps * dt, 'true');
+      damageEnemy(e, e.poisonDps * dt, 'true', true);
       if (Math.random() < dt * 4) spawnParts(e.x + rand(-10, 10), rowCy(e) - 6, '#8be04a', 1, 30, 0.5, 'smoke');
     }
     if (e.dead) { enemies.splice(i, 1); continue; }
@@ -2052,6 +2054,78 @@ const EMBLEM_POS = [
   [-29, -11], [-29, 14], [0, -50], [16, 40],
 ];
 
+/* ===== 材质与通用绘制助手 ===== */
+// 三档材质：1 钢铁 / 2 合金 / 3 秘金
+const TIERS = [
+  { base: '#6d8296', dark: '#334254', light: '#a9bdd0', trim: '#8fa1b8', seam: 'rgba(255,255,255,0.10)', led: '#ffc531' },
+  { base: '#7fa9cf', dark: '#2b587f', light: '#d3e9fb', trim: '#bfe3ff', seam: 'rgba(127,215,255,0.55)', led: '#7fd7ff' },
+  { base: '#5a5170', dark: '#241f33', light: '#b6a6e6', trim: '#e8c877', seam: 'rgba(232,200,119,0.55)', led: '#ffd764' },
+];
+function pal(lv) { return TIERS[Math.min(Math.max(lv || 1, 1), 3) - 1]; }
+
+// 斜面金属板：上亮下暗 + 描边
+function panel(ctx, x, y, w, h, r, P, noEdge) {
+  const gd = ctx.createLinearGradient(x, y, x, y + h);
+  gd.addColorStop(0, P.light);
+  gd.addColorStop(0.42, P.base);
+  gd.addColorStop(1, P.dark);
+  ctx.fillStyle = gd;
+  rr(ctx, x, y, w, h, r); ctx.fill();
+  if (!noEdge) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 1.4;
+    rr(ctx, x, y, w, h, r); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    rr(ctx, x + 2, y + 1.5, Math.max(w * 0.28, 5), Math.max(h - 4, 3), Math.min(r, 4)); ctx.fill();
+  }
+}
+// 铆钉
+function bolt(ctx, x, y, P, rad) {
+  const R = rad || 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath(); ctx.arc(x, y + 0.6, R, 0, TAU); ctx.fill();
+  ctx.fillStyle = P.light;
+  ctx.beginPath(); ctx.arc(x, y, R * 0.75, 0, TAU); ctx.fill();
+}
+// 发光包装
+function emissive(ctx, color, blur, fn) {
+  ctx.save();
+  ctx.shadowBlur = blur;
+  ctx.shadowColor = color;
+  fn();
+  ctx.restore();
+}
+// 警戒斜纹条
+function hazard(ctx, x, y, w, h, r) {
+  ctx.save();
+  rr(ctx, x, y, w, h, r || 3);
+  ctx.clip();
+  const n = Math.ceil(w / 11) + 3;
+  for (let i = -2; i < n; i++) {
+    ctx.fillStyle = i % 2 === 0 ? '#ffc531' : '#25292f';
+    ctx.save();
+    ctx.translate(x + i * 11, y + h / 2);
+    ctx.rotate(-0.55);
+    ctx.fillRect(-5, -h, 10, h * 2.6);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+// 底盘（多数机器共用）
+function pedestal(ctx, P, w, lv) {
+  const half = (w || 42) / 2;
+  panel(ctx, -half, 16, half * 2, 20, 6, P);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  rr(ctx, -half + 5, 20, half * 2 - 10, 4, 2); ctx.fill();
+  bolt(ctx, -half + 6, 30, P);
+  bolt(ctx, half - 6, 30, P);
+  if (lv >= 2) { hazard(ctx, -half, 32, half * 2, 5, 2); }
+  if (lv >= 3) {
+    ctx.fillStyle = P.trim;
+    rr(ctx, -half - 3, 14, half * 2 + 6, 4, 2); ctx.fill();
+  }
+}
+
 function drawMachine(ctx, type, x, y, s, m) {
   const mods = (m && m.modules) ? m.modules : (modulesOfType(type) || []);
   ctx.save();
@@ -2073,7 +2147,6 @@ function drawMachine(ctx, type, x, y, s, m) {
   const pri = mods[0];
   if (pri) drawLevelDecor(ctx, totalLv(mods));
   drawChassis(ctx, type, pri, m);
-  // 副能力徽章：沿机体右侧排列，最多 4 枚
   // 副能力徽章：环绕机体排布，数量不限（超过 8 个显示 +N）
   const extra = mods.length - 1;
   const shown = Math.min(extra, EMBLEM_POS.length);
@@ -2103,7 +2176,7 @@ function drawMachine(ctx, type, x, y, s, m) {
   }
 }
 
-// 机体造型分发：经典组合有专属造型，其余按主模块+等级
+// 机体造型分发：经典组合有专属造型，其余按主模块 + 等级（1/2/3 各有专属外观）
 function drawChassis(ctx, type, pri, m) {
   switch (type) {
     case 'arcturret': return drawArcturret(ctx, m);
@@ -2112,259 +2185,24 @@ function drawChassis(ctx, type, pri, m) {
     case 'frostcannon': return drawFrostcannon(ctx, m);
   }
   if (!pri) return;
+  const lv = Math.min(pri.lv, 3);
   switch (pri.kind) {
-    case 'shot': return pri.lv >= 3 ? drawGatling(ctx, m) : pri.lv === 2 ? drawTwinturret(ctx, m) : drawTurret(ctx, m);
-    case 'energy': return pri.lv >= 2 ? drawPowerplant(ctx, m) : drawGenerator(ctx, m);
-    case 'armor': return drawBarricade(ctx, m);
-    case 'melee': return drawPuncher(ctx, m);
-    case 'frost': return drawFan(ctx, m);
-    case 'shred': return drawShredder(ctx, m);
-    case 'magnet': return drawMagnet(ctx, m);
-    case 'zap': return drawTesla(ctx, m);
-    case 'laser': return drawRailgun(ctx, m);
-    case 'rocket': return drawRocket(ctx, m);
-    case 'mine': return drawMineLayer(ctx, m, pri.lv);
-    case 'flame': return drawFlamer(ctx, m, pri.lv);
-    case 'poison': return drawPoison(ctx, m, pri.lv);
-    case 'mortar': return drawMortar(ctx, m, pri.lv);
-    case 'sniper': return drawSniper(ctx, m, pri.lv);
-    case 'repair': return drawRepair(ctx, m, pri.lv);
-  }
-}
-
-/* ---- 新机器造型 ---- */
-function drawMineLayer(ctx, m, lv) {
-  const rec = (m && m.recoil > 0) ? m.recoil * 20 : 0;
-  // 履带底盘
-  const base = ctx.createLinearGradient(0, 8, 0, 36);
-  base.addColorStop(0, '#4a5a52');
-  base.addColorStop(1, '#2b352f');
-  ctx.fillStyle = base;
-  rr(ctx, -24, 12, 48, 24, 7); ctx.fill();
-  ctx.fillStyle = '#26302b';
-  for (let i = 0; i < 5; i++) {
-    rr(ctx, -21 + i * 9, 16, 6, 16, 2); ctx.fill();
-  }
-  // 弹仓
-  ctx.fillStyle = '#5c6b60';
-  rr(ctx, -18, -18, 36, 30, 6); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.1)';
-  rr(ctx, -16, -16, 9, 26, 4); ctx.fill();
-  // 顶部堆放的地雷
-  const count = Math.min(3, lv || 1);
-  for (let i = 0; i < count; i++) {
-    ctx.fillStyle = '#7a5a34';
-    ctx.beginPath();
-    ctx.ellipse(-9 + i * 9, -22, 6, 4, 0, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#ff5d5d';
-    ctx.beginPath();
-    ctx.arc(-9 + i * 9, -25, 1.8, 0, TAU);
-    ctx.fill();
-  }
-  // 投放滑道
-  ctx.fillStyle = '#41504a';
-  rr(ctx, 14 + rec, -6, 18, 8, 3); ctx.fill();
-  ctx.fillStyle = '#ffc531';
-  ctx.fillRect(-24, 34, 48, 3);
-}
-
-function drawFlamer(ctx, m, lv) {
-  const fire = m && m.flameT > 0;
-  // 燃料罐
-  const tank = ctx.createLinearGradient(-24, 0, -6, 0);
-  tank.addColorStop(0, '#7a3b2a');
-  tank.addColorStop(1, '#b0522f');
-  ctx.fillStyle = tank;
-  rr(ctx, -26, -18, 20, 44, 9); ctx.fill();
-  ctx.fillStyle = '#ffc531';
-  rr(ctx, -24, -12, 16, 5, 2); ctx.fill();
-  // 底座
-  ctx.fillStyle = '#33414e';
-  rr(ctx, -14, 18, 34, 18, 5); ctx.fill();
-  // 喷嘴
-  ctx.fillStyle = '#5d7186';
-  rr(ctx, -6, -12, 30, 14, 5); ctx.fill();
-  ctx.fillStyle = '#46566a';
-  rr(ctx, 22, -14, 10, 18, 3); ctx.fill();
-  // 常燃火苗
-  ctx.save();
-  ctx.shadowBlur = 10;
-  ctx.shadowColor = 'rgba(255,140,50,0.9)';
-  ctx.fillStyle = '#ffb347';
-  ctx.beginPath();
-  ctx.ellipse(34, -5, 4 + Math.sin(time * 12) * 1.2, 6, 0, 0, TAU);
-  ctx.fill();
-  // 喷射中的火舌
-  if (fire) {
-    const len = 30 + (lv || 1) * 16;
-    const grd = ctx.createLinearGradient(34, 0, 34 + len, 0);
-    grd.addColorStop(0, 'rgba(255,220,120,0.95)');
-    grd.addColorStop(0.5, 'rgba(255,140,40,0.65)');
-    grd.addColorStop(1, 'rgba(255,80,20,0)');
-    ctx.fillStyle = grd;
-    ctx.beginPath();
-    ctx.moveTo(34, -8);
-    ctx.quadraticCurveTo(34 + len * 0.6, -20 - rand(0, 6), 34 + len, -2);
-    ctx.quadraticCurveTo(34 + len * 0.6, 18 + rand(0, 6), 34, 4);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function drawPoison(ctx, m, lv) {
-  const bub = Math.sin(time * 3) * 2;
-  // 底座
-  ctx.fillStyle = '#2f3d33';
-  rr(ctx, -20, 18, 40, 18, 5); ctx.fill();
-  // 药剂罐（玻璃）
-  const glass = ctx.createLinearGradient(-16, -24, 16, 20);
-  glass.addColorStop(0, 'rgba(140,220,110,0.85)');
-  glass.addColorStop(1, 'rgba(60,130,50,0.9)');
-  ctx.fillStyle = glass;
-  rr(ctx, -16, -24, 32, 44, 10); ctx.fill();
-  ctx.strokeStyle = '#8be04a';
-  ctx.lineWidth = 2;
-  rr(ctx, -16, -24, 32, 44, 10); ctx.stroke();
-  // 气泡
-  ctx.fillStyle = 'rgba(220,255,190,0.65)';
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
-    ctx.arc(-8 + i * 8, 6 - ((time * 22 + i * 13) % 26) + bub, 2.2 + i * 0.4, 0, TAU);
-    ctx.fill();
-  }
-  // 喷嘴
-  ctx.fillStyle = '#4c5b51';
-  rr(ctx, 12, -12, 22, 10, 4); ctx.fill();
-  ctx.fillStyle = '#8be04a';
-  ctx.beginPath(); ctx.arc(35, -7, 3.4, 0, TAU); ctx.fill();
-  // 毒标
-  ctx.fillStyle = '#0f1a12';
-  ctx.font = '900 13px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('☠', 0, -4);
-  // 高等级：更多喷口
-  if ((lv || 1) >= 2) {
-    ctx.fillStyle = '#4c5b51';
-    rr(ctx, 12, 2, 18, 8, 3); ctx.fill();
-  }
-}
-
-function drawMortar(ctx, m, lv) {
-  const rec = (m && m.recoil > 0) ? m.recoil * 16 : 0;
-  // 三脚架
-  ctx.strokeStyle = '#4c5b6d';
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(-16, 32); ctx.lineTo(-2, 4);
-  ctx.moveTo(16, 32); ctx.lineTo(2, 4);
-  ctx.stroke();
-  ctx.fillStyle = '#33414e';
-  rr(ctx, -22, 28, 44, 10, 4); ctx.fill();
-  // 炮管（朝斜上方）
-  ctx.save();
-  ctx.translate(0, 4 + rec);
-  ctx.rotate(-0.72);
-  const tube = ctx.createLinearGradient(-9, 0, 9, 0);
-  tube.addColorStop(0, '#7d8f9f');
-  tube.addColorStop(1, '#4a5a68');
-  ctx.fillStyle = tube;
-  rr(ctx, -9, -40, 18, 44, 6); ctx.fill();
-  ctx.fillStyle = '#39485a';
-  rr(ctx, -11, -42, 22, 8, 4); ctx.fill();
-  // 炮口装填的炮弹
-  if ((lv || 1) >= 2) {
-    ctx.fillStyle = '#d0a56a';
-    ctx.beginPath();
-    ctx.ellipse(0, -44, 5, 7, 0, 0, TAU);
-    ctx.fill();
-  }
-  ctx.restore();
-  // 弹药箱
-  ctx.fillStyle = '#5a6b52';
-  rr(ctx, 12, 12, 18, 14, 3); ctx.fill();
-  ctx.fillStyle = '#ffc531';
-  rr(ctx, 15, 16, 12, 3, 1); ctx.fill();
-}
-
-function drawSniper(ctx, m, lv) {
-  const rec = (m && m.recoil > 0) ? m.recoil * 24 : 0;
-  const charged = !m || !m.mcd || (m.mcd.sniper || 0) <= 0.35;
-  // 三脚架 + 底座
-  ctx.fillStyle = '#2a3541';
-  rr(ctx, -20, 20, 40, 16, 5); ctx.fill();
-  ctx.fillStyle = '#3c4b5d';
-  rr(ctx, -12, 6, 24, 16, 4); ctx.fill();
-  // 长枪管
-  const barrel = ctx.createLinearGradient(0, -14, 0, -4);
-  barrel.addColorStop(0, '#8fa3b8');
-  barrel.addColorStop(1, '#4c5b6d');
-  ctx.fillStyle = barrel;
-  rr(ctx, -18 - rec, -12, 58, 9, 4); ctx.fill();
-  // 枪口制退器
-  ctx.fillStyle = '#39485a';
-  rr(ctx, 34 - rec, -15, 10, 15, 3); ctx.fill();
-  // 机匣
-  ctx.fillStyle = '#6d8299';
-  rr(ctx, -20 - rec, -18, 26, 20, 5); ctx.fill();
-  // 瞄准镜
-  ctx.fillStyle = '#2b3644';
-  rr(ctx, -12 - rec, -30, 26, 10, 5); ctx.fill();
-  ctx.save();
-  ctx.shadowBlur = charged ? 10 : 0;
-  ctx.shadowColor = 'rgba(255,224,168,0.9)';
-  ctx.fillStyle = charged ? '#ffe0a8' : '#6b5a3a';
-  ctx.beginPath(); ctx.arc(12 - rec, -25, 3.2, 0, TAU); ctx.fill();
-  ctx.restore();
-  // 高等级：双联枪管
-  if ((lv || 1) >= 2) {
-    ctx.fillStyle = '#5d7186';
-    rr(ctx, -14 - rec, -2, 48, 6, 3); ctx.fill();
-  }
-}
-
-function drawRepair(ctx, m, lv) {
-  const pulse = m && m.pulse > 0 ? m.pulse * 2 : 0;
-  const spin = (m && m.spin ? m.spin : 0) * 1.6;
-  if (pulse > 0) {
-    ctx.fillStyle = 'rgba(88,214,139,' + (0.2 * pulse) + ')';
-    ctx.beginPath(); ctx.arc(0, -2, 44, 0, TAU); ctx.fill();
-  }
-  // 工坊机身
-  const body = ctx.createLinearGradient(0, -22, 0, 30);
-  body.addColorStop(0, '#3f6b52');
-  body.addColorStop(1, '#264636');
-  ctx.fillStyle = body;
-  rr(ctx, -24, -20, 48, 50, 8); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  rr(ctx, -22, -18, 10, 44, 5); ctx.fill();
-  // 旋转扳手臂
-  ctx.save();
-  ctx.translate(0, -4);
-  ctx.rotate(spin);
-  ctx.strokeStyle = '#c8d4e0';
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(-14, 0); ctx.lineTo(14, 0);
-  ctx.stroke();
-  ctx.fillStyle = '#c8d4e0';
-  ctx.beginPath(); ctx.arc(15, 0, 4.5, 0, TAU); ctx.fill();
-  ctx.beginPath(); ctx.arc(-15, 0, 4.5, 0, TAU); ctx.fill();
-  ctx.restore();
-  // 绿十字
-  ctx.save();
-  ctx.shadowBlur = 8 + pulse * 10;
-  ctx.shadowColor = 'rgba(88,214,139,0.9)';
-  ctx.fillStyle = '#8ff2b6';
-  rr(ctx, -4, -30, 8, 22, 2); ctx.fill();
-  rr(ctx, -11, -23, 22, 8, 2); ctx.fill();
-  ctx.restore();
-  // 状态灯
-  ctx.fillStyle = '#58d68b';
-  for (let i = 0; i < Math.min(3, lv || 1); i++) {
-    ctx.beginPath(); ctx.arc(-14 + i * 14, 24, 2.6, 0, TAU); ctx.fill();
+    case 'shot': return lv >= 3 ? drawGatling(ctx, m) : lv === 2 ? drawTwinturret(ctx, m) : drawTurret(ctx, m);
+    case 'energy': return lv >= 3 ? drawFusionCore(ctx, m) : lv === 2 ? drawPowerplant(ctx, m) : drawGenerator(ctx, m);
+    case 'armor': return lv >= 3 ? drawFortress(ctx, m) : lv === 2 ? drawAlloyWall(ctx, m) : drawBarricade(ctx, m);
+    case 'melee': return drawPuncher(ctx, m, lv);
+    case 'frost': return drawFan(ctx, m, lv);
+    case 'shred': return drawShredder(ctx, m, lv);
+    case 'magnet': return drawMagnet(ctx, m, lv);
+    case 'zap': return drawTesla(ctx, m, lv);
+    case 'laser': return drawRailgun(ctx, m, lv);
+    case 'rocket': return drawRocket(ctx, m, lv);
+    case 'mine': return drawMineLayer(ctx, m, lv);
+    case 'flame': return drawFlamer(ctx, m, lv);
+    case 'poison': return drawPoison(ctx, m, lv);
+    case 'mortar': return drawMortar(ctx, m, lv);
+    case 'sniper': return drawSniper(ctx, m, lv);
+    case 'repair': return drawRepair(ctx, m, lv);
   }
 }
 
@@ -2373,7 +2211,6 @@ function drawLevelDecor(ctx, tl) {
   if (tl <= 1) return;
   const pulse = Math.sin(time * 4) * 0.05;
   if (tl >= 7) {
-    // 超阶机体：青白双环
     ctx.fillStyle = 'rgba(127,215,255,' + (0.15 + pulse) + ')';
     ctx.beginPath(); ctx.ellipse(0, 34, 40, 11, 0, 0, TAU); ctx.fill();
     ctx.strokeStyle = 'rgba(200,240,255,' + (0.65 + pulse) + ')';
@@ -2401,7 +2238,7 @@ function drawLevelDecor(ctx, tl) {
   }
 }
 
-// 副模块徽章（沿机体边缘的小圆标）
+// 副模块徽章
 function drawEmblem(ctx, mod, px, py) {
   const col = EMBLEM_COLOR[mod.kind] || '#8fa1b8';
   ctx.save();
@@ -2503,17 +2340,17 @@ function drawEmblem(ctx, mod, px, py) {
       ctx.fillRect(-6, -1.8, 12, 3.6);
       break;
   }
-  // 等级点
   if (mod.lv > 1) {
     ctx.fillStyle = '#ffc531';
-    for (let i = 0; i < mod.lv; i++) {
-      ctx.beginPath(); ctx.arc(-6 + i * 6, 14, 2, 0, TAU); ctx.fill();
+    const dots = Math.min(mod.lv, 5);
+    for (let i = 0; i < dots; i++) {
+      ctx.beginPath(); ctx.arc(-((dots - 1) * 3) + i * 6, 14, 2, 0, TAU); ctx.fill();
     }
   }
   ctx.restore();
 }
 
-// 圆角血条（带底槽和描边）
+// 圆角血条
 function drawBar(ctx, cx, by, bw, bh, ratio, color) {
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   rr(ctx, cx - bw / 2 - 1, by - 1, bw + 2, bh + 2, 3);
@@ -2528,61 +2365,6 @@ function drawBar(ctx, cx, by, bw, bh, ratio, color) {
   }
 }
 
-// 加特林炮台：旋转三管机炮
-function drawGatling(ctx, m) {
-  const rec = (m && m.recoil > 0) ? m.recoil * 22 : 0;
-  const spin = (m && m.spin ? m.spin : 0) * 7;
-  // 重型底座
-  const ped = ctx.createLinearGradient(0, 10, 0, 38);
-  ped.addColorStop(0, '#3d4d61');
-  ped.addColorStop(1, '#25313f');
-  ctx.fillStyle = ped;
-  rr(ctx, -24, 14, 48, 22, 6); ctx.fill();
-  ctx.fillStyle = '#243141';
-  rr(ctx, -16, 4, 32, 16, 5); ctx.fill();
-  // 弹链箱
-  ctx.fillStyle = '#4c5b6d';
-  rr(ctx, -30, -18, 14, 26, 4); ctx.fill();
-  ctx.fillStyle = '#ffc531';
-  for (let i = 0; i < 3; i++) {
-    rr(ctx, -27, -14 + i * 7, 8, 4, 1.5); ctx.fill();
-  }
-  // 炮塔主体
-  const dome = ctx.createRadialGradient(-8, -16, 3, -4, -10, 22);
-  dome.addColorStop(0, '#93a9c0');
-  dome.addColorStop(1, '#5a6c80');
-  ctx.fillStyle = dome;
-  ctx.beginPath();
-  ctx.arc(-4, -10, 18, 0, TAU);
-  ctx.fill();
-  // 旋转三管
-  for (let i = 0; i < 3; i++) {
-    const dy = Math.sin(spin + i * TAU / 3) * 5.5;
-    const front = Math.cos(spin + i * TAU / 3) > 0;
-    ctx.fillStyle = front ? '#6d8095' : '#49596b';
-    rr(ctx, 6 - rec, -14 + dy, 34, 6, 3); ctx.fill();
-  }
-  // 炮管箍环
-  ctx.fillStyle = '#38465699';
-  rr(ctx, 20 - rec, -18, 6, 20, 2); ctx.fill();
-  ctx.fillStyle = '#2f3b49';
-  rr(ctx, 36 - rec, -17, 6, 18, 2); ctx.fill();
-  // 开火焰光
-  if (rec > 0) {
-    ctx.save();
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = 'rgba(255,200,90,0.9)';
-    ctx.fillStyle = 'rgba(255,220,130,0.9)';
-    ctx.beginPath();
-    ctx.arc(46 - rec, -8, 5 + rec * 0.4, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-  }
-  // 指示灯
-  ctx.fillStyle = '#ff9d2e';
-  ctx.beginPath(); ctx.arc(-4, -26, 3, 0, TAU); ctx.fill();
-}
-
 function drawGiftBox(ctx, m) {
   const spin = m && m.spin ? m.spin : 0;
   const progress = m && m.openT !== undefined ? 1 - m.openT / BOX_OPEN_TIME : 0;
@@ -2590,26 +2372,27 @@ function drawGiftBox(ctx, m) {
   ctx.rotate(wob);
   const pop = 1 + progress * 0.12;
   ctx.scale(pop, pop);
-  // 盒身
-  ctx.fillStyle = '#ff9d2e';
+  const bodyG = ctx.createLinearGradient(-24, -12, 24, 28);
+  bodyG.addColorStop(0, '#ffb14d');
+  bodyG.addColorStop(1, '#e2820f');
+  ctx.fillStyle = bodyG;
   rr(ctx, -24, -12, 48, 40, 6); ctx.fill();
-  ctx.fillStyle = '#e2820f';
+  ctx.fillStyle = '#d1760c';
   rr(ctx, -24, 16, 48, 12, 5); ctx.fill();
-  // 竖缎带
   ctx.fillStyle = '#ff5d5d';
   ctx.fillRect(-5, -12, 10, 40);
-  // 盒盖
-  ctx.fillStyle = '#ffc531';
+  const lidG = ctx.createLinearGradient(0, -24, 0, -10);
+  lidG.addColorStop(0, '#ffe08a');
+  lidG.addColorStop(1, '#f0ac1c');
+  ctx.fillStyle = lidG;
   rr(ctx, -28, -24, 56, 14, 5); ctx.fill();
   ctx.fillStyle = '#ff5d5d';
   ctx.fillRect(-5, -24, 10, 14);
-  // 蝴蝶结
   ctx.fillStyle = '#ff5d5d';
   ctx.beginPath(); ctx.ellipse(-9, -29, 7, 5, -0.4, 0, TAU); ctx.fill();
   ctx.beginPath(); ctx.ellipse(9, -29, 7, 5, 0.4, 0, TAU); ctx.fill();
   ctx.fillStyle = '#d94343';
   ctx.beginPath(); ctx.arc(0, -28, 3.5, 0, TAU); ctx.fill();
-  // 问号
   ctx.fillStyle = '#fff7e6';
   ctx.font = '900 20px "PingFang SC","Microsoft YaHei",sans-serif';
   ctx.textAlign = 'center';
@@ -2617,73 +2400,155 @@ function drawGiftBox(ctx, m) {
   ctx.fillText('?', 12, 6);
 }
 
+/* ===== 射击线：自动炮台 → 双管炮台 → 加特林炮台 ===== */
 function drawTurret(ctx, m) {
+  const P = pal(1);
   const rec = (m && m.recoil > 0) ? m.recoil * 30 : 0;
-  // 底座（金属渐变）
-  const ped = ctx.createLinearGradient(0, 6, 0, 36);
-  ped.addColorStop(0, '#3b4a5d');
-  ped.addColorStop(1, '#232f3d');
-  ctx.fillStyle = ped;
-  rr(ctx, -20, 16, 40, 20, 5); ctx.fill();
-  ctx.fillStyle = '#243141';
-  rr(ctx, -14, 6, 28, 14, 4); ctx.fill();
-  // 炮管（上亮下暗）
-  const barrel = ctx.createLinearGradient(0, -16, 0, -4);
-  barrel.addColorStop(0, '#6e8296');
-  barrel.addColorStop(1, '#48586a');
-  ctx.fillStyle = barrel;
-  rr(ctx, 2 - rec, -16, 36, 12, 4); ctx.fill();
-  ctx.fillStyle = '#3c4b5d';
-  rr(ctx, 30 - rec, -18, 8, 16, 3); ctx.fill();
-  // 炮塔（球面高光）
-  const dome = ctx.createRadialGradient(-9, -14, 2, -4, -8, 19);
-  dome.addColorStop(0, '#a3b8cd');
-  dome.addColorStop(0.55, '#71859b');
-  dome.addColorStop(1, '#54677c');
+  pedestal(ctx, P, 40, 1);
+  panel(ctx, -14, 4, 28, 16, 5, P);
+  // 炮管
+  panel(ctx, 2 - rec, -16, 36, 12, 4, P);
+  ctx.fillStyle = P.dark;
+  rr(ctx, 30 - rec, -18, 9, 16, 3); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.beginPath(); ctx.ellipse(38 - rec, -10, 2, 5, 0, 0, TAU); ctx.fill();
+  // 炮塔球
+  const dome = ctx.createRadialGradient(-9, -14, 2, -4, -8, 20);
+  dome.addColorStop(0, '#b7cade');
+  dome.addColorStop(0.5, P.base);
+  dome.addColorStop(1, P.dark);
   ctx.fillStyle = dome;
-  ctx.beginPath();
-  ctx.arc(-4, -8, 17, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.28)';
-  ctx.beginPath();
-  ctx.ellipse(-9, -14, 6, 4, -0.6, 0, TAU);
-  ctx.fill();
-  // 指示灯
-  ctx.fillStyle = '#ffc531';
-  ctx.beginPath();
-  ctx.arc(-4, -22, 3, 0, TAU);
-  ctx.fill();
-  // 铆钉
-  ctx.fillStyle = '#22303f';
-  for (const px of [-14, -6, 2, 10]) {
-    ctx.beginPath(); ctx.arc(px, 26, 1.8, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(-4, -8, 17, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(-4, -8, 17, 0, TAU); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.beginPath(); ctx.ellipse(-10, -15, 6, 4, -0.6, 0, TAU); ctx.fill();
+  bolt(ctx, -14, -2, P, 1.8);
+  bolt(ctx, 4, -2, P, 1.8);
+  emissive(ctx, 'rgba(255,197,49,0.9)', 7, () => {
+    ctx.fillStyle = P.led;
+    ctx.beginPath(); ctx.arc(-4, -22, 3, 0, TAU); ctx.fill();
+  });
+  if (rec > 0) {
+    emissive(ctx, 'rgba(255,210,110,0.95)', 12, () => {
+      ctx.fillStyle = 'rgba(255,225,150,0.9)';
+      ctx.beginPath(); ctx.arc(42 - rec, -10, 4 + rec * 0.3, 0, TAU); ctx.fill();
+    });
   }
 }
 
+function drawTwinturret(ctx, m) {
+  const P = pal(2);
+  const rec = (m && m.recoil > 0) ? m.recoil * 28 : 0;
+  const up = m && m.altBarrel;
+  pedestal(ctx, P, 44, 2);
+  panel(ctx, -15, 2, 30, 18, 5, P);
+  // 双炮管 + 冷却环
+  for (const [oy, r0] of [[-24, up ? rec : 0], [-10, up ? 0 : rec]]) {
+    panel(ctx, 2 - r0, oy, 36, 10, 4, P);
+    ctx.fillStyle = P.dark;
+    rr(ctx, 30 - r0, oy - 2, 9, 14, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    for (let i = 0; i < 3; i++) { rr(ctx, 8 + i * 7 - r0, oy - 1, 2.5, 12, 1); ctx.fill(); }
+  }
+  // 炮塔
+  const dome = ctx.createRadialGradient(-9, -18, 2, -4, -10, 22);
+  dome.addColorStop(0, '#e4f3ff');
+  dome.addColorStop(0.45, P.base);
+  dome.addColorStop(1, P.dark);
+  ctx.fillStyle = dome;
+  ctx.beginPath(); ctx.arc(-4, -10, 18, 0, TAU); ctx.fill();
+  ctx.strokeStyle = P.seam;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(-4, -10, 14, -0.6, 2.2); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.32)';
+  ctx.beginPath(); ctx.ellipse(-11, -17, 6, 4, -0.6, 0, TAU); ctx.fill();
+  emissive(ctx, 'rgba(127,215,255,0.9)', 8, () => {
+    ctx.fillStyle = P.led;
+    ctx.beginPath(); ctx.arc(-10, -26, 2.8, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(-1, -28, 2.8, 0, TAU); ctx.fill();
+  });
+}
+
+function drawGatling(ctx, m) {
+  const P = pal(3);
+  const rec = (m && m.recoil > 0) ? m.recoil * 22 : 0;
+  const spin = (m && m.spin ? m.spin : 0) * 7;
+  pedestal(ctx, P, 48, 3);
+  panel(ctx, -16, 2, 32, 18, 5, P);
+  // 弹链箱
+  panel(ctx, -32, -18, 15, 28, 4, P);
+  ctx.fillStyle = '#ffc531';
+  for (let i = 0; i < 4; i++) { rr(ctx, -29, -14 + i * 6, 9, 3.6, 1.4); ctx.fill(); }
+  ctx.strokeStyle = P.trim;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-17, -6); ctx.lineTo(-8, -6); ctx.stroke();
+  // 旋转三管
+  for (let i = 0; i < 3; i++) {
+    const a = spin + i * TAU / 3;
+    const dy = Math.sin(a) * 6;
+    const front = Math.cos(a) > 0;
+    ctx.fillStyle = front ? P.light : P.dark;
+    rr(ctx, 6 - rec, -14 + dy, 36, 6.5, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    rr(ctx, 34 - rec, -14 + dy, 6, 6.5, 2); ctx.fill();
+  }
+  // 管束箍环
+  ctx.fillStyle = P.trim;
+  rr(ctx, 18 - rec, -20, 6, 24, 3); ctx.fill();
+  rr(ctx, 36 - rec, -19, 5, 22, 2.5); ctx.fill();
+  // 炮塔（暗金）
+  const dome = ctx.createRadialGradient(-10, -18, 2, -4, -10, 22);
+  dome.addColorStop(0, '#cbb8f5');
+  dome.addColorStop(0.45, P.base);
+  dome.addColorStop(1, P.dark);
+  ctx.fillStyle = dome;
+  ctx.beginPath(); ctx.arc(-4, -10, 18, 0, TAU); ctx.fill();
+  ctx.strokeStyle = P.trim;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.arc(-4, -10, 18, 0, TAU); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.28)';
+  ctx.beginPath(); ctx.ellipse(-11, -17, 6, 4, -0.6, 0, TAU); ctx.fill();
+  emissive(ctx, 'rgba(255,157,46,0.95)', 10, () => {
+    ctx.fillStyle = '#ff9d2e';
+    ctx.beginPath(); ctx.arc(-4, -26, 3.2, 0, TAU); ctx.fill();
+  });
+  if (rec > 0) {
+    emissive(ctx, 'rgba(255,200,90,0.95)', 16, () => {
+      ctx.fillStyle = 'rgba(255,230,160,0.95)';
+      ctx.beginPath(); ctx.arc(48 - rec, -10, 6 + rec * 0.4, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(255,180,60,0.6)';
+      ctx.beginPath();
+      ctx.moveTo(42 - rec, -16); ctx.lineTo(58 - rec, -10); ctx.lineTo(42 - rec, -4);
+      ctx.closePath(); ctx.fill();
+    });
+  }
+}
+
+/* ===== 能量线：发电机 → 聚变电站 → 核能核心 ===== */
 function drawGenerator(ctx, m) {
+  const P = pal(1);
   const glow = m && m.pulse > 0 ? m.pulse * 2 : 0;
   if (glow > 0) {
     ctx.fillStyle = 'rgba(255,197,49,' + (0.25 * glow) + ')';
     ctx.beginPath(); ctx.arc(0, 0, 40, 0, TAU); ctx.fill();
   }
-  // 电池外壳（圆柱高光）
   const shell = ctx.createLinearGradient(-20, 0, 20, 0);
   shell.addColorStop(0, '#243342');
-  shell.addColorStop(0.3, '#3a4d61');
-  shell.addColorStop(0.55, '#2b3a4a');
+  shell.addColorStop(0.32, '#41586e');
+  shell.addColorStop(0.58, '#2b3a4a');
   shell.addColorStop(1, '#1f2c39');
   ctx.fillStyle = shell;
   rr(ctx, -20, -24, 40, 58, 8); ctx.fill();
-  ctx.strokeStyle = '#4a5c70';
+  ctx.strokeStyle = '#546a80';
   ctx.lineWidth = 2;
   rr(ctx, -20, -24, 40, 58, 8); ctx.stroke();
-  // 正极头
   const cap = ctx.createLinearGradient(0, -32, 0, -23);
   cap.addColorStop(0, '#ffe084');
   cap.addColorStop(1, '#e8a20f');
   ctx.fillStyle = cap;
   rr(ctx, -8, -32, 16, 9, 3); ctx.fill();
-  // 电量窗（玻璃感）
   const win = ctx.createLinearGradient(-13, -16, 13, 26);
   win.addColorStop(0, '#46648a');
   win.addColorStop(1, '#2e415a');
@@ -2691,249 +2556,556 @@ function drawGenerator(ctx, m) {
   rr(ctx, -13, -16, 26, 42, 4); ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.12)';
   rr(ctx, -11, -14, 8, 38, 3); ctx.fill();
-  // 闪电标
-  ctx.fillStyle = '#ffc531';
-  ctx.beginPath();
-  ctx.moveTo(4, -12);
-  ctx.lineTo(-8, 6);
-  ctx.lineTo(-1, 6);
-  ctx.lineTo(-4, 20);
-  ctx.lineTo(9, 0);
-  ctx.lineTo(2, 0);
-  ctx.closePath();
-  ctx.fill();
+  emissive(ctx, 'rgba(255,197,49,0.8)', 8 + glow * 8, () => {
+    ctx.fillStyle = '#ffc531';
+    ctx.beginPath();
+    ctx.moveTo(4, -12); ctx.lineTo(-8, 6); ctx.lineTo(-1, 6);
+    ctx.lineTo(-4, 20); ctx.lineTo(9, 0); ctx.lineTo(2, 0);
+    ctx.closePath(); ctx.fill();
+  });
+  bolt(ctx, -15, -20, P, 1.7);
+  bolt(ctx, 15, -20, P, 1.7);
 }
 
-function drawBarricade(ctx, m) {
-  const dmg = m && m.maxHp ? 1 - m.hp / m.maxHp : 0;
-  // 主体钢板（拉丝金属渐变）
-  const plate = ctx.createLinearGradient(-26, -34, 26, 36);
-  plate.addColorStop(0, '#71879e');
-  plate.addColorStop(0.5, '#5d7186');
-  plate.addColorStop(1, '#4a5c70');
-  ctx.fillStyle = plate;
-  rr(ctx, -26, -34, 52, 70, 7); ctx.fill();
-  ctx.fillStyle = '#6d8299';
-  rr(ctx, -26, -34, 52, 14, 7); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.1)';
-  rr(ctx, -24, -32, 10, 66, 5); ctx.fill();
-  // 警戒条
-  ctx.save();
-  rr(ctx, -26, -34, 52, 12, 6);
-  ctx.clip();
-  for (let i = -3; i < 5; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#ffc531' : '#2a323c';
-    ctx.save();
-    ctx.translate(i * 14, -28);
-    ctx.rotate(-0.5);
-    ctx.fillRect(-6, -10, 12, 24);
-    ctx.restore();
-  }
-  ctx.restore();
-  // 横梁
-  ctx.fillStyle = '#4c5f73';
-  rr(ctx, -26, -8, 52, 8, 3); ctx.fill();
-  rr(ctx, -26, 14, 52, 8, 3); ctx.fill();
-  // 铆钉
-  ctx.fillStyle = '#33404f';
-  for (const py of [-4, 18]) {
-    for (const px of [-19, 0, 19]) {
-      ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
+function drawPowerplant(ctx, m) {
+  const P = pal(2);
+  const glow = m && m.pulse > 0 ? m.pulse * 2 : 0;
+  ctx.fillStyle = 'rgba(255,197,49,' + (0.12 + 0.25 * glow) + ')';
+  ctx.beginPath(); ctx.arc(0, -2, 42, 0, TAU); ctx.fill();
+  panel(ctx, -24, -26, 48, 60, 9, P);
+  // 双正极
+  ctx.fillStyle = '#ffc531';
+  rr(ctx, -17, -34, 14, 9, 3); ctx.fill();
+  rr(ctx, 3, -34, 14, 9, 3); ctx.fill();
+  // 反应窗
+  const win = ctx.createLinearGradient(-17, -18, 17, 28);
+  win.addColorStop(0, '#31536f');
+  win.addColorStop(1, '#1d3247');
+  ctx.fillStyle = win;
+  rr(ctx, -17, -18, 34, 46, 5); ctx.fill();
+  emissive(ctx, 'rgba(255,197,49,0.85)', 9, () => {
+    ctx.fillStyle = '#ffc531';
+    for (const ox of [-9, 7]) {
+      ctx.beginPath();
+      ctx.moveTo(ox + 3, -12); ctx.lineTo(ox - 5, 4); ctx.lineTo(ox, 4);
+      ctx.lineTo(ox - 2, 18); ctx.lineTo(ox + 6, 0); ctx.lineTo(ox + 1, 0);
+      ctx.closePath(); ctx.fill();
     }
-  }
-  // 裂纹
-  if (dmg > 0.35) {
-    ctx.strokeStyle = 'rgba(20,26,34,0.8)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-10, -30); ctx.lineTo(-2, -12); ctx.lineTo(-12, 2);
-    ctx.stroke();
-  }
-  if (dmg > 0.7) {
-    ctx.strokeStyle = 'rgba(20,26,34,0.9)';
-    ctx.beginPath();
-    ctx.moveTo(16, -26); ctx.lineTo(8, -4); ctx.lineTo(20, 10); ctx.lineTo(10, 28);
-    ctx.stroke();
-  }
+  });
+  // 电子轨道
+  ctx.strokeStyle = 'rgba(255,215,100,0.75)';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.ellipse(0, 2, 30, 11, -0.5, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, 2, 30, 11, 0.5, 0, TAU); ctx.stroke();
+  bolt(ctx, -19, -21, P, 1.8);
+  bolt(ctx, 19, -21, P, 1.8);
 }
 
-function drawPuncher(ctx, m) {
-  // 出拳动画：recoil 从 0.25 递减，拳头先伸出再收回
-  let ext = 0;
-  if (m && m.recoil > 0) {
-    const p = 1 - m.recoil / 0.25;
-    ext = Math.sin(p * Math.PI) * 18;
-  }
-  // 底座
-  ctx.fillStyle = '#2f3d4e';
-  rr(ctx, -20, 18, 40, 18, 5); ctx.fill();
-  ctx.fillStyle = '#3c4b5d';
-  rr(ctx, -16, 2, 24, 20, 5); ctx.fill();
-  // 机身
-  ctx.fillStyle = '#71859b';
-  rr(ctx, -18, -22, 26, 28, 6); ctx.fill();
-  ctx.fillStyle = '#ffc531';
-  ctx.beginPath(); ctx.arc(-6, -14, 3, 0, TAU); ctx.fill();
-  // 弹簧（锯齿线）
-  ctx.strokeStyle = '#8ba1b8';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  const sx = 8, len = 12 + ext;
-  ctx.moveTo(sx, -8);
-  for (let i = 0; i <= 5; i++) {
-    ctx.lineTo(sx + (i + 0.5) * len / 6, -8 + (i % 2 === 0 ? -6 : 6));
-  }
-  ctx.lineTo(sx + len, -8);
-  ctx.stroke();
-  // 拳套
-  ctx.fillStyle = '#e04848';
-  ctx.beginPath();
-  ctx.arc(sx + len + 9, -8, 11, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = '#c23636';
-  rr(ctx, sx + len - 2, -16, 8, 16, 3); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  ctx.beginPath();
-  ctx.arc(sx + len + 12, -12, 3.5, 0, TAU);
-  ctx.fill();
-}
-
-function drawShredder(ctx, m) {
-  const chew = m && m.chew > 0 ? m.chew : 0;
-  const ready = !m || !m.cd || m.cd <= 0;
-  const jx = chew > 0 ? rand(-2, 2) : 0;
-  const jy = chew > 0 ? rand(-1.5, 1.5) : 0;
-  ctx.save();
-  ctx.translate(jx, jy);
-  // 纸箱主体（收集桶，金属渐变）
-  const bin = ctx.createLinearGradient(-22, 0, 22, 0);
-  bin.addColorStop(0, '#425468');
-  bin.addColorStop(0.5, '#37475a');
-  bin.addColorStop(1, '#2c3a4b');
-  ctx.fillStyle = bin;
-  rr(ctx, -22, -4, 44, 40, 6); ctx.fill();
-  // 透明窗 + 纸条
-  ctx.fillStyle = '#22303f';
-  rr(ctx, -15, 2, 30, 28, 4); ctx.fill();
-  ctx.strokeStyle = '#dfe7ef';
-  ctx.lineWidth = 2.4;
-  for (const px of [-9, -3, 3, 9]) {
-    ctx.beginPath();
-    ctx.moveTo(px, 6);
-    ctx.quadraticCurveTo(px + 3, 16, px, 27);
-    ctx.stroke();
-  }
-  // 上方进纸口（嘴）
-  ctx.fillStyle = '#5d7186';
-  rr(ctx, -28, -26 - chew * 8, 56, 24, 6); ctx.fill();
-  ctx.fillStyle = '#141b25';
-  rr(ctx, -22, -17 - chew * 8, 44, 7, 3); ctx.fill();
-  // 牙齿
-  ctx.fillStyle = '#c8d4e0';
-  for (let i = 0; i < 6; i++) {
-    const px = -19 + i * 7.4;
-    ctx.beginPath();
-    ctx.moveTo(px, -17 - chew * 8);
-    ctx.lineTo(px + 3.2, -10.5 - chew * 4);
-    ctx.lineTo(px + 6.4, -17 - chew * 8);
-    ctx.closePath();
-    ctx.fill();
-  }
-  // 状态灯：绿=就绪 红=冷却
-  ctx.fillStyle = ready ? '#58d68b' : '#ff5d5d';
-  ctx.beginPath();
-  ctx.arc(20, -30 - chew * 8, 3.4, 0, TAU);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawFan(ctx, m) {
-  const spin = m && m.spin ? m.spin : 0;
-  // 支架
-  ctx.fillStyle = '#31414f';
-  rr(ctx, -5, 8, 10, 26, 3); ctx.fill();
-  rr(ctx, -16, 30, 32, 7, 3); ctx.fill();
-  // 外框
-  ctx.save();
-  ctx.shadowBlur = 8;
-  ctx.shadowColor = 'rgba(127,215,255,0.6)';
-  ctx.strokeStyle = '#7fd7ff';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(0, -8, 24, 0, TAU);
-  ctx.stroke();
-  ctx.restore();
-  const glass = ctx.createRadialGradient(-7, -15, 2, 0, -8, 24);
-  glass.addColorStop(0, 'rgba(90,140,175,0.9)');
-  glass.addColorStop(1, 'rgba(30,55,76,0.9)');
-  ctx.fillStyle = glass;
-  ctx.beginPath();
-  ctx.arc(0, -8, 22, 0, TAU);
-  ctx.fill();
-  // 扇叶
-  ctx.fillStyle = '#a8e6ff';
+function drawFusionCore(ctx, m) {
+  const P = pal(3);
+  const glow = m && m.pulse > 0 ? m.pulse * 2 : 0;
+  const t = time;
+  ctx.fillStyle = 'rgba(255,197,49,' + (0.14 + 0.28 * glow) + ')';
+  ctx.beginPath(); ctx.arc(0, -2, 48, 0, TAU); ctx.fill();
+  // 底座与支柱
+  pedestal(ctx, P, 46, 3);
+  panel(ctx, -10, -6, 20, 26, 4, P);
+  // 环形磁笼
+  ctx.strokeStyle = P.trim;
+  ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.arc(0, -14, 26, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, -14, 26, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+  ctx.fillStyle = P.dark;
+  rr(ctx, -30, -18, 9, 10, 3); ctx.fill();
+  rr(ctx, 21, -18, 9, 10, 3); ctx.fill();
+  // 核心球
+  const core = ctx.createRadialGradient(0, -16, 2, 0, -14, 18);
+  core.addColorStop(0, '#fffbe8');
+  core.addColorStop(0.4, '#ffd764');
+  core.addColorStop(1, '#e06a12');
+  emissive(ctx, 'rgba(255,190,70,0.95)', 18 + glow * 10, () => {
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(0, -14, 13 + Math.sin(t * 4) * 0.8 + glow * 2, 0, TAU); ctx.fill();
+  });
+  // 旋转轨道
+  ctx.strokeStyle = 'rgba(255,224,150,0.85)';
+  ctx.lineWidth = 2;
   for (let i = 0; i < 3; i++) {
     ctx.save();
-    ctx.translate(0, -8);
-    ctx.rotate(spin + i * TAU / 3);
+    ctx.translate(0, -14);
+    ctx.rotate(t * 1.1 + i * TAU / 3);
+    ctx.beginPath(); ctx.ellipse(0, 0, 22, 7, 0, 0, TAU); ctx.stroke();
+    ctx.fillStyle = '#fff2c4';
+    ctx.beginPath(); ctx.arc(22, 0, 2.6, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ===== 装甲线：装甲路障 → 合金壁垒 → 千钧堡垒 ===== */
+function drawBarricade(ctx, m) {
+  const P = pal(1);
+  const dmg = m && m.maxHp ? 1 - m.hp / m.maxHp : 0;
+  panel(ctx, -26, -34, 52, 70, 7, P);
+  hazard(ctx, -26, -34, 52, 13, 6);
+  ctx.fillStyle = P.dark;
+  rr(ctx, -26, -8, 52, 8, 3); ctx.fill();
+  rr(ctx, -26, 14, 52, 8, 3); ctx.fill();
+  for (const py of [-4, 18]) for (const px of [-19, 0, 19]) bolt(ctx, px, py, P, 2.2);
+  if (dmg > 0.35) {
+    ctx.strokeStyle = 'rgba(15,20,26,0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-10, -30); ctx.lineTo(-2, -12); ctx.lineTo(-12, 2); ctx.stroke();
+  }
+  if (dmg > 0.7) {
+    ctx.strokeStyle = 'rgba(15,20,26,0.9)';
+    ctx.beginPath(); ctx.moveTo(16, -26); ctx.lineTo(8, -4); ctx.lineTo(20, 10); ctx.lineTo(10, 28); ctx.stroke();
+  }
+}
+
+// 合金壁垒：切角合金板 + 发光能量缝 + 六角螺栓
+function drawAlloyWall(ctx, m) {
+  const P = pal(2);
+  const dmg = m && m.maxHp ? 1 - m.hp / m.maxHp : 0;
+  const w = 56, h = 74, x = -w / 2, y = -36, ch = 11; // ch=切角
+  // 切角外形
+  ctx.beginPath();
+  ctx.moveTo(x + ch, y);
+  ctx.lineTo(x + w - ch, y);
+  ctx.lineTo(x + w, y + ch);
+  ctx.lineTo(x + w, y + h - ch);
+  ctx.lineTo(x + w - ch, y + h);
+  ctx.lineTo(x + ch, y + h);
+  ctx.lineTo(x, y + h - ch);
+  ctx.lineTo(x, y + ch);
+  ctx.closePath();
+  const gd = ctx.createLinearGradient(x, y, x + w, y + h);
+  gd.addColorStop(0, '#d3e9fb');
+  gd.addColorStop(0.35, P.base);
+  gd.addColorStop(0.62, '#5d89ae');
+  gd.addColorStop(1, P.dark);
+  ctx.fillStyle = gd;
+  ctx.fill();
+  ctx.strokeStyle = '#1e3d59';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // 竖向合金肋
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(x + ch, y); ctx.lineTo(x + w - ch, y); ctx.lineTo(x + w, y + ch);
+  ctx.lineTo(x + w, y + h - ch); ctx.lineTo(x + w - ch, y + h); ctx.lineTo(x + ch, y + h);
+  ctx.lineTo(x, y + h - ch); ctx.lineTo(x, y + ch); ctx.closePath();
+  ctx.clip();
+  for (const rx of [-15, 1, 15]) {
+    const rg = ctx.createLinearGradient(rx - 6, 0, rx + 6, 0);
+    rg.addColorStop(0, 'rgba(255,255,255,0.22)');
+    rg.addColorStop(0.5, 'rgba(255,255,255,0.05)');
+    rg.addColorStop(1, 'rgba(0,0,0,0.28)');
+    ctx.fillStyle = rg;
+    ctx.fillRect(rx - 6, y, 12, h);
+  }
+  // 能量缝
+  emissive(ctx, 'rgba(127,215,255,0.9)', 8, () => {
+    ctx.strokeStyle = P.seam;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(x + 3, -12); ctx.lineTo(x + w - 3, -12); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + 3, 14); ctx.lineTo(x + w - 3, 14); ctx.stroke();
+  });
+  // 斜向高光扫过
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.beginPath();
+  ctx.moveTo(x - 4, y + h * 0.72); ctx.lineTo(x + w * 0.62, y - 4);
+  ctx.lineTo(x + w * 0.78, y - 4); ctx.lineTo(x + 6, y + h * 0.86);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  // 上下加固梁
+  ctx.fillStyle = '#27506f';
+  rr(ctx, x + 2, y + 2, w - 4, 9, 4); ctx.fill();
+  rr(ctx, x + 2, y + h - 11, w - 4, 9, 4); ctx.fill();
+  ctx.fillStyle = P.trim;
+  for (let i = 0; i < 5; i++) { rr(ctx, x + 6 + i * 10, y + 4.5, 6, 4, 1.6); ctx.fill(); }
+  // 六角螺栓
+  const hexBolt = (bx, by) => {
+    ctx.fillStyle = '#1d3a52';
     ctx.beginPath();
-    ctx.ellipse(0, -11, 5.5, 12, 0, 0, TAU);
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + 0.5;
+      ctx[i ? 'lineTo' : 'moveTo'](bx + Math.cos(a) * 4.4, by + Math.sin(a) * 4.4);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#9fc9e8';
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + 0.5;
+      ctx[i ? 'lineTo' : 'moveTo'](bx + Math.cos(a) * 2.6, by + Math.sin(a) * 2.6);
+    }
+    ctx.closePath(); ctx.fill();
+  };
+  hexBolt(x + 9, y + ch + 6); hexBolt(x + w - 9, y + ch + 6);
+  hexBolt(x + 9, y + h - ch - 6); hexBolt(x + w - 9, y + h - ch - 6);
+  // 中央徽记
+  emissive(ctx, 'rgba(127,215,255,0.8)', 7, () => {
+    ctx.strokeStyle = '#bfe3ff';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -6); ctx.lineTo(8, -1); ctx.lineTo(8, 5);
+    ctx.quadraticCurveTo(8, 11, 0, 14);
+    ctx.quadraticCurveTo(-8, 11, -8, 5);
+    ctx.lineTo(-8, -1); ctx.closePath();
+    ctx.stroke();
+  });
+  if (dmg > 0.4) {
+    ctx.strokeStyle = 'rgba(10,25,38,0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-8, -26); ctx.lineTo(0, -8); ctx.lineTo(-10, 6); ctx.stroke();
+  }
+  if (dmg > 0.75) {
+    ctx.beginPath(); ctx.moveTo(14, -20); ctx.lineTo(6, 0); ctx.lineTo(18, 16); ctx.stroke();
+  }
+}
+
+// 千钧堡垒：城垛 + 侧翼扶壁 + 能量核心 + 护盾波纹
+function drawFortress(ctx, m) {
+  const P = pal(3);
+  const dmg = m && m.maxHp ? 1 - m.hp / m.maxHp : 0;
+  const t = time;
+  // 护盾波纹
+  ctx.strokeStyle = 'rgba(255,215,100,' + (0.22 + Math.sin(t * 3) * 0.07) + ')';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, -2, 38, 44, 0, 0, TAU); ctx.stroke();
+  // 侧翼扶壁
+  for (const sx of [-30, 22]) {
+    panel(ctx, sx, -20, 12, 56, 4, P);
+    ctx.fillStyle = P.trim;
+    rr(ctx, sx - 1, -24, 14, 6, 2); ctx.fill();
+    // 尖刺
+    ctx.fillStyle = P.light;
+    ctx.beginPath();
+    ctx.moveTo(sx + 6, -26); ctx.lineTo(sx + 10, -38); ctx.lineTo(sx + 2, -38);
+    ctx.closePath(); ctx.fill();
+  }
+  // 主墙体
+  const gd = ctx.createLinearGradient(-24, -30, 24, 36);
+  gd.addColorStop(0, '#6e6488');
+  gd.addColorStop(0.45, P.base);
+  gd.addColorStop(1, P.dark);
+  ctx.fillStyle = gd;
+  rr(ctx, -24, -30, 48, 66, 6); ctx.fill();
+  ctx.strokeStyle = '#16121f';
+  ctx.lineWidth = 2;
+  rr(ctx, -24, -30, 48, 66, 6); ctx.stroke();
+  // 城垛
+  for (let i = 0; i < 4; i++) {
+    const bx = -24 + i * 13;
+    ctx.fillStyle = P.base;
+    rr(ctx, bx, -40, 9, 12, 2); ctx.fill();
+    ctx.fillStyle = P.trim;
+    rr(ctx, bx, -41, 9, 3, 1.5); ctx.fill();
+  }
+  // 金色横带
+  ctx.fillStyle = P.trim;
+  rr(ctx, -26, -14, 52, 5, 2.5); ctx.fill();
+  rr(ctx, -26, 20, 52, 5, 2.5); ctx.fill();
+  // 石纹分块
+  ctx.strokeStyle = 'rgba(20,16,30,0.5)';
+  ctx.lineWidth = 1.2;
+  for (const ly of [-2, 8]) {
+    ctx.beginPath(); ctx.moveTo(-22, ly); ctx.lineTo(22, ly); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, -2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-11, -2); ctx.lineTo(-11, 8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(11, -2); ctx.lineTo(11, 8); ctx.stroke();
+  // 能量核心
+  emissive(ctx, 'rgba(255,215,110,0.95)', 14, () => {
+    const core = ctx.createRadialGradient(0, 3, 1, 0, 3, 11);
+    core.addColorStop(0, '#fff6d8');
+    core.addColorStop(1, '#e8a020');
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(0, 3, 8 + Math.sin(t * 4) * 0.8, 0, TAU); ctx.fill();
+  });
+  ctx.strokeStyle = P.trim;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 3, 12, 0, TAU); ctx.stroke();
+  // 铆钉
+  for (const py of [-22, 30]) for (const px of [-17, 0, 17]) bolt(ctx, px, py, P, 2.2);
+  if (dmg > 0.5) {
+    ctx.strokeStyle = 'rgba(12,10,18,0.85)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(-14, -26); ctx.lineTo(-6, -10); ctx.lineTo(-16, 4); ctx.stroke();
+  }
+}
+
+/* ===== 近战线：弹簧拳机 → 连环拳机 → 狂怒拳机 ===== */
+function drawPuncher(ctx, m, lv) {
+  const P = pal(lv);
+  let ext = 0;
+  if (m && m.recoil > 0) ext = Math.sin((1 - m.recoil / 0.25) * Math.PI) * (14 + lv * 4);
+  pedestal(ctx, P, 40, lv);
+  panel(ctx, -16, 2, 24, 20, 5, P);
+  panel(ctx, -18, -24, 26, 30, 6, P);
+  emissive(ctx, 'rgba(255,197,49,0.85)', 7, () => {
+    ctx.fillStyle = P.led;
+    ctx.beginPath(); ctx.arc(-6, -16, 3, 0, TAU); ctx.fill();
+  });
+  const fists = Math.min(lv, 3);
+  const rowY = fists === 1 ? [-8] : fists === 2 ? [-18, 2] : [-24, -4, 14];
+  for (let i = 0; i < fists; i++) {
+    const fy = rowY[i];
+    const off = ext * (i === 0 ? 1 : i === 1 ? 0.82 : 0.66);
+    // 弹簧
+    ctx.strokeStyle = P.light;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    const sx = 8, len = 11 + off;
+    ctx.moveTo(sx, fy);
+    for (let k = 0; k <= 5; k++) ctx.lineTo(sx + (k + 0.5) * len / 6, fy + (k % 2 === 0 ? -5.5 : 5.5));
+    ctx.lineTo(sx + len, fy);
+    ctx.stroke();
+    // 拳套
+    const fx = sx + len + 9;
+    const fg = ctx.createRadialGradient(fx - 3, fy - 4, 1, fx, fy, 12);
+    fg.addColorStop(0, lv >= 3 ? '#ffd2a0' : '#f07a6d');
+    fg.addColorStop(1, lv >= 3 ? '#c23a1c' : '#b93434');
+    ctx.fillStyle = fg;
+    ctx.beginPath(); ctx.arc(fx, fy, 10 - (fists > 2 ? 1.5 : 0), 0, TAU); ctx.fill();
+    ctx.fillStyle = lv >= 3 ? '#8f2a12' : '#932828';
+    rr(ctx, fx - 11, fy - 7, 8, 14, 3); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath(); ctx.arc(fx + 3, fy - 4, 3, 0, TAU); ctx.fill();
+    // 三级：拳头拖尾火花
+    if (lv >= 3 && off > 3) {
+      emissive(ctx, 'rgba(255,150,60,0.9)', 10, () => {
+        ctx.fillStyle = 'rgba(255,180,90,0.75)';
+        ctx.beginPath();
+        ctx.moveTo(sx + 4, fy - 5); ctx.lineTo(sx - 8, fy); ctx.lineTo(sx + 4, fy + 5);
+        ctx.closePath(); ctx.fill();
+      });
+    }
+  }
+}
+
+/* ===== 冰霜线：冷冻风扇 → 暴风冰扇 → 极寒涡轮 ===== */
+function drawFan(ctx, m, lv) {
+  const P = pal(lv);
+  const spin = m && m.spin ? m.spin : 0;
+  const R = lv >= 3 ? 27 : lv === 2 ? 25 : 24;
+  // 支架
+  panel(ctx, -6, 8, 12, 26, 3, P);
+  panel(ctx, -17, 28, 34, 9, 4, P);
+  // 外框
+  emissive(ctx, 'rgba(127,215,255,0.75)', lv >= 3 ? 14 : 8, () => {
+    ctx.strokeStyle = lv >= 3 ? '#e0f4ff' : '#7fd7ff';
+    ctx.lineWidth = lv >= 3 ? 4 : 3;
+    ctx.beginPath(); ctx.arc(0, -8, R, 0, TAU); ctx.stroke();
+  });
+  const glass = ctx.createRadialGradient(-8, -16, 2, 0, -8, R);
+  glass.addColorStop(0, 'rgba(120,175,210,0.9)');
+  glass.addColorStop(1, 'rgba(24,48,70,0.92)');
+  ctx.fillStyle = glass;
+  ctx.beginPath(); ctx.arc(0, -8, R - 2, 0, TAU); ctx.fill();
+  // 扇叶
+  const blades = lv >= 3 ? 6 : lv === 2 ? 4 : 3;
+  ctx.fillStyle = lv >= 3 ? '#dff4ff' : '#a8e6ff';
+  for (let i = 0; i < blades; i++) {
+    ctx.save();
+    ctx.translate(0, -8);
+    ctx.rotate(spin + i * TAU / blades);
+    ctx.beginPath();
+    ctx.ellipse(0, -(R * 0.46), R * 0.22, R * 0.5, 0, 0, TAU);
     ctx.fill();
     ctx.restore();
   }
   // 中心
   ctx.fillStyle = '#e8f7ff';
-  ctx.beginPath();
-  ctx.arc(0, -8, 5, 0, TAU);
-  ctx.fill();
-  // 防护栅格
-  ctx.strokeStyle = 'rgba(127,215,255,0.5)';
+  ctx.beginPath(); ctx.arc(0, -8, lv >= 2 ? 6 : 5, 0, TAU); ctx.fill();
+  // 栅格
+  ctx.strokeStyle = 'rgba(127,215,255,0.45)';
   ctx.lineWidth = 1;
   for (let i = 0; i < 6; i++) {
     const a = i * TAU / 6;
     ctx.beginPath();
     ctx.moveTo(Math.cos(a) * 6, -8 + Math.sin(a) * 6);
-    ctx.lineTo(Math.cos(a) * 23, -8 + Math.sin(a) * 23);
+    ctx.lineTo(Math.cos(a) * (R - 3), -8 + Math.sin(a) * (R - 3));
     ctx.stroke();
+  }
+  // 二级：侧挂冰晶储罐
+  if (lv === 2) {
+    ctx.fillStyle = '#cfeeff';
+    for (const sx of [-26, 26]) {
+      ctx.beginPath();
+      ctx.moveTo(sx, 2); ctx.lineTo(sx + 5, 10); ctx.lineTo(sx, 18); ctx.lineTo(sx - 5, 10);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  // 三级：涡轮环 + 冰晶卫星 + 寒雾
+  if (lv >= 3) {
+    ctx.strokeStyle = 'rgba(200,240,255,0.7)';
+    ctx.lineWidth = 2;
+    ctx.save();
+    ctx.translate(0, -8);
+    ctx.rotate(-spin * 0.4);
+    ctx.beginPath(); ctx.ellipse(0, 0, R + 8, (R + 8) * 0.34, 0, 0, TAU); ctx.stroke();
+    for (let i = 0; i < 3; i++) {
+      const a = i * TAU / 3;
+      const px = Math.cos(a) * (R + 8), py = Math.sin(a) * (R + 8) * 0.34;
+      ctx.fillStyle = '#e8f9ff';
+      ctx.beginPath();
+      ctx.moveTo(px, py - 5); ctx.lineTo(px + 4, py); ctx.lineTo(px, py + 5); ctx.lineTo(px - 4, py);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    ctx.fillStyle = 'rgba(190,235,255,0.14)';
+    ctx.beginPath(); ctx.arc(0, -8, R + 16, 0, TAU); ctx.fill();
   }
 }
 
-function drawMagnet(ctx, m) {
+/* ===== 粉碎线：碎纸机 → 工业碎纸机 → 湮灭粉碎机 ===== */
+function drawShredder(ctx, m, lv) {
+  const P = pal(lv);
+  const chew = m && m.chew > 0 ? m.chew : 0;
+  const ready = !m || !m.cd || m.cd <= 0;
+  const jx = chew > 0 ? rand(-2, 2) : 0;
+  const jy = chew > 0 ? rand(-1.5, 1.5) : 0;
+  const void3 = lv >= 3;
+  ctx.save();
+  ctx.translate(jx, jy);
+  // 收集桶
+  panel(ctx, -23, -4, 46, 40, 6, P);
+  // 观察窗
+  ctx.fillStyle = void3 ? '#180f28' : '#1b2733';
+  rr(ctx, -15, 2, 30, 28, 4); ctx.fill();
+  if (void3) {
+    emissive(ctx, 'rgba(199,123,255,0.85)', 10, () => {
+      ctx.strokeStyle = '#c77bff';
+      ctx.lineWidth = 2.4;
+      for (const px of [-8, 0, 8]) {
+        ctx.beginPath();
+        ctx.moveTo(px, 6);
+        ctx.quadraticCurveTo(px + 4, 16, px, 27);
+        ctx.stroke();
+      }
+    });
+  } else {
+    ctx.strokeStyle = '#dfe7ef';
+    ctx.lineWidth = 2.4;
+    for (const px of [-9, -3, 3, 9]) {
+      ctx.beginPath();
+      ctx.moveTo(px, 6);
+      ctx.quadraticCurveTo(px + 3, 16, px, 27);
+      ctx.stroke();
+    }
+  }
+  // 进料口
+  const mouthW = lv >= 2 ? 60 : 56;
+  panel(ctx, -mouthW / 2, -26 - chew * 8, mouthW, 24, 6, P);
+  ctx.fillStyle = void3 ? '#0d0716' : '#141b25';
+  rr(ctx, -mouthW / 2 + 6, -17 - chew * 8, mouthW - 12, 7, 3); ctx.fill();
+  // 牙齿
+  const teeth = lv >= 3 ? 8 : lv === 2 ? 7 : 6;
+  ctx.fillStyle = void3 ? '#d9b8ff' : '#c8d4e0';
+  for (let i = 0; i < teeth; i++) {
+    const step = (mouthW - 14) / teeth;
+    const px = -mouthW / 2 + 7 + i * step;
+    ctx.beginPath();
+    ctx.moveTo(px, -17 - chew * 8);
+    ctx.lineTo(px + step * 0.45, -10 - chew * 4);
+    ctx.lineTo(px + step * 0.9, -17 - chew * 8);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // 二级：侧置滚轮马达
+  if (lv === 2) {
+    for (const sx of [-30, 22]) {
+      panel(ctx, sx, 4, 9, 20, 3, P);
+      ctx.fillStyle = P.dark;
+      ctx.beginPath(); ctx.arc(sx + 4.5, 14, 3.4, 0, TAU); ctx.fill();
+    }
+  }
+  // 三级：虚空环 + 吸入粒子
+  if (void3) {
+    ctx.strokeStyle = 'rgba(199,123,255,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(0, -22 - chew * 8, 34, 9, 0, 0, TAU);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(216,180,255,0.75)';
+    for (let i = 0; i < 3; i++) {
+      const a = time * 2.2 + i * 2.1;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * 28, -22 - chew * 8 + Math.sin(a) * 7, 2, 0, TAU);
+      ctx.fill();
+    }
+  }
+  // 状态灯
+  emissive(ctx, ready ? 'rgba(88,214,139,0.9)' : 'rgba(255,93,93,0.9)', 7, () => {
+    ctx.fillStyle = ready ? '#58d68b' : '#ff5d5d';
+    ctx.beginPath(); ctx.arc(mouthW / 2 - 8, -30 - chew * 8, 3.4, 0, TAU); ctx.fill();
+  });
+  ctx.restore();
+}
+
+/* ===== 磁力线：磁力吊塔 → 重力吊塔 → 引力发生器 ===== */
+function drawMagnet(ctx, m, lv) {
+  const P = pal(lv);
   const flash = m && m.flash > 0 ? m.flash : 0;
-  // 底座
-  ctx.fillStyle = '#33414e';
-  rr(ctx, -22, 24, 44, 12, 4); ctx.fill();
-  // 塔架
-  ctx.fillStyle = '#4c5b6d';
-  rr(ctx, -20, -30, 9, 56, 3); ctx.fill();
-  ctx.strokeStyle = '#3a4756';
+  if (lv >= 3) {
+    // 引力发生器：悬浮黑洞球 + 双环
+    pedestal(ctx, P, 40, 3);
+    panel(ctx, -9, -8, 18, 26, 4, P);
+    const hover = Math.sin(time * 2) * 3;
+    emissive(ctx, 'rgba(255,157,46,0.9)', 16, () => {
+      const core = ctx.createRadialGradient(0, -24 + hover, 1, 0, -24 + hover, 15);
+      core.addColorStop(0, '#1b1020');
+      core.addColorStop(0.55, '#7a3a12');
+      core.addColorStop(1, '#ff9d2e');
+      ctx.fillStyle = core;
+      ctx.beginPath(); ctx.arc(0, -24 + hover, 13, 0, TAU); ctx.fill();
+    });
+    ctx.strokeStyle = 'rgba(255,190,110,0.85)';
+    ctx.lineWidth = 2.2;
+    for (let i = 0; i < 2; i++) {
+      ctx.save();
+      ctx.translate(0, -24 + hover);
+      ctx.rotate(time * (i ? -0.9 : 1.3) + i);
+      ctx.beginPath(); ctx.ellipse(0, 0, 22 - i * 4, 8 - i * 2, 0, 0, TAU); ctx.stroke();
+      ctx.restore();
+    }
+    if (flash > 0) {
+      ctx.strokeStyle = 'rgba(255,202,107,' + flash * 2.5 + ')';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 4; i++) {
+        const a = rand(0, TAU);
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 14, -24 + hover + Math.sin(a) * 14);
+        ctx.lineTo(Math.cos(a) * 26, -24 + hover + Math.sin(a) * 26);
+        ctx.stroke();
+      }
+    }
+    return;
+  }
+  // 吊塔（1/2 级）
+  panel(ctx, -22, 24, 44, 12, 4, P);
+  panel(ctx, -20, -30, 9, 56, 3, P);
+  ctx.strokeStyle = P.dark;
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-18, 16); ctx.lineTo(-13, 2);
-  ctx.moveTo(-13, 16); ctx.lineTo(-18, 2);
-  ctx.stroke();
-  // 横臂
-  ctx.fillStyle = '#5d7186';
-  rr(ctx, -22, -34, 48, 8, 3); ctx.fill();
-  // 吊索
-  ctx.strokeStyle = '#8ba1b8';
+  ctx.beginPath(); ctx.moveTo(-18, 16); ctx.lineTo(-13, 2); ctx.moveTo(-13, 16); ctx.lineTo(-18, 2); ctx.stroke();
+  panel(ctx, -22, -34, 48, 8, 3, P);
+  ctx.strokeStyle = P.light;
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(18, -26);
-  ctx.lineTo(18, -14);
-  ctx.stroke();
-  // 马蹄形磁铁
-  ctx.strokeStyle = '#e04848';
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.arc(18, -8, 9, Math.PI, 0);
-  ctx.stroke();
-  ctx.fillStyle = '#c8d4e0';
-  ctx.fillRect(6, -8, 7, 8);
-  ctx.fillRect(23, -8, 7, 8);
-  // 吸附电弧
+  ctx.beginPath(); ctx.moveTo(18, -26); ctx.lineTo(18, -14); ctx.stroke();
+  // 磁铁（2 级为双磁铁）
+  const mags = lv === 2 ? [[13, -8], [24, -4]] : [[18, -8]];
+  for (const [mx, my] of mags) {
+    emissive(ctx, 'rgba(224,72,72,0.6)', 6, () => {
+      ctx.strokeStyle = '#e04848';
+      ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.arc(mx, my, 9, Math.PI, 0); ctx.stroke();
+    });
+    ctx.fillStyle = '#dbe6ef';
+    ctx.fillRect(mx - 12, my, 7, 8);
+    ctx.fillRect(mx + 5, my, 7, 8);
+  }
   if (flash > 0) {
-    ctx.strokeStyle = 'rgba(255,202,107,' + (flash * 2.5) + ')';
+    ctx.strokeStyle = 'rgba(255,202,107,' + flash * 2.5 + ')';
     ctx.lineWidth = 2;
     for (let i = 0; i < 3; i++) {
       ctx.beginPath();
@@ -2942,178 +3114,603 @@ function drawMagnet(ctx, m) {
       ctx.stroke();
     }
   }
-  // 指示灯
-  ctx.fillStyle = '#ffc531';
-  ctx.beginPath();
-  ctx.arc(-16, -38, 3, 0, TAU);
-  ctx.fill();
+  emissive(ctx, 'rgba(255,197,49,0.8)', 6, () => {
+    ctx.fillStyle = P.led;
+    ctx.beginPath(); ctx.arc(-16, -38, 3, 0, TAU); ctx.fill();
+  });
 }
 
-function drawTesla(ctx, m) {
+/* ===== 雷电线：特斯拉线圈 → 高压电塔 → 雷暴中枢 ===== */
+function drawTesla(ctx, m, lv) {
+  const P = pal(lv);
   const flash = m && m.flash > 0 ? m.flash * 4 : 0;
-  // 底座
-  ctx.fillStyle = '#33414e';
-  rr(ctx, -18, 20, 36, 16, 4); ctx.fill();
-  // 线圈塔
-  ctx.fillStyle = '#4d3f68';
-  ctx.beginPath();
-  ctx.moveTo(-14, 22);
-  ctx.lineTo(-7, -18);
-  ctx.lineTo(7, -18);
-  ctx.lineTo(14, 22);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = '#8f7ab5';
-  ctx.lineWidth = 2.2;
-  for (let i = 0; i < 5; i++) {
-    const y = 16 - i * 8;
-    const w = 13 - i * 1.4;
+  pedestal(ctx, P, lv >= 3 ? 46 : 38, lv);
+  if (lv >= 3) {
+    // 雷暴中枢
+    ctx.fillStyle = P.dark;
     ctx.beginPath();
-    ctx.moveTo(-w, y);
-    ctx.lineTo(w, y);
-    ctx.stroke();
+    ctx.moveTo(-18, 20); ctx.lineTo(-10, -14); ctx.lineTo(10, -14); ctx.lineTo(18, 20);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = P.trim;
+    ctx.lineWidth = 2.4;
+    for (let i = 0; i < 5; i++) {
+      const yy = 14 - i * 7, ww = 15 - i * 1.2;
+      ctx.beginPath(); ctx.moveTo(-ww, yy); ctx.lineTo(ww, yy); ctx.stroke();
+    }
+    // 环形加速器
+    ctx.strokeStyle = 'rgba(199,123,255,0.8)';
+    ctx.lineWidth = 3;
+    ctx.save();
+    ctx.translate(0, -28);
+    ctx.rotate(time * 0.8);
+    ctx.beginPath(); ctx.ellipse(0, 0, 26, 9, 0, 0, TAU); ctx.stroke();
+    ctx.restore();
+    emissive(ctx, 'rgba(199,123,255,0.95)', 18 + flash * 8, () => {
+      const grd = ctx.createRadialGradient(0, -30, 2, 0, -28, 17);
+      grd.addColorStop(0, '#fbf3ff');
+      grd.addColorStop(1, flash > 0 ? '#d99cff' : '#8d63c9');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(0, -28, 14 + flash * 2, 0, TAU); ctx.fill();
+    });
+    ctx.strokeStyle = 'rgba(220,180,255,0.85)';
+    ctx.lineWidth = 1.8;
+    for (let i = 0; i < 5; i++) {
+      const a = time * 3 + i * 1.3;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 15, -28 + Math.sin(a) * 15);
+      ctx.lineTo(Math.cos(a) * (24 + rand(0, 5)), -28 + Math.sin(a) * (24 + rand(0, 5)));
+      ctx.stroke();
+    }
+    return;
   }
-  // 顶球
-  const grd = ctx.createRadialGradient(0, -26, 2, 0, -26, 13);
-  grd.addColorStop(0, '#f2e8ff');
-  grd.addColorStop(1, flash > 0 ? '#c77bff' : '#7e5bb5');
-  ctx.save();
-  ctx.shadowBlur = 10 + flash * 14;
-  ctx.shadowColor = 'rgba(199,123,255,0.85)';
-  ctx.fillStyle = grd;
+  // 1/2 级线圈塔
+  ctx.fillStyle = lv === 2 ? '#3f5a86' : '#4d3f68';
   ctx.beginPath();
-  ctx.arc(0, -26, 11 + flash * 2, 0, TAU);
-  ctx.fill();
-  ctx.restore();
+  ctx.moveTo(-14, 22); ctx.lineTo(-7, -18); ctx.lineTo(7, -18); ctx.lineTo(14, 22);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = lv === 2 ? '#8fc0e8' : '#8f7ab5';
+  ctx.lineWidth = 2.2;
+  for (let i = 0; i < (lv === 2 ? 7 : 5); i++) {
+    const yy = 16 - i * (lv === 2 ? 6 : 8), ww = 13 - i * (lv === 2 ? 1 : 1.4);
+    ctx.beginPath(); ctx.moveTo(-ww, yy); ctx.lineTo(ww, yy); ctx.stroke();
+  }
+  const spheres = lv === 2 ? [[-9, -28], [9, -28]] : [[0, -26]];
+  for (const [sx, sy] of spheres) {
+    emissive(ctx, lv === 2 ? 'rgba(127,215,255,0.9)' : 'rgba(199,123,255,0.85)', 10 + flash * 14, () => {
+      const grd = ctx.createRadialGradient(sx, sy, 2, sx, sy, 13);
+      grd.addColorStop(0, '#f2e8ff');
+      grd.addColorStop(1, flash > 0 ? (lv === 2 ? '#8fd8ff' : '#c77bff') : (lv === 2 ? '#4f87b5' : '#7e5bb5'));
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.arc(sx, sy, (lv === 2 ? 9 : 11) + flash * 2, 0, TAU); ctx.fill();
+    });
+  }
   if (flash > 0) {
-    ctx.strokeStyle = 'rgba(210,160,255,' + (0.7 * flash) + ')';
+    ctx.strokeStyle = lv === 2 ? 'rgba(150,220,255,0.8)' : 'rgba(210,160,255,0.8)';
     ctx.lineWidth = 2;
     for (let i = 0; i < 4; i++) {
       const a = rand(0, TAU);
+      const s0 = spheres[i % spheres.length];
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 12, -26 + Math.sin(a) * 12);
-      ctx.lineTo(Math.cos(a) * 19, -26 + Math.sin(a) * 19);
+      ctx.moveTo(s0[0] + Math.cos(a) * 11, s0[1] + Math.sin(a) * 11);
+      ctx.lineTo(s0[0] + Math.cos(a) * 19, s0[1] + Math.sin(a) * 19);
       ctx.stroke();
     }
   }
 }
 
-function drawRailgun(ctx, m) {
+/* ===== 激光线：轨道激光炮 → 相位激光炮 → 歼星激光 ===== */
+function drawRailgun(ctx, m, lv) {
+  const P = pal(lv);
   const charge = m && m.charge !== undefined ? clamp(m.charge, 0, 1) : 0.6;
   const flash = m && m.flash > 0 ? m.flash : 0;
-  // 平台
-  ctx.fillStyle = '#2f3d4e';
-  rr(ctx, -22, 18, 44, 18, 5); ctx.fill();
-  ctx.fillStyle = '#3c4b5d';
-  rr(ctx, -18, 8, 30, 14, 4); ctx.fill();
-  // 双轨炮身
-  ctx.fillStyle = '#57687c';
-  rr(ctx, -14, -16, 50, 7, 3); ctx.fill();
-  rr(ctx, -14, -2, 50, 7, 3); ctx.fill();
-  // 能量线圈
-  for (let i = 0; i < 3; i++) {
-    const cxp = -4 + i * 13;
-    ctx.strokeStyle = flash > 0 ? '#ffd0a8' : 'rgba(255,140,80,' + (0.35 + charge * 0.6) + ')';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(cxp, -5.5, 9, -Math.PI * 0.65, Math.PI * 0.65);
-    ctx.stroke();
+  const hot = lv >= 3 ? '#ff6a2e' : lv === 2 ? '#8be0ff' : '#ff8c50';
+  pedestal(ctx, P, lv >= 3 ? 50 : 44, lv);
+  panel(ctx, -18, 6, 32, 16, 4, P);
+  // 双轨
+  const rails = lv >= 3 ? 3 : 2;
+  for (let i = 0; i < rails; i++) {
+    const oy = -18 + i * (lv >= 3 ? 11 : 14);
+    panel(ctx, -14, oy, lv >= 3 ? 58 : 50, 7, 3, P);
   }
-  // 炮口发光
-  ctx.fillStyle = flash > 0 ? '#fff1e0' : 'rgba(255,140,80,' + (0.3 + charge * 0.7) + ')';
-  ctx.beginPath();
-  ctx.arc(38, -5.5, 4 + charge * 2 + flash * 8, 0, TAU);
-  ctx.fill();
-  // 尾部机箱
-  ctx.fillStyle = '#71859b';
-  rr(ctx, -24, -20, 12, 30, 4); ctx.fill();
-  ctx.fillStyle = '#ff8c50';
-  ctx.beginPath();
-  ctx.arc(-18, -24, 3, 0, TAU);
-  ctx.fill();
+  // 能量线圈
+  const coils = lv >= 3 ? 4 : 3;
+  for (let i = 0; i < coils; i++) {
+    const cxp = -4 + i * (lv >= 3 ? 15 : 13);
+    ctx.strokeStyle = flash > 0 ? '#fff0e0' : hot;
+    ctx.globalAlpha = 0.35 + charge * 0.6;
+    ctx.lineWidth = lv >= 3 ? 4 : 3;
+    ctx.beginPath(); ctx.arc(cxp, -5.5, lv >= 3 ? 12 : 9, -Math.PI * 0.68, Math.PI * 0.68); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // 聚焦透镜（2 级起）
+  if (lv >= 2) {
+    ctx.fillStyle = 'rgba(20,30,42,0.9)';
+    ctx.beginPath(); ctx.ellipse(lv >= 3 ? 48 : 42, -5.5, 5, 13, 0, 0, TAU); ctx.fill();
+    emissive(ctx, hot, 12, () => {
+      ctx.fillStyle = hot;
+      ctx.globalAlpha = 0.5 + charge * 0.5;
+      ctx.beginPath(); ctx.ellipse(lv >= 3 ? 48 : 42, -5.5, 3, 10, 0, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }
+  // 炮口辉光
+  emissive(ctx, hot, 12 + flash * 20, () => {
+    ctx.fillStyle = flash > 0 ? '#fff4e6' : hot;
+    ctx.globalAlpha = flash > 0 ? 1 : 0.3 + charge * 0.7;
+    ctx.beginPath(); ctx.arc(lv >= 3 ? 56 : 44, -5.5, 4 + charge * 3 + flash * 9, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+  // 尾部机箱与散热片
+  panel(ctx, -26, -22, 14, 34, 4, P);
+  ctx.fillStyle = P.dark;
+  for (let i = 0; i < 3; i++) { rr(ctx, -30, -16 + i * 9, 5, 6, 2); ctx.fill(); }
+  emissive(ctx, hot, 8, () => {
+    ctx.fillStyle = hot;
+    ctx.beginPath(); ctx.arc(-19, -26, 3, 0, TAU); ctx.fill();
+  });
 }
 
-function drawRocket(ctx, m) {
+/* ===== 火箭线：火箭发射井 → 双联火箭井 → 末日火箭井 ===== */
+function drawRocket(ctx, m, lv) {
+  const P = pal(lv);
   const blink = Math.sin((m && m.spin ? m.spin : 0) * 5) > 0;
-  const reload = m && m.reload ? clamp(m.reload, 0, 1) : 0; // 1=刚发射
-  const sink = reload * 30; // 装填时火箭下沉
-  // 发射井
-  ctx.fillStyle = '#3a4656';
-  rr(ctx, -24, -14, 48, 50, 8); ctx.fill();
-  ctx.fillStyle = '#2b3543';
-  rr(ctx, -18, -10, 36, 40, 6); ctx.fill();
-  // 火箭（装填时缓缓升起）
-  ctx.save();
+  const reload = m && m.reload ? clamp(m.reload, 0, 1) : 0;
+  const sink = reload * 30;
+  const silos = Math.min(lv, 3);
+  panel(ctx, -26, -14, 52, 50, 8, P);
+  const spacing = silos === 1 ? 0 : silos === 2 ? 13 : 15;
+  for (let i = 0; i < silos; i++) {
+    const ox = silos === 1 ? 0 : -spacing * (silos - 1) / 2 + i * spacing;
+    ctx.fillStyle = P.dark;
+    rr(ctx, ox - 9, -10, 18, 40, 5); ctx.fill();
+    // 火箭（装填时下沉）
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ox - 10, -42, 20, 72);
+    ctx.clip();
+    ctx.translate(0, sink);
+    const bw = silos >= 3 ? 5.5 : 7;
+    ctx.fillStyle = '#dde5ee';
+    rr(ctx, ox - bw, -18, bw * 2, 28, 3); ctx.fill();
+    ctx.fillStyle = lv >= 3 ? '#ff9d2e' : '#ff5d5d';
+    ctx.beginPath();
+    ctx.moveTo(ox - bw, -18); ctx.lineTo(ox, -33); ctx.lineTo(ox + bw, -18);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#4cc2ff';
+    ctx.beginPath(); ctx.arc(ox, -8, 2.6, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  // 井口前板
+  panel(ctx, -26, 14, 52, 22, 6, P);
+  // 舱门
+  ctx.fillStyle = P.light;
+  rr(ctx, -28, -22, 20, 10, 3); ctx.fill();
+  rr(ctx, 8, -22, 20, 10, 3); ctx.fill();
+  // 三级：侧挂导弹与目标天线
+  if (lv >= 3) {
+    ctx.fillStyle = P.trim;
+    rr(ctx, -34, -6, 8, 26, 3); ctx.fill();
+    rr(ctx, 26, -6, 8, 26, 3); ctx.fill();
+    ctx.strokeStyle = P.trim;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(20, -22); ctx.lineTo(26, -36); ctx.stroke();
+    emissive(ctx, 'rgba(255,93,93,0.9)', 8, () => {
+      ctx.fillStyle = '#ff5d5d';
+      ctx.beginPath(); ctx.arc(26, -38, 2.8, 0, TAU); ctx.fill();
+    });
+  }
+  emissive(ctx, reload > 0 ? 'rgba(255,93,93,0.8)' : 'rgba(255,197,49,0.8)', 7, () => {
+    ctx.fillStyle = reload > 0 ? '#ff5d5d' : (blink ? '#ffc531' : '#6b5514');
+    ctx.beginPath(); ctx.arc(20, -8, 3, 0, TAU); ctx.fill();
+  });
+  hazard(ctx, -26, 30, 52, 5, 2);
+}
+
+/* ===== 地雷线 ===== */
+function drawMineLayer(ctx, m, lv) {
+  const P = pal(lv);
+  const rec = (m && m.recoil > 0) ? m.recoil * 20 : 0;
+  // 履带
+  ctx.fillStyle = lv >= 3 ? '#2b2438' : '#2b352f';
+  rr(ctx, -25, 12, 50, 24, 8); ctx.fill();
+  ctx.fillStyle = lv >= 3 ? '#4a4160' : '#3d4a42';
+  for (let i = 0; i < 6; i++) { rr(ctx, -22 + i * 8, 15, 5, 18, 2); ctx.fill(); }
+  ctx.fillStyle = P.dark;
+  ctx.beginPath(); ctx.arc(-17, 24, 6, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(17, 24, 6, 0, TAU); ctx.fill();
+  // 弹仓
+  panel(ctx, -19, -20, 38, 32, 6, P);
+  // 顶部地雷架
+  const count = Math.min(lv + 1, 4);
+  for (let i = 0; i < count; i++) {
+    const mx = -((count - 1) * 9) / 2 + i * 9;
+    ctx.fillStyle = lv >= 3 ? '#6b4a8a' : '#7a5a34';
+    ctx.beginPath(); ctx.ellipse(mx, -24, 6, 4, 0, 0, TAU); ctx.fill();
+    emissive(ctx, 'rgba(255,93,93,0.8)', 5, () => {
+      ctx.fillStyle = '#ff5d5d';
+      ctx.beginPath(); ctx.arc(mx, -27, 1.8, 0, TAU); ctx.fill();
+    });
+  }
+  // 投放滑道
+  panel(ctx, 14 + rec, -6, 20, 9, 3, P);
+  ctx.fillStyle = P.trim;
   ctx.beginPath();
-  ctx.rect(-18, -40, 36, 70);
-  ctx.clip();
-  ctx.translate(0, sink);
-  ctx.fillStyle = '#d5dde6';
-  rr(ctx, -7, -18, 14, 30, 4); ctx.fill();
-  ctx.fillStyle = '#ff5d5d';
-  ctx.beginPath();
-  ctx.moveTo(-7, -18);
-  ctx.lineTo(0, -34);
-  ctx.lineTo(7, -18);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#4cc2ff';
-  ctx.beginPath();
-  ctx.arc(0, -8, 3.6, 0, TAU);
-  ctx.fill();
-  ctx.restore();
-  // 井口前板（遮住下沉的火箭底部）
-  ctx.fillStyle = '#3a4656';
-  rr(ctx, -24, 14, 48, 22, 6); ctx.fill();
-  // 舱门（打开状态）
-  ctx.fillStyle = '#4c5b6d';
-  rr(ctx, -26, -22, 20, 10, 3); ctx.fill();
-  rr(ctx, 6, -22, 20, 10, 3); ctx.fill();
-  // 状态灯：装填中红色常亮，就绪黄色闪烁
-  ctx.fillStyle = reload > 0 ? '#ff5d5d' : (blink ? '#ffc531' : '#6b5514');
-  ctx.beginPath();
-  ctx.arc(19, -8, 3, 0, TAU);
-  ctx.fill();
-  // 警戒条
+  ctx.moveTo(30 + rec, -7); ctx.lineTo(38 + rec, 2); ctx.lineTo(30 + rec, 4);
+  ctx.closePath(); ctx.fill();
+  hazard(ctx, -25, 33, 50, 4, 2);
+}
+
+/* ===== 火焰线：连续喷火，不发射子弹 ===== */
+function drawFlamer(ctx, m, lv) {
+  const P = pal(lv);
+  const firing = m && m.flameT > 0;
+  const nozzles = Math.min(lv, 3);
+  // 燃料罐
+  const tank = ctx.createLinearGradient(-28, 0, -8, 0);
+  tank.addColorStop(0, lv >= 3 ? '#4a2740' : '#7a3b2a');
+  tank.addColorStop(1, lv >= 3 ? '#a3462f' : '#b0522f');
+  ctx.fillStyle = tank;
+  rr(ctx, -28, -20, 21, 48, 10); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 1.4;
+  rr(ctx, -28, -20, 21, 48, 10); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  rr(ctx, -26, -17, 6, 42, 3); ctx.fill();
   ctx.fillStyle = '#ffc531';
-  ctx.fillRect(-24, 30, 48, 4);
+  rr(ctx, -26, -13, 17, 5, 2); ctx.fill();
+  rr(ctx, -26, 18, 17, 5, 2); ctx.fill();
+  // 底座 + 软管
+  panel(ctx, -14, 16, 34, 20, 5, P);
+  ctx.strokeStyle = '#3a4652';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(-8, 2); ctx.quadraticCurveTo(0, 10, 6, 0);
+  ctx.stroke();
+  // 喷枪主体
+  panel(ctx, -8, -14, 30, 15, 5, P);
+  // 喷嘴
+  for (let i = 0; i < nozzles; i++) {
+    const ny = nozzles === 1 ? -6.5 : nozzles === 2 ? -12 + i * 11 : -14 + i * 8;
+    ctx.fillStyle = P.dark;
+    rr(ctx, 20, ny - 4, 12, 8, 3); ctx.fill();
+    ctx.fillStyle = P.trim;
+    rr(ctx, 30, ny - 5, 4, 10, 2); ctx.fill();
+  }
+  // 火焰
+  const rangeCells = modStat('flame', 'range', lv) || 1.6;
+  const len = CELL_W * rangeCells * 0.78;
+  for (let i = 0; i < nozzles; i++) {
+    const ny = nozzles === 1 ? -6.5 : nozzles === 2 ? -12 + i * 11 : -14 + i * 8;
+    // 常燃小火苗
+    emissive(ctx, 'rgba(255,140,50,0.9)', 8, () => {
+      ctx.fillStyle = lv >= 3 ? '#bfe4ff' : '#ffb347';
+      ctx.beginPath();
+      ctx.ellipse(36, ny, 3.4 + Math.sin(time * 14 + i) * 1, 5, 0, 0, TAU);
+      ctx.fill();
+    });
+    if (!firing) continue;
+    // 喷射火舌（多层叠加 + 抖动）
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const layers = [
+      { l: len, w: 26, c0: 'rgba(255,90,20,0.55)', c1: 'rgba(255,60,10,0)' },
+      { l: len * 0.78, w: 18, c0: 'rgba(255,170,50,0.72)', c1: 'rgba(255,120,30,0)' },
+      { l: len * 0.5, w: 11, c0: lv >= 3 ? 'rgba(180,225,255,0.95)' : 'rgba(255,235,160,0.95)', c1: 'rgba(255,200,90,0)' },
+    ];
+    for (const L of layers) {
+      const gd = ctx.createLinearGradient(34, ny, 34 + L.l, ny);
+      gd.addColorStop(0, L.c0);
+      gd.addColorStop(1, L.c1);
+      ctx.fillStyle = gd;
+      ctx.beginPath();
+      ctx.moveTo(34, ny - 4);
+      const j1 = Math.sin(time * 22 + i * 2) * 4;
+      const j2 = Math.cos(time * 18 + i) * 4;
+      ctx.quadraticCurveTo(34 + L.l * 0.5, ny - L.w + j1, 34 + L.l, ny + j2 * 0.4);
+      ctx.quadraticCurveTo(34 + L.l * 0.5, ny + L.w + j2, 34, ny + 4);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // 飞散的火星
+    ctx.fillStyle = 'rgba(255,210,120,0.8)';
+    for (let k = 0; k < 3; k++) {
+      const px = 40 + ((time * 260 + k * 47 + i * 23) % len);
+      ctx.beginPath();
+      ctx.arc(px, ny + Math.sin(px * 0.14 + time * 9) * 7, 1.8, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/* ===== 毒液线 ===== */
+function drawPoison(ctx, m, lv) {
+  const P = pal(lv);
+  const bub = Math.sin(time * 3) * 2;
+  panel(ctx, -21, 18, 42, 18, 5, P);
+  if (lv >= 3) {
+    // 瘟疫散布器：坩埚 + 扩散毒雾
+    ctx.fillStyle = 'rgba(139,224,74,0.13)';
+    ctx.beginPath(); ctx.arc(0, -4, 40 + Math.sin(time * 2) * 3, 0, TAU); ctx.fill();
+    const cauldron = ctx.createLinearGradient(0, -14, 0, 20);
+    cauldron.addColorStop(0, '#4a5a3c');
+    cauldron.addColorStop(1, '#22301c');
+    ctx.fillStyle = cauldron;
+    ctx.beginPath();
+    ctx.moveTo(-22, -12);
+    ctx.quadraticCurveTo(-26, 18, 0, 20);
+    ctx.quadraticCurveTo(26, 18, 22, -12);
+    ctx.closePath(); ctx.fill();
+    emissive(ctx, 'rgba(139,224,74,0.9)', 12, () => {
+      ctx.fillStyle = '#8be04a';
+      ctx.beginPath(); ctx.ellipse(0, -12, 22, 6, 0, 0, TAU); ctx.fill();
+    });
+    ctx.fillStyle = 'rgba(200,255,160,0.75)';
+    for (let i = 0; i < 4; i++) {
+      const a = time * 1.6 + i * 1.7;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * 16, -18 - ((time * 20 + i * 12) % 24), 2.4 + i * 0.3, 0, TAU);
+      ctx.fill();
+    }
+    ctx.fillStyle = P.trim;
+    rr(ctx, -26, -16, 52, 5, 2); ctx.fill();
+    return;
+  }
+  // 药剂罐
+  const glass = ctx.createLinearGradient(-17, -26, 17, 20);
+  glass.addColorStop(0, 'rgba(150,230,120,0.9)');
+  glass.addColorStop(1, 'rgba(50,120,45,0.92)');
+  ctx.fillStyle = glass;
+  rr(ctx, -17, -26, 34, 46, 11); ctx.fill();
+  ctx.strokeStyle = '#8be04a';
+  ctx.lineWidth = 2;
+  rr(ctx, -17, -26, 34, 46, 11); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  rr(ctx, -14, -22, 7, 38, 3); ctx.fill();
+  ctx.fillStyle = 'rgba(220,255,190,0.7)';
+  for (let i = 0; i < 4; i++) {
+    ctx.beginPath();
+    ctx.arc(-9 + i * 6, 6 - ((time * 22 + i * 13) % 28) + bub, 2 + i * 0.3, 0, TAU);
+    ctx.fill();
+  }
+  // 喷嘴（2 级双喷口）
+  const noz = lv === 2 ? [-14, 2] : [-8];
+  for (const ny of noz) {
+    panel(ctx, 13, ny, 22, 10, 4, P);
+    emissive(ctx, 'rgba(139,224,74,0.85)', 7, () => {
+      ctx.fillStyle = '#8be04a';
+      ctx.beginPath(); ctx.arc(36, ny + 5, 3.4, 0, TAU); ctx.fill();
+    });
+  }
+  ctx.fillStyle = '#12200f';
+  ctx.font = '900 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('☠', 0, -4);
+  if (lv === 2) {
+    ctx.fillStyle = P.trim;
+    rr(ctx, -20, -30, 40, 6, 3); ctx.fill();
+  }
+}
+
+/* ===== 迫击炮线 ===== */
+function drawMortar(ctx, m, lv) {
+  const P = pal(lv);
+  const rec = (m && m.recoil > 0) ? m.recoil * 16 : 0;
+  const tubes = Math.min(lv, 3);
+  // 支架
+  ctx.strokeStyle = P.dark;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(-18, 32); ctx.lineTo(-3, 6);
+  ctx.moveTo(18, 32); ctx.lineTo(3, 6);
+  ctx.stroke();
+  panel(ctx, -24, 26, 48, 11, 4, P);
+  // 炮管
+  for (let i = 0; i < tubes; i++) {
+    const spread = tubes === 1 ? 0 : (i - (tubes - 1) / 2) * (tubes === 2 ? 11 : 13);
+    ctx.save();
+    ctx.translate(spread, 4 + rec);
+    ctx.rotate(-0.72 + (tubes > 1 ? spread * 0.012 : 0));
+    const tw = tubes >= 3 ? 7 : 9;
+    const tube = ctx.createLinearGradient(-tw, 0, tw, 0);
+    tube.addColorStop(0, P.light);
+    tube.addColorStop(1, P.dark);
+    ctx.fillStyle = tube;
+    rr(ctx, -tw, -42, tw * 2, 46, 5); ctx.fill();
+    ctx.fillStyle = P.dark;
+    rr(ctx, -tw - 2, -44, tw * 2 + 4, 8, 4); ctx.fill();
+    if (lv >= 2) {
+      ctx.fillStyle = '#d0a56a';
+      ctx.beginPath(); ctx.ellipse(0, -46, 4.5, 6.5, 0, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+  // 三级：目标计算阵列
+  if (lv >= 3) {
+    panel(ctx, -32, -6, 12, 20, 4, P);
+    emissive(ctx, 'rgba(255,157,46,0.85)', 8, () => {
+      ctx.fillStyle = '#ff9d2e';
+      ctx.beginPath(); ctx.arc(-26, 2, 3.4, 0, TAU); ctx.fill();
+    });
+    ctx.strokeStyle = P.trim;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(-26, 2, 9, -1.2, 1.2); ctx.stroke();
+  }
+  // 弹药箱
+  panel(ctx, 14, 10, 20, 16, 3, P);
+  ctx.fillStyle = '#ffc531';
+  rr(ctx, 17, 14, 14, 3.4, 1.5); ctx.fill();
+  ctx.fillStyle = '#d0a56a';
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath(); ctx.ellipse(19 + i * 5, 21, 2, 3, 0, 0, TAU); ctx.fill();
+  }
+}
+
+/* ===== 狙击线 ===== */
+function drawSniper(ctx, m, lv) {
+  const P = pal(lv);
+  const rec = (m && m.recoil > 0) ? m.recoil * 24 : 0;
+  const charged = !m || !m.mcd || (m.mcd.sniper || 0) <= 0.35;
+  const len = lv >= 3 ? 72 : lv === 2 ? 64 : 58;
+  pedestal(ctx, P, 42, lv);
+  panel(ctx, -13, 4, 26, 18, 4, P);
+  // 主枪管
+  panel(ctx, -18 - rec, -12, len, 9, 4, P);
+  // 制退器
+  ctx.fillStyle = P.dark;
+  rr(ctx, len - 24 - rec, -15, 11, 15, 3); ctx.fill();
+  if (lv >= 2) {
+    ctx.fillStyle = P.trim;
+    for (let i = 0; i < 3; i++) { rr(ctx, len - 40 - rec + i * 7, -14, 3, 13, 1.5); ctx.fill(); }
+  }
+  // 机匣
+  panel(ctx, -22 - rec, -19, 28, 22, 5, P);
+  // 三级：能量导轨与充能环
+  if (lv >= 3) {
+    ctx.strokeStyle = charged ? '#ffe0a8' : '#6b5a3a';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 3; i++) {
+      const cxp = 4 + i * 18 - rec;
+      ctx.beginPath(); ctx.arc(cxp, -7.5, 10, -Math.PI * 0.6, Math.PI * 0.6); ctx.stroke();
+    }
+    panel(ctx, -34 - rec, -8, 12, 18, 4, P);
+  } else if (lv === 2) {
+    panel(ctx, -16 - rec, -1, len - 14, 6, 3, P);
+  }
+  // 瞄准镜
+  panel(ctx, -14 - rec, -32, 30, 11, 5, P);
+  emissive(ctx, 'rgba(255,224,168,0.95)', charged ? 12 : 0, () => {
+    ctx.fillStyle = charged ? '#ffe0a8' : '#6b5a3a';
+    ctx.beginPath(); ctx.arc(14 - rec, -26.5, 3.4, 0, TAU); ctx.fill();
+  });
+  // 两脚架
+  ctx.strokeStyle = P.dark;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(14 - rec, -2); ctx.lineTo(10, 18);
+  ctx.moveTo(14 - rec, -2); ctx.lineTo(22, 18);
+  ctx.stroke();
+}
+
+/* ===== 维修线 ===== */
+function drawRepair(ctx, m, lv) {
+  const P = pal(lv);
+  const pulse = m && m.pulse > 0 ? m.pulse * 2 : 0;
+  const spin = (m && m.spin ? m.spin : 0) * 1.6;
+  if (pulse > 0) {
+    ctx.fillStyle = 'rgba(88,214,139,' + (0.2 * pulse) + ')';
+    ctx.beginPath(); ctx.arc(0, -2, 46, 0, TAU); ctx.fill();
+  }
+  if (lv >= 3) {
+    // 奇迹熔炉：熔炉 + 光环 + 悬浮工具
+    const body = ctx.createLinearGradient(0, -24, 0, 32);
+    body.addColorStop(0, '#3d6b52');
+    body.addColorStop(1, '#1d3a2b');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(-26, 32); ctx.lineTo(-20, -20); ctx.lineTo(20, -20); ctx.lineTo(26, 32);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = P.trim;
+    rr(ctx, -28, -24, 56, 7, 3); ctx.fill();
+    // 熔炉口
+    emissive(ctx, 'rgba(140,255,180,0.9)', 16, () => {
+      const fire = ctx.createRadialGradient(0, 8, 2, 0, 8, 16);
+      fire.addColorStop(0, '#ffffff');
+      fire.addColorStop(0.4, '#8ff2b6');
+      fire.addColorStop(1, 'rgba(60,190,120,0)');
+      ctx.fillStyle = fire;
+      ctx.beginPath(); ctx.arc(0, 8, 14 + Math.sin(time * 5) * 1.4, 0, TAU); ctx.fill();
+    });
+    // 光环
+    ctx.strokeStyle = 'rgba(143,242,182,0.8)';
+    ctx.lineWidth = 2.4;
+    ctx.save();
+    ctx.translate(0, -30);
+    ctx.rotate(time * 0.9);
+    ctx.beginPath(); ctx.ellipse(0, 0, 22, 7, 0, 0, TAU); ctx.stroke();
+    ctx.restore();
+    // 悬浮扳手
+    ctx.save();
+    ctx.translate(0, -30);
+    ctx.rotate(-time * 1.4);
+    ctx.strokeStyle = '#dbe6ef';
+    ctx.lineWidth = 3.4;
+    ctx.beginPath(); ctx.moveTo(-13, 0); ctx.lineTo(13, 0); ctx.stroke();
+    ctx.fillStyle = '#dbe6ef';
+    ctx.beginPath(); ctx.arc(14, 0, 4.2, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(-14, 0, 4.2, 0, TAU); ctx.fill();
+    ctx.restore();
+    emissive(ctx, 'rgba(88,214,139,0.9)', 10, () => {
+      ctx.fillStyle = '#8ff2b6';
+      rr(ctx, -4, -14, 8, 20, 2); ctx.fill();
+      rr(ctx, -11, -7, 22, 8, 2); ctx.fill();
+    });
+    return;
+  }
+  // 1/2 级工坊
+  const body = ctx.createLinearGradient(0, -22, 0, 30);
+  body.addColorStop(0, lv === 2 ? '#48806a' : '#3f6b52');
+  body.addColorStop(1, '#22402f');
+  ctx.fillStyle = body;
+  rr(ctx, -24, -20, 48, 50, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = 1.5;
+  rr(ctx, -24, -20, 48, 50, 8); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  rr(ctx, -22, -18, 10, 44, 5); ctx.fill();
+  // 旋转扳手
+  const arms = lv === 2 ? 2 : 1;
+  for (let i = 0; i < arms; i++) {
+    ctx.save();
+    ctx.translate(0, -4);
+    ctx.rotate(spin + i * Math.PI / 2);
+    ctx.strokeStyle = '#c8d4e0';
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(14, 0); ctx.stroke();
+    ctx.fillStyle = '#c8d4e0';
+    ctx.beginPath(); ctx.arc(15, 0, 4.5, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(-15, 0, 4.5, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  emissive(ctx, 'rgba(88,214,139,0.9)', 8 + pulse * 10, () => {
+    ctx.fillStyle = '#8ff2b6';
+    rr(ctx, -4, -30, 8, 22, 2); ctx.fill();
+    rr(ctx, -11, -23, 22, 8, 2); ctx.fill();
+  });
+  ctx.fillStyle = '#58d68b';
+  for (let i = 0; i < Math.min(3, lv); i++) {
+    ctx.beginPath(); ctx.arc(-14 + i * 14, 24, 2.6, 0, TAU); ctx.fill();
+  }
 }
 
 /* ---- 合成机型绘制 ---- */
 function drawFrostcannon(ctx, m) {
-  // 出炮动画
+  const P = pal(2);
   let ext = 0;
-  if (m && m.recoil > 0) {
-    const p = 1 - m.recoil / 0.25;
-    ext = Math.sin(p * Math.PI) * 14;
-  }
-  // 底座（弹簧拳机同款）
-  ctx.fillStyle = '#2f3d4e';
-  rr(ctx, -20, 18, 40, 18, 5); ctx.fill();
-  ctx.fillStyle = '#3c4b5d';
-  rr(ctx, -16, 2, 24, 20, 5); ctx.fill();
-  // 机身（冰蓝配色）
-  ctx.fillStyle = '#5a7d96';
-  rr(ctx, -18, -22, 26, 28, 6); ctx.fill();
-  ctx.fillStyle = '#7fd7ff';
-  ctx.beginPath(); ctx.arc(-6, -14, 3, 0, TAU); ctx.fill();
-  // 弹簧
+  if (m && m.recoil > 0) ext = Math.sin((1 - m.recoil / 0.25) * Math.PI) * 14;
+  pedestal(ctx, P, 40, 2);
+  panel(ctx, -16, 2, 24, 20, 5, P);
+  panel(ctx, -18, -22, 26, 28, 6, P);
+  emissive(ctx, 'rgba(127,215,255,0.85)', 7, () => {
+    ctx.fillStyle = '#7fd7ff';
+    ctx.beginPath(); ctx.arc(-6, -14, 3, 0, TAU); ctx.fill();
+  });
   ctx.strokeStyle = '#a8d8ee';
   ctx.lineWidth = 3;
   ctx.beginPath();
   const sx = 8, len = 12 + ext;
   ctx.moveTo(sx, -8);
-  for (let i = 0; i <= 5; i++) {
-    ctx.lineTo(sx + (i + 0.5) * len / 6, -8 + (i % 2 === 0 ? -6 : 6));
-  }
+  for (let i = 0; i <= 5; i++) ctx.lineTo(sx + (i + 0.5) * len / 6, -8 + (i % 2 === 0 ? -6 : 6));
   ctx.lineTo(sx + len, -8);
   ctx.stroke();
-  // 冰弹（雪球 + 雪花纹）
   const bx = sx + len + 9;
-  ctx.fillStyle = 'rgba(191,233,255,0.35)';
-  ctx.beginPath(); ctx.arc(bx, -8, 14, 0, TAU); ctx.fill();
-  ctx.fillStyle = '#cfeeff';
-  ctx.beginPath(); ctx.arc(bx, -8, 11, 0, TAU); ctx.fill();
+  emissive(ctx, 'rgba(150,220,255,0.9)', 12, () => {
+    ctx.fillStyle = 'rgba(191,233,255,0.4)';
+    ctx.beginPath(); ctx.arc(bx, -8, 14, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#dff2ff';
+    ctx.beginPath(); ctx.arc(bx, -8, 11, 0, TAU); ctx.fill();
+  });
   ctx.strokeStyle = '#5fb8e8';
   ctx.lineWidth = 1.6;
   for (let i = 0; i < 3; i++) {
@@ -3125,175 +3722,90 @@ function drawFrostcannon(ctx, m) {
   }
 }
 
-function drawTwinturret(ctx, m) {
-  const rec = (m && m.recoil > 0) ? m.recoil * 30 : 0;
-  const up = m && m.altBarrel;
-  // 底座
-  ctx.fillStyle = '#2f3d4e';
-  rr(ctx, -20, 16, 40, 20, 5); ctx.fill();
-  ctx.fillStyle = '#243141';
-  rr(ctx, -14, 6, 28, 14, 4); ctx.fill();
-  // 双炮管
-  ctx.fillStyle = '#57687c';
-  rr(ctx, 2 - (up ? rec : 0), -24, 36, 10, 4); ctx.fill();
-  rr(ctx, 2 - (up ? 0 : rec), -10, 36, 10, 4); ctx.fill();
-  ctx.fillStyle = '#3c4b5d';
-  rr(ctx, 30 - (up ? rec : 0), -26, 8, 14, 3); ctx.fill();
-  rr(ctx, 30 - (up ? 0 : rec), -12, 8, 14, 3); ctx.fill();
-  // 炮塔
-  ctx.fillStyle = '#71859b';
-  ctx.beginPath();
-  ctx.arc(-4, -10, 18, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = '#8ba1b8';
-  ctx.beginPath();
-  ctx.arc(-7, -13, 9, 0, TAU);
-  ctx.fill();
-  // 双指示灯
-  ctx.fillStyle = '#ffc531';
-  ctx.beginPath(); ctx.arc(-9, -26, 3, 0, TAU); ctx.fill();
-  ctx.beginPath(); ctx.arc(0, -28, 3, 0, TAU); ctx.fill();
-}
-
-function drawPowerplant(ctx, m) {
-  const glow = m && m.pulse > 0 ? m.pulse * 2 : 0;
-  ctx.fillStyle = 'rgba(255,197,49,' + (0.12 + 0.25 * glow) + ')';
-  ctx.beginPath(); ctx.arc(0, -2, 42, 0, TAU); ctx.fill();
-  // 主体
-  ctx.fillStyle = '#2b3a4a';
-  rr(ctx, -24, -26, 48, 60, 9); ctx.fill();
-  ctx.strokeStyle = '#5a6f85';
-  ctx.lineWidth = 2;
-  rr(ctx, -24, -26, 48, 60, 9); ctx.stroke();
-  // 双正极头
-  ctx.fillStyle = '#ffc531';
-  rr(ctx, -17, -34, 14, 9, 3); ctx.fill();
-  rr(ctx, 3, -34, 14, 9, 3); ctx.fill();
-  // 反应窗
-  ctx.fillStyle = '#39506b';
-  rr(ctx, -17, -18, 34, 46, 5); ctx.fill();
-  // 双闪电
-  ctx.fillStyle = '#ffc531';
-  for (const ox of [-9, 7]) {
-    ctx.beginPath();
-    ctx.moveTo(ox + 3, -12);
-    ctx.lineTo(ox - 5, 4);
-    ctx.lineTo(ox, 4);
-    ctx.lineTo(ox - 2, 18);
-    ctx.lineTo(ox + 6, 0);
-    ctx.lineTo(ox + 1, 0);
-    ctx.closePath();
-    ctx.fill();
-  }
-  // 电子轨道环
-  ctx.strokeStyle = 'rgba(255,215,100,0.7)';
-  ctx.lineWidth = 1.8;
-  ctx.beginPath();
-  ctx.ellipse(0, 2, 30, 11, -0.5, 0, TAU);
-  ctx.stroke();
-}
-
 function drawArcturret(ctx, m) {
+  const P = pal(2);
   const rec = (m && m.recoil > 0) ? m.recoil * 30 : 0;
   const spark = m && m.recoil > 0;
-  // 底座
-  ctx.fillStyle = '#33414e';
-  rr(ctx, -20, 16, 40, 20, 5); ctx.fill();
-  ctx.fillStyle = '#2b3444';
-  rr(ctx, -14, 6, 28, 14, 4); ctx.fill();
-  // 炮管（紫调）
+  pedestal(ctx, P, 40, 2);
+  panel(ctx, -14, 4, 28, 16, 4, P);
   ctx.fillStyle = '#6a5f8c';
   rr(ctx, 2 - rec, -14, 36, 12, 4); ctx.fill();
   ctx.fillStyle = '#514873';
-  rr(ctx, 30 - rec, -16, 8, 16, 3); ctx.fill();
-  // 炮塔
-  ctx.fillStyle = '#7d6fa8';
-  ctx.beginPath();
-  ctx.arc(-4, -8, 16, 0, TAU);
-  ctx.fill();
-  // 顶部迷你线圈球
+  rr(ctx, 30 - rec, -16, 9, 16, 3); ctx.fill();
+  const dome = ctx.createRadialGradient(-8, -14, 2, -4, -8, 18);
+  dome.addColorStop(0, '#cbb8f5');
+  dome.addColorStop(1, '#6a5f8c');
+  ctx.fillStyle = dome;
+  ctx.beginPath(); ctx.arc(-4, -8, 16, 0, TAU); ctx.fill();
   ctx.strokeStyle = '#8f7ab5';
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-4, -22); ctx.lineTo(-4, -28);
-  ctx.stroke();
-  const grd = ctx.createRadialGradient(-4, -33, 1, -4, -33, 8);
-  grd.addColorStop(0, '#f2e8ff');
-  grd.addColorStop(1, spark ? '#c77bff' : '#7e5bb5');
-  ctx.fillStyle = grd;
-  ctx.beginPath();
-  ctx.arc(-4, -33, 7, 0, TAU);
-  ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-4, -22); ctx.lineTo(-4, -28); ctx.stroke();
+  emissive(ctx, 'rgba(199,123,255,0.9)', spark ? 16 : 8, () => {
+    const grd = ctx.createRadialGradient(-4, -33, 1, -4, -33, 9);
+    grd.addColorStop(0, '#f2e8ff');
+    grd.addColorStop(1, spark ? '#c77bff' : '#7e5bb5');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(-4, -33, 7.5, 0, TAU); ctx.fill();
+  });
   if (spark) {
-    ctx.strokeStyle = 'rgba(210,160,255,0.8)';
+    ctx.strokeStyle = 'rgba(210,160,255,0.85)';
     ctx.lineWidth = 1.6;
     for (let i = 0; i < 3; i++) {
       const a = rand(0, TAU);
       ctx.beginPath();
       ctx.moveTo(-4 + Math.cos(a) * 7, -33 + Math.sin(a) * 7);
-      ctx.lineTo(-4 + Math.cos(a) * 13, -33 + Math.sin(a) * 13);
+      ctx.lineTo(-4 + Math.cos(a) * 14, -33 + Math.sin(a) * 14);
       ctx.stroke();
     }
   }
 }
 
 function drawMagshredder(ctx, m) {
-  drawShredder(ctx, m);
-  // 顶部悬浮磁铁吊臂
+  drawShredder(ctx, m, 2);
   const hover = Math.sin((m && m.spin ? m.spin : 0) * 2) * 2;
   ctx.strokeStyle = '#8ba1b8';
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(10, -34);
-  ctx.lineTo(10, -42 + hover);
-  ctx.stroke();
-  ctx.strokeStyle = '#e04848';
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.arc(10, -44 + hover, 7, Math.PI, 0);
-  ctx.stroke();
-  ctx.fillStyle = '#c8d4e0';
+  ctx.beginPath(); ctx.moveTo(10, -34); ctx.lineTo(10, -42 + hover); ctx.stroke();
+  emissive(ctx, 'rgba(224,72,72,0.6)', 7, () => {
+    ctx.strokeStyle = '#e04848';
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(10, -44 + hover, 7, Math.PI, 0); ctx.stroke();
+  });
+  ctx.fillStyle = '#dbe6ef';
   ctx.fillRect(1, -44 + hover, 5.5, 6);
   ctx.fillRect(13.5, -44 + hover, 5.5, 6);
 }
 
 function drawFrostwall(ctx, m) {
   const dmg = m && m.maxHp ? 1 - m.hp / m.maxHp : 0;
-  // 寒气微光
-  ctx.fillStyle = 'rgba(127,215,255,0.08)';
+  ctx.fillStyle = 'rgba(127,215,255,0.09)';
   ctx.beginPath(); ctx.arc(0, 0, 46, 0, TAU); ctx.fill();
-  // 冰墙主体
-  ctx.fillStyle = '#6f9ab5';
+  const ice = ctx.createLinearGradient(-26, -34, 26, 36);
+  ice.addColorStop(0, '#d7eefb');
+  ice.addColorStop(0.4, '#8fc0da');
+  ice.addColorStop(1, '#4c7f9e');
+  ctx.fillStyle = ice;
   rr(ctx, -26, -34, 52, 70, 7); ctx.fill();
-  ctx.fillStyle = '#8fc0da';
-  rr(ctx, -26, -34, 52, 14, 7); ctx.fill();
-  // 冰纹横梁
+  ctx.strokeStyle = 'rgba(20,50,70,0.5)';
+  ctx.lineWidth = 1.6;
+  rr(ctx, -26, -34, 52, 70, 7); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  rr(ctx, -24, -32, 9, 66, 4); ctx.fill();
   ctx.fillStyle = '#5a86a3';
   rr(ctx, -26, -8, 52, 8, 3); ctx.fill();
   rr(ctx, -26, 14, 52, 8, 3); ctx.fill();
-  // 冰锥
-  ctx.fillStyle = '#cfeeff';
-  for (const [px, len] of [[-18, 10], [-6, 15], [7, 9], [17, 13]]) {
-    ctx.beginPath();
-    ctx.moveTo(px - 4, -20);
-    ctx.lineTo(px, -20 + len);
-    ctx.lineTo(px + 4, -20);
-    ctx.closePath();
-    ctx.fill();
-  }
-  // 高光
-  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-18, -28); ctx.lineTo(-8, -14);
-  ctx.stroke();
-  // 裂纹
+  emissive(ctx, 'rgba(200,240,255,0.7)', 8, () => {
+    ctx.fillStyle = '#e8f9ff';
+    for (const [px, len] of [[-18, 11], [-6, 16], [7, 10], [17, 14]]) {
+      ctx.beginPath();
+      ctx.moveTo(px - 4.5, -20); ctx.lineTo(px, -20 + len); ctx.lineTo(px + 4.5, -20);
+      ctx.closePath(); ctx.fill();
+    }
+  });
   if (dmg > 0.5) {
     ctx.strokeStyle = 'rgba(30,60,80,0.8)';
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(10, -28); ctx.lineTo(2, -6); ctx.lineTo(14, 12);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(10, -28); ctx.lineTo(2, -6); ctx.lineTo(14, 12); ctx.stroke();
   }
 }
 
@@ -3322,30 +3834,32 @@ function drawEnemy(e) {
     case 'titan': drawTitan(e); break;
   }
   if (flash) {
-    g.globalAlpha = 0.55;
+    g.globalAlpha = 0.34;
     g.globalCompositeOperation = 'lighter';
     g.fillStyle = '#ffffff';
     g.beginPath();
-    g.arc(0, -6, e.w / 2 + 4, 0, TAU);
+    g.ellipse(0, -4, e.w * 0.42, e.w * 0.46, 0, 0, TAU);
     g.fill();
     g.globalCompositeOperation = 'source-over';
     g.globalAlpha = 1;
   }
   if (e.frozenT > 0) {
-    // 冰块封印
+    // 冰块封印（尺寸随体型）
     const hw = e.w / 2 + 5;
-    g.globalAlpha = 0.45;
+    const top = e.boss ? -58 : -34;
+    const hgt = e.boss ? 100 : 60;
+    g.globalAlpha = 0.42;
     g.fillStyle = '#a8dcf5';
-    rr(g, -hw, -34, hw * 2, 60, 8);
+    rr(g, -hw, top, hw * 2, hgt, 8);
     g.fill();
     g.globalAlpha = 0.75;
     g.strokeStyle = '#e0f4ff';
     g.lineWidth = 2;
-    rr(g, -hw, -34, hw * 2, 60, 8);
+    rr(g, -hw, top, hw * 2, hgt, 8);
     g.stroke();
     g.beginPath();
-    g.moveTo(-hw * 0.5, -30); g.lineTo(-hw * 0.1, -12);
-    g.moveTo(hw * 0.4, -26); g.lineTo(hw * 0.1, -4);
+    g.moveTo(-hw * 0.5, top + 4); g.lineTo(-hw * 0.1, top + hgt * 0.4);
+    g.moveTo(hw * 0.4, top + 8); g.lineTo(hw * 0.1, top + hgt * 0.55);
     g.stroke();
     g.globalAlpha = 1;
   } else if (frozen) {
@@ -3356,17 +3870,39 @@ function drawEnemy(e) {
     g.fill();
     g.globalAlpha = 1;
   }
-  // 灼烧 / 中毒的状态染色
+  // 灼烧：暖色轮廓 + 向上跳动的火苗（不铺满机体，避免多个敌人叠成白团）
   if (e.burnT > 0) {
-    g.globalAlpha = 0.3 + Math.sin(time * 14) * 0.08;
-    g.fillStyle = '#ff7a2e';
-    g.beginPath(); g.arc(0, -6, e.w / 2 + 2, 0, TAU); g.fill();
+    const rw = e.w * 0.4, rh = e.w * 0.46;
+    g.globalAlpha = 0.5 + Math.sin(time * 12) * 0.15;
+    g.strokeStyle = '#ff8a3c';
+    g.lineWidth = 2;
+    g.beginPath(); g.ellipse(0, -4, rw, rh, 0, 0, TAU); g.stroke();
+    for (let i = 0; i < 3; i++) {
+      const fx = -rw * 0.55 + i * rw * 0.55;
+      const ph = (time * 5 + i * 1.7) % 1;
+      g.globalAlpha = (1 - ph) * 0.9;
+      g.fillStyle = i === 1 ? '#ffe08a' : '#ff9d2e';
+      g.beginPath();
+      g.ellipse(fx + Math.sin(time * 9 + i) * 2, -rh - ph * 16, 3 - ph * 1.6, 6.5 - ph * 3, 0, 0, TAU);
+      g.fill();
+    }
     g.globalAlpha = 1;
   }
+  // 中毒：绿色轮廓 + 上浮气泡
   if (e.poisonT > 0) {
-    g.globalAlpha = 0.26 + Math.sin(time * 6) * 0.06;
-    g.fillStyle = '#8be04a';
-    g.beginPath(); g.arc(0, -6, e.w / 2 + 2, 0, TAU); g.fill();
+    const rw = e.w * 0.4, rh = e.w * 0.46;
+    g.globalAlpha = 0.45 + Math.sin(time * 5) * 0.12;
+    g.strokeStyle = '#8be04a';
+    g.lineWidth = 2;
+    g.beginPath(); g.ellipse(0, -4, rw, rh, 0, 0, TAU); g.stroke();
+    g.fillStyle = '#c8f59a';
+    for (let i = 0; i < 3; i++) {
+      const ph = (time * 3 + i * 0.9) % 1;
+      g.globalAlpha = (1 - ph) * 0.85;
+      g.beginPath();
+      g.arc(-rw * 0.5 + i * rw * 0.5, -rh * 0.4 - ph * 20, 2.4 - ph, 0, TAU);
+      g.fill();
+    }
     g.globalAlpha = 1;
   }
   g.restore();
