@@ -39,6 +39,17 @@ const MACHINES = {
   frostwall:   { name: '寒冰壁垒',   rarity: 'fusion', hp: 2000, desc: '高耐久寒冰墙，靠近的敌人被大幅减速' },
 };
 
+// 普通模式：卡槽顺序、价格与冷却（秒）
+const CLASSIC_ORDER = ['generator', 'turret', 'barricade', 'puncher', 'fan', 'shredder', 'magnet', 'tesla', 'railgun', 'rocket'];
+const CLASSIC_COST = {
+  generator: 50, turret: 100, barricade: 50, puncher: 100, fan: 150,
+  shredder: 150, magnet: 175, tesla: 250, railgun: 250, rocket: 125,
+};
+const CLASSIC_CD = {
+  generator: 5, turret: 5, barricade: 15, puncher: 5, fan: 8,
+  shredder: 12, magnet: 12, tesla: 15, railgun: 15, rocket: 20,
+};
+
 // 合成配方：[材料A, 材料B, 产物]（不分先后顺序）
 const RECIPES = [
   ['puncher', 'fan', 'frostcannon'],
@@ -99,6 +110,9 @@ cv.style.aspectRatio = W + ' / ' + H;
 
 /* ========== 游戏状态 ========== */
 let state = 'menu';        // menu | playing | paused | over | win
+let mode = 'box';          // box（盲盒模式） | classic（普通模式）
+let classicCd = {};        // 普通模式各卡剩余冷却
+let classicCardEls = {};   // 普通模式卡片 DOM 引用
 let energy, score, kills, wave, endless, pity, history;
 let grid, enemies, bullets, orbs, parts, floats, zaps, beams;
 let waveState, waveTimer, queue, spawnT, skyT, lastRows;
@@ -117,7 +131,52 @@ function initGame() {
   skyT = 3; lastRows = [];
   bannerText = ''; bannerSub = ''; bannerT = 0; shakeT = 0; shakeAmp = 0;
   sel = null; submitted = false; time = 0;
+  classicCd = {};
   renderTray();
+  renderClassicTray();
+  applyModeUI();
+}
+
+// 根据模式切换卡槽区域
+function applyModeUI() {
+  const classic = mode === 'classic';
+  $('boxBtn').style.display = classic ? 'none' : '';
+  $('trayInfo').style.display = classic ? 'none' : '';
+  $('classicTray').style.display = classic ? '' : 'none';
+}
+
+// 普通模式卡槽：全部机器明码标价
+function renderClassicTray() {
+  const holder = $('classicTray');
+  holder.innerHTML = '';
+  classicCardEls = {};
+  for (const type of CLASSIC_ORDER) {
+    const info = MACHINES[type];
+    const el = document.createElement('div');
+    el.className = 'card r-' + info.rarity;
+    el.title = info.name + '（' + CLASSIC_COST[type] + '⚡ / 冷却 ' + CLASSIC_CD[type] + ' 秒）：' + info.desc;
+    const mini = document.createElement('canvas');
+    mini.width = 104; mini.height = 104;
+    drawMachine(mini.getContext('2d'), type, 52, 58, 1.0, {});
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = info.name;
+    const cost = document.createElement('div');
+    cost.className = 'cost';
+    cost.textContent = CLASSIC_COST[type] + '⚡';
+    const cdOv = document.createElement('div');
+    cdOv.className = 'cdOv';
+    el.appendChild(mini); el.appendChild(nm); el.appendChild(cost); el.appendChild(cdOv);
+    el.addEventListener('click', () => {
+      if (state !== 'playing' || mode !== 'classic') return;
+      if (sel && sel.mode === 'card' && sel.type === type) { sel = null; renderTray(); return; }
+      if (energy < CLASSIC_COST[type] || (classicCd[type] || 0) > 0) { sfx('error'); return; }
+      sel = { mode: 'card', type };
+      renderTray();
+    });
+    holder.appendChild(el);
+    classicCardEls[type] = { el, cdOv };
+  }
 }
 
 /* ========== 音效（WebAudio 合成） ========== */
@@ -903,6 +962,11 @@ function updateFx(dt) {
 /* ========== 主循环 ========== */
 function update(dt) {
   time += dt;
+  if (mode === 'classic') {
+    for (const k in classicCd) {
+      if (classicCd[k] > 0) classicCd[k] -= dt;
+    }
+  }
   updateWaves(dt);
   updateMachines(dt);
   updateBullets(dt);
@@ -930,14 +994,28 @@ function updateHud() {
   else wtxt = '第' + wave + '/' + TOTAL_WAVES + '波';
   $('waveVal').textContent = wtxt;
   $('boxBtn').disabled = state !== 'playing' || energy < BOX_COST;
+  if (mode === 'classic') {
+    for (const type in classicCardEls) {
+      const { el, cdOv } = classicCardEls[type];
+      const cd = classicCd[type] || 0;
+      el.classList.toggle('off', state !== 'playing' || energy < CLASSIC_COST[type] || cd > 0);
+      el.classList.toggle('sel', !!(sel && sel.mode === 'card' && sel.type === type));
+      cdOv.style.height = cd > 0 ? (cd / CLASSIC_CD[type] * 100) + '%' : '0';
+    }
+  }
 }
 
 /* ========== 游戏流程 ========== */
-function startGame() {
+function startGame(m) {
+  if (m === 'box' || m === 'classic') mode = m;
   initGame();
   state = 'playing';
   show('menu', false); show('end', false); show('pauseOv', false);
-  banner('准备布防！', '点"开盲盒"再点空格放置 —— 落地即开！');
+  if (mode === 'classic') {
+    banner('准备布防！', '从卡槽选择机器，用能量按标价部署');
+  } else {
+    banner('准备布防！', '点"开盲盒"再点空格放置 —— 落地即开！');
+  }
 }
 function pauseGame() {
   if (state !== 'playing') return;
@@ -1122,6 +1200,28 @@ cv.addEventListener('pointerdown', ev => {
     renderTray();
     return;
   }
+  if (sel && sel.mode === 'card') {
+    // 普通模式：花能量放置选中的机器
+    const type = sel.type;
+    if (grid[cell.r][cell.c]) {
+      addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '这里已有机器', '#ff5d5d');
+      sfx('error');
+      return;
+    }
+    if (energy < CLASSIC_COST[type] || (classicCd[type] || 0) > 0) {
+      sel = null;
+      renderTray();
+      sfx('error');
+      return;
+    }
+    if (place(type, cell.r, cell.c)) {
+      energy -= CLASSIC_COST[type];
+      classicCd[type] = CLASSIC_CD[type];
+      sel = null;
+      renderTray();
+    }
+    return;
+  }
   if (sel && sel.mode === 'box') {
     if (grid[cell.r][cell.c]) {
       addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '这里已有机器', '#ff5d5d');
@@ -1159,7 +1259,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden && state === 'playing') pauseGame();
 });
 
-$('startBtn').addEventListener('click', () => { ensureAc(); startGame(); });
+$('startBtn').addEventListener('click', () => { ensureAc(); startGame('box'); });
+$('startClassicBtn').addEventListener('click', () => { ensureAc(); startGame('classic'); });
 $('againBtn').addEventListener('click', () => { ensureAc(); startGame(); });
 $('endlessBtn').addEventListener('click', continueEndless);
 $('boxBtn').addEventListener('click', () => {
@@ -2582,6 +2683,20 @@ function drawHoverGhost() {
     g.fillRect(x, y, CELL_W, CELL_H);
     return;
   }
+  if (sel.mode === 'card') {
+    // 普通模式：选中机器的放置预览
+    g.fillStyle = occupied ? 'rgba(255,93,93,0.22)' : 'rgba(88,214,139,0.16)';
+    g.fillRect(x, y, CELL_W, CELL_H);
+    g.strokeStyle = occupied ? 'rgba(255,93,93,0.7)' : 'rgba(88,214,139,0.7)';
+    g.lineWidth = 2;
+    g.strokeRect(x + 1, y + 1, CELL_W - 2, CELL_H - 2);
+    if (!occupied) {
+      g.globalAlpha = 0.55;
+      drawMachine(g, sel.type, cellCx(cell.c), cellCy(cell.r) + 6, 1.0, {});
+      g.globalAlpha = 1;
+    }
+    return;
+  }
   // 盲盒放置模式
   g.fillStyle = occupied ? 'rgba(255,93,93,0.22)' : 'rgba(255,197,49,0.14)';
   g.fillRect(x, y, CELL_W, CELL_H);
@@ -2618,8 +2733,19 @@ function drawBanner() {
 
 /* ========== 调试接口（供自动化测试） ========== */
 window.__game = {
-  start: startGame,
+  start: m => startGame(m),
   addEnergy: n => { energy += n; },
+  playCard: (t, r, c) => {
+    if (mode !== 'classic' || state !== 'playing') return false;
+    if (CLASSIC_COST[t] === undefined) return false;
+    if (energy < CLASSIC_COST[t] || (classicCd[t] || 0) > 0) return false;
+    if (!place(t, r, c)) return false;
+    energy -= CLASSIC_COST[t];
+    classicCd[t] = CLASSIC_CD[t];
+    return true;
+  },
+  get mode() { return mode; },
+  get cooldowns() { return { ...classicCd }; },
   // 花能量在场上放一个盲盒（模拟真实购买）
   buyBox: (r, c) => {
     if (state !== 'playing' || energy < BOX_COST) return false;

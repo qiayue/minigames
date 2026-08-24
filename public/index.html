@@ -105,6 +105,18 @@
   }
   #pulls .histEmpty { font-size: 11px; color: var(--dim); opacity: .6; }
   #cards { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
+  /* 普通模式卡槽 */
+  #classicTray { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
+  .card .cost {
+    position: absolute; top: -7px; right: -6px; font-size: 10px; font-weight: 800;
+    border-radius: 6px; padding: 1px 5px; color: #3a2500; background: var(--accent);
+  }
+  .card.off { filter: grayscale(.7) brightness(.6); cursor: not-allowed; }
+  .card.off:hover { transform: none; }
+  .card .cdOv {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 0;
+    background: rgba(8, 12, 18, .74); border-radius: 0 0 8px 8px; pointer-events: none;
+  }
   .card {
     width: 74px; border-radius: 10px; border: 2px solid var(--line);
     background: var(--panel2); cursor: pointer; position: relative;
@@ -172,7 +184,12 @@
     background: linear-gradient(160deg, #ffd764, #ff9d2e);
     box-shadow: 0 4px 0 #b96e12; color: #3a2500;
   }
+  .bigBtn.classic {
+    background: linear-gradient(160deg, #8fd0ff, #3f8fbf);
+    box-shadow: 0 4px 0 #2a6a92, 0 8px 18px rgba(80, 170, 220, .25); color: #082334;
+  }
   .btnRow { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .modeNote { color: var(--dim); font-size: 12px; margin-top: 10px; }
 
   /* 抽卡展示浮层只做视觉展示，不拦截操作 */
   #reveal { background: transparent; backdrop-filter: none; pointer-events: none; }
@@ -260,6 +277,7 @@
         <span class="lbl" id="histLbl">最近开出</span><span id="pulls"></span>
       </div>
     </div>
+    <div id="classicTray" style="display:none;"></div>
     <button id="fuseBtn" title="选中后依次点击场上两台机器进行合成：弹簧拳机+冷冻风扇=冰冻弹簧炮 | 自动炮台+自动炮台=双管炮台 | 发电机+发电机=聚变电站 | 自动炮台+特斯拉线圈=电弧机炮 | 碎纸机+磁力吊塔=磁力碎纸机 | 装甲路障+冷冻风扇=寒冰壁垒"><span class="big">🧪</span>合成</button>
     <button id="shovelBtn" title="选中后点击场上的机器将其拆除"><span class="big">🔧</span>拆除</button>
   </div>
@@ -280,9 +298,11 @@
         <div>🛡️ <b>目标</b>：守住 10 波进攻，别让机器人冲进左侧基地</div>
       </div>
       <div class="btnRow">
-        <button class="bigBtn" id="startBtn">▶ 开始游戏</button>
+        <button class="bigBtn" id="startBtn">🎁 盲盒模式</button>
+        <button class="bigBtn classic" id="startClassicBtn">🃏 普通模式</button>
         <button class="bigBtn alt" id="menuBoardBtn">🏆 排行榜</button>
       </div>
+      <div class="modeNote">盲盒模式：开盲盒拼手气 · 普通模式：全部机器明码标价，经典种卡玩法</div>
       <div id="menuBoard" style="margin-top:14px; display:none;"></div>
     </div>
 
