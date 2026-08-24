@@ -118,18 +118,19 @@ function sortModules(mods) {
   return mods.slice().sort((a, b) =>
     b.lv - a.lv || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
 }
-// 杂交：合并两台机器的模块
+// 杂交：合并两台机器的模块（能力最多叠加 5 个）
+const MAX_MODULES = 5;
 function mergeModules(a, b) {
   const map = {};
   for (const mod of [...a, ...b]) {
     map[mod.kind] = Math.min(3, (map[mod.kind] || 0) + mod.lv);
   }
   const merged = sortModules(Object.keys(map).map(k => ({ kind: k, lv: map[k] })));
-  return merged.slice(0, 2); // 最多保留 2 个最强模块
+  return merged.slice(0, MAX_MODULES);
 }
 function typeOfModules(mods) {
   if (mods.length === 1) return LADDER_TYPE[mods[0].kind][mods[0].lv - 1];
-  if (mods[0].lv === 1 && mods[1].lv === 1) {
+  if (mods.length === 2 && mods[0].lv === 1 && mods[1].lv === 1) {
     const kinds = [mods[0].kind, mods[1].kind];
     const pair = PAIR_TYPE.find(p => p[0].every(k => kinds.includes(k)));
     if (pair) return pair[1];
@@ -139,14 +140,17 @@ function typeOfModules(mods) {
 function totalLv(mods) { return mods.reduce((s, mod) => s + mod.lv, 0); }
 function nameOfModules(mods) {
   if (mods.length === 1) return LADDER_NAME[mods[0].kind][mods[0].lv - 1];
-  if (mods[0].lv === 1 && mods[1].lv === 1) {
+  if (mods.length === 2 && mods[0].lv === 1 && mods[1].lv === 1) {
     const kinds = [mods[0].kind, mods[1].kind];
     const pair = PAIR_TYPE.find(p => p[0].every(k => kinds.includes(k)));
     if (pair) return pair[2];
   }
-  const name = KIND_ADJ[mods[1].kind] + LADDER_NAME[mods[0].kind][mods[0].lv - 1];
+  // 修饰词链 + 本体名：碎纸机+装甲=装甲碎纸机，再+电池=充能装甲碎纸机……
+  let adj = '';
+  for (let i = mods.length - 1; i >= 1; i--) adj += KIND_ADJ[mods[i].kind];
+  const name = adj + LADDER_NAME[mods[0].kind][mods[0].lv - 1];
   const t = totalLv(mods);
-  return t > 2 ? name + ' Lv' + t : name;
+  return t > mods.length ? name + ' Lv' + t : name;
 }
 function descOfModules(mods) {
   return mods.map(mod => KIND_DESC[mod.kind] + (mod.lv > 1 ? '×' + mod.lv : '')).join('，');
@@ -1717,10 +1721,14 @@ function drawMachine(ctx, type, x, y, s, m) {
     }
     return;
   }
-  const pri = mods[0], sec = mods[1];
+  const pri = mods[0];
   if (pri) drawLevelDecor(ctx, totalLv(mods));
   drawChassis(ctx, type, pri, m);
-  if (sec) drawEmblem(ctx, sec);
+  // 副能力徽章：沿机体右侧排列，最多 4 枚
+  const EMBLEM_POS = [[29, -36], [29, -11], [29, 14], [-29, -36]];
+  for (let i = 1; i < mods.length && i <= 4; i++) {
+    drawEmblem(ctx, mods[i], EMBLEM_POS[i - 1][0], EMBLEM_POS[i - 1][1]);
+  }
   ctx.restore();
   // 血条
   if (m && m.maxHp && m.hp < m.maxHp) {
@@ -1755,7 +1763,17 @@ function drawChassis(ctx, type, pri, m) {
 function drawLevelDecor(ctx, tl) {
   if (tl <= 1) return;
   const pulse = Math.sin(time * 4) * 0.05;
-  if (tl >= 4) {
+  if (tl >= 7) {
+    // 超阶机体：青白双环
+    ctx.fillStyle = 'rgba(127,215,255,' + (0.15 + pulse) + ')';
+    ctx.beginPath(); ctx.ellipse(0, 34, 40, 11, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,240,255,' + (0.65 + pulse) + ')';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.ellipse(0, 34, 40, 11, 0, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = 'rgba(127,215,255,' + (0.45 + pulse) + ')';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.ellipse(0, 34, 33, 8.5, 0, 0, TAU); ctx.stroke();
+  } else if (tl >= 4) {
     ctx.fillStyle = 'rgba(199,123,255,' + (0.14 + pulse) + ')';
     ctx.beginPath(); ctx.ellipse(0, 34, 36, 10, 0, 0, TAU); ctx.fill();
     ctx.strokeStyle = 'rgba(199,123,255,' + (0.55 + pulse) + ')';
@@ -1774,11 +1792,11 @@ function drawLevelDecor(ctx, tl) {
   }
 }
 
-// 副模块徽章（机体右上角小圆标）
-function drawEmblem(ctx, mod) {
+// 副模块徽章（沿机体边缘的小圆标）
+function drawEmblem(ctx, mod, px, py) {
   const col = EMBLEM_COLOR[mod.kind] || '#8fa1b8';
   ctx.save();
-  ctx.translate(29, -36);
+  ctx.translate(px === undefined ? 29 : px, py === undefined ? -36 : py);
   ctx.fillStyle = 'rgba(14,20,28,0.94)';
   ctx.beginPath(); ctx.arc(0, 0, 11, 0, TAU); ctx.fill();
   ctx.strokeStyle = col;
