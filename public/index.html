@@ -105,8 +105,13 @@
   }
   #pulls .histEmpty { font-size: 11px; color: var(--dim); opacity: .6; }
   #cards { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
-  /* 普通模式卡槽 */
-  #classicTray { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
+  /* 普通 / 创造模式卡槽 */
+  #classicTray { display: flex; gap: 5px; flex: 1; flex-wrap: wrap; }
+  /* 机器多时自动缩小卡片 */
+  #classicTray.many .card { width: 58px; padding: 3px 1px 2px; }
+  #classicTray.many .card canvas { width: 40px; height: 40px; }
+  #classicTray.many .card .nm { font-size: 9px; }
+  #classicTray.many .card .cost { font-size: 9px; padding: 0 4px; }
   .card .cost {
     position: absolute; top: -7px; right: -6px; font-size: 10px; font-weight: 800;
     border-radius: 6px; padding: 1px 5px; color: #3a2500; background: var(--accent);
@@ -191,6 +196,12 @@
     background: linear-gradient(160deg, #8fd0ff, #3f8fbf);
     box-shadow: 0 4px 0 #2a6a92, 0 8px 18px rgba(80, 170, 220, .25); color: #082334;
   }
+  .bigBtn.creative {
+    background: linear-gradient(160deg, #d7b3ff, #9a5fe0);
+    box-shadow: 0 4px 0 #6d3aa8, 0 8px 18px rgba(160, 110, 230, .25); color: #1d0f30;
+  }
+  #wavesBtn { font-size: 13px; font-weight: 700; }
+  #wavesBtn.off { color: var(--danger); border-color: var(--danger); }
   .btnRow { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   .modeNote { color: var(--dim); font-size: 12px; margin-top: 10px; }
 
@@ -256,13 +267,14 @@
 <body>
 <div id="wrap">
   <header>
-    <div id="brand">⚙️ 机械防线 <small>盲盒塔防</small></div>
+    <div id="brand">⚙️ 机械防线 <small id="brandMode">盲盒塔防</small></div>
     <div id="stats">
       <div class="pill" id="energyPill"><span class="ico">⚡</span><span id="energyVal">0</span></div>
       <div class="pill" id="wavePill"><span class="ico">🌊</span><span id="waveVal">准备中</span></div>
       <div class="pill" id="scorePill"><span class="ico">🏆</span><span id="scoreVal">0</span></div>
     </div>
     <div id="btns">
+      <button class="iconBtn" id="wavesBtn" title="创造模式：开关敌潮" style="display:none;">🌊 敌潮：开</button>
       <button class="iconBtn" id="pauseBtn" title="暂停 / 继续">⏸️</button>
       <button class="iconBtn" id="muteBtn" title="声音开关">🔊</button>
       <button class="iconBtn" id="restartBtn" title="重新开始">🔄</button>
@@ -296,7 +308,8 @@
         <div>🎁 <b>开盲盒</b>：花 50⚡ 把盲盒放到战场空格上——<b>落地即开</b>，开出什么就地服役！</div>
         <div>🎲 <b>拼手气</b>：10 种机器分普通/稀有/史诗，连开 4 次普通后必出稀有以上</div>
         <div>⚡ <b>能量</b>：点击掉落的电池收集能量，发电机也会产电</div>
-        <div>🧤 <b>手套</b>：把已放置的机器搬到别的格子（冷却 5 秒）；🚀 火箭井发射后会自动装填</div>
+        <div>🧤 <b>手套</b>：把已放置的机器随意搬到别的格子，<b>没有冷却</b>；🚀 火箭井发射后会自动装填</div>
+        <div>🛠️ <b>创造模式</b>：能量无限、机器免费无冷却、敌潮可随时开关，尽情实验杂交组合</div>
         <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎；🥊 弹簧拳机近战无视护盾</div>
         <div>🧪 <b>杂交</b>：<b>任意两台机器都能合成</b>！同类升级（炮台→双管→<b>加特林</b>）；异类叠能力，一台机器最多同时拥有 <b>5 种能力</b></div>
         <div>⚠️ <b>新威胁</b>：自爆无人蜂撞机自爆、盾卫机器人的护盾能挡住子弹！</div>
@@ -305,9 +318,10 @@
       <div class="btnRow">
         <button class="bigBtn" id="startBtn">🎁 盲盒模式</button>
         <button class="bigBtn classic" id="startClassicBtn">🃏 普通模式</button>
+        <button class="bigBtn creative" id="startCreativeBtn">🛠️ 创造模式</button>
         <button class="bigBtn alt" id="menuBoardBtn">🏆 排行榜</button>
       </div>
-      <div class="modeNote">盲盒模式：开盲盒拼手气 · 普通模式：全部机器明码标价，经典种卡玩法</div>
+      <div class="modeNote">盲盒模式：开盲盒拼手气 · 普通模式：经典种卡玩法 · 创造模式：无限能量、无冷却、敌潮可关</div>
       <div id="menuBoard" style="margin-top:14px; display:none;"></div>
     </div>
 
