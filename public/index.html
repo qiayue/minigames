@@ -78,7 +78,32 @@
     filter: grayscale(.85) brightness(.75); cursor: not-allowed;
     box-shadow: none;
   }
+  #boxBtn.sel {
+    outline: 3px solid var(--accent);
+    box-shadow: 0 0 18px rgba(255, 197, 49, .65), 0 3px 0 #b96e12;
+  }
   #boxBtn .big { font-size: 22px; display: block; }
+  #trayInfo {
+    flex: 1; display: flex; flex-direction: column; justify-content: center;
+    gap: 6px; min-width: 220px; padding: 2px 4px;
+  }
+  #trayTip { font-size: 13px; color: var(--dim); }
+  #trayTip b { color: var(--accent); }
+  #trayRow2 { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  #trayRow2 .lbl { font-size: 11px; color: var(--dim); white-space: nowrap; }
+  #pityDots { display: flex; gap: 4px; }
+  #pityDots .dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--panel2); border: 1px solid var(--line);
+  }
+  #pityDots .dot.on { background: var(--rare); border-color: var(--rare); box-shadow: 0 0 6px rgba(76, 194, 255, .6); }
+  #histLbl { margin-left: 8px; }
+  #pulls { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  #pulls .hist {
+    width: 30px; height: 30px; border-radius: 7px;
+    border: 2px solid var(--line); background: var(--panel2);
+  }
+  #pulls .histEmpty { font-size: 11px; color: var(--dim); opacity: .6; }
   #cards { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
   .card {
     width: 74px; border-radius: 10px; border: 2px solid var(--line);
@@ -224,10 +249,16 @@
   </header>
 
   <div id="tray">
-    <button id="boxBtn" title="普通 58% / 稀有 30% / 史诗 12%，连续 4 次普通后必出稀有以上">
+    <button id="boxBtn" title="先点我，再点战场空格放置盲盒——落地即开！普通 58% / 稀有 30% / 史诗 12%，连续 4 次普通后必出稀有以上">
       <span class="big">🎁</span>开盲盒 <span id="boxCost">50</span>⚡
     </button>
-    <div id="cards"></div>
+    <div id="trayInfo">
+      <div id="trayTip">🎁 点"开盲盒"，再点战场空格放下盲盒 —— <b>落地即开，开出什么就地服役！</b></div>
+      <div id="trayRow2">
+        <span class="lbl">保底进度</span><span id="pityDots"></span>
+        <span class="lbl" id="histLbl">最近开出</span><span id="pulls"></span>
+      </div>
+    </div>
     <button id="shovelBtn" title="选中后点击场上的机器将其拆除"><span class="big">🔧</span>拆除</button>
   </div>
 
@@ -238,10 +269,11 @@
       <h1>⚙️ 机械防线 <span class="gold">盲盒塔防</span></h1>
       <div class="sub">废铁机器人大军来袭，开盲盒抽机器，守住你的基地！</div>
       <div class="howto">
-        <div>🎁 <b>开盲盒</b>：花 50⚡ 能量随机抽一台机器，放到卡槽里</div>
-        <div>🏗️ <b>布防</b>：点选卡片，再点击战场空格部署机器</div>
+        <div>🎁 <b>开盲盒</b>：花 50⚡ 把盲盒放到战场空格上——<b>落地即开</b>，开出什么就地服役！</div>
+        <div>🎲 <b>拼手气</b>：10 种机器分普通/稀有/史诗，连开 4 次普通后必出稀有以上</div>
         <div>⚡ <b>能量</b>：点击掉落的电池收集能量，发电机也会产电</div>
-        <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎！（需冷却）</div>
+        <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎；🥊 弹簧拳机近战无视护盾</div>
+        <div>⚠️ <b>新威胁</b>：自爆无人蜂撞机自爆、盾卫机器人的护盾能挡住子弹！</div>
         <div>🛡️ <b>目标</b>：守住 10 波进攻，别让机器人冲进左侧基地</div>
       </div>
       <div class="btnRow">

@@ -1,5 +1,5 @@
 /* 机械防线 · 盲盒塔防
- * 植物大战僵尸式玩法：开盲盒抽机器 → 布防 → 抵御一波波机器人进攻
+ * 植物大战僵尸式玩法：把盲盒放到战场上 → 落地开箱 → 随机机器就地服役
  * 纯 Canvas 绘制，无外部资源
  */
 'use strict';
@@ -12,7 +12,8 @@ const W = GRID_X + COLS * CELL_W + 12;   // 940
 const H = GRID_Y + ROWS * CELL_H + 12;   // 526
 const TOTAL_WAVES = 10;
 const BOX_COST = 50;
-const HAND_MAX = 6;
+const BOX_HP = 150;
+const BOX_OPEN_TIME = 0.9;
 const TAU = Math.PI * 2;
 
 const RARITY_NAME = { common: '普通', rare: '稀有', epic: '史诗' };
@@ -22,23 +23,28 @@ const MACHINES = {
   turret:    { name: '自动炮台',   rarity: 'common', hp: 300,  desc: '向前方持续发射能量弹' },
   generator: { name: '能量发电机', rarity: 'common', hp: 300,  desc: '每 7 秒产出 25 能量' },
   barricade: { name: '装甲路障',   rarity: 'common', hp: 1600, desc: '高耐久，把敌人挡在身前' },
+  puncher:   { name: '弹簧拳机',   rarity: 'common', hp: 380,  desc: '弹簧铁拳连续痛击身前的敌人（无视护盾）' },
   shredder:  { name: '碎纸机',     rarity: 'rare',   hp: 450,  desc: '把靠近的机器人整个粉碎，随后冷却 9 秒' },
   fan:       { name: '冷冻风扇',   rarity: 'rare',   hp: 300,  desc: '冰弹攻击并大幅减速敌人' },
+  magnet:    { name: '磁力吊塔',   rarity: 'rare',   hp: 320,  desc: '定期把本行最靠近基地的敌人拖回后方' },
   tesla:     { name: '特斯拉线圈', rarity: 'epic',   hp: 350,  desc: '闪电链同时打击本行多个敌人' },
+  railgun:   { name: '轨道激光炮', rarity: 'epic',   hp: 300,  desc: '激光贯穿本行所有敌人' },
   rocket:    { name: '火箭发射井', rarity: 'epic',   hp: 200,  desc: '敌人进入本行时发射火箭，贯穿全行（一次性）' },
 };
 
 const ENEMIES = {
-  scrap:   { name: '废铁机器人', hp: 100,  speed: 19, dmg: 45,  score: 10, w: 46 },
-  armored: { name: '装甲机器人', hp: 320,  speed: 15, dmg: 55,  score: 25, w: 50 },
-  drone:   { name: '疾速无人机', hp: 70,   speed: 42, dmg: 30,  score: 15, w: 44 },
-  crusher: { name: '重型碾压车', hp: 1400, speed: 11, dmg: 240, score: 80, w: 86 },
+  scrap:     { name: '废铁机器人', hp: 100,  speed: 19, dmg: 45,  score: 10, w: 46 },
+  armored:   { name: '装甲机器人', hp: 320,  speed: 15, dmg: 55,  score: 25, w: 50 },
+  drone:     { name: '疾速无人机', hp: 70,   speed: 42, dmg: 30,  score: 15, w: 44, fly: true },
+  bomber:    { name: '自爆无人蜂', hp: 90,   speed: 34, dmg: 300, score: 20, w: 44, fly: true },
+  shieldbot: { name: '盾卫机器人', hp: 260,  speed: 13, dmg: 50,  score: 30, w: 52, shield: 220 },
+  crusher:   { name: '重型碾压车', hp: 1400, speed: 11, dmg: 240, score: 80, w: 86 },
 };
 
 const BOX_POOL = {
-  common: [['turret', 24], ['generator', 22], ['barricade', 12]],
-  rare:   [['shredder', 15], ['fan', 15]],
-  epic:   [['tesla', 7], ['rocket', 5]],
+  common: [['turret', 20], ['generator', 20], ['barricade', 10], ['puncher', 12]],
+  rare:   [['shredder', 12], ['fan', 12], ['magnet', 10]],
+  epic:   [['tesla', 6], ['rocket', 5], ['railgun', 6]],
 };
 
 /* ========== 工具 ========== */
@@ -73,21 +79,20 @@ cv.style.aspectRatio = W + ' / ' + H;
 
 /* ========== 游戏状态 ========== */
 let state = 'menu';        // menu | playing | paused | over | win
-let energy, score, kills, wave, endless, pity;
-let grid, hand, enemies, bullets, orbs, parts, floats, zaps;
+let energy, score, kills, wave, endless, pity, history;
+let grid, enemies, bullets, orbs, parts, floats, zaps, beams;
 let waveState, waveTimer, queue, spawnT, skyT, lastRows;
 let bannerText, bannerSub, bannerT, shakeT, shakeAmp;
-let sel = null;            // {mode:'card', idx} | {mode:'shovel'}
+let sel = null;            // {mode:'box'} | {mode:'shovel'}
 let mouse = { x: -1, y: -1 };
 let submitted = false;
 let time = 0;
 
 function initGame() {
-  energy = 100; score = 0; kills = 0; wave = 0;
-  endless = false; pity = 0;
+  energy = 150; score = 0; kills = 0; wave = 0;
+  endless = false; pity = 0; history = [];
   grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
-  hand = [];
-  enemies = []; bullets = []; orbs = []; parts = []; floats = []; zaps = [];
+  enemies = []; bullets = []; orbs = []; parts = []; floats = []; zaps = []; beams = [];
   waveState = 'pre'; waveTimer = 15; queue = []; spawnT = 0;
   skyT = 3; lastRows = [];
   bannerText = ''; bannerSub = ''; bannerT = 0; shakeT = 0; shakeAmp = 0;
@@ -146,6 +151,9 @@ function sfx(name) {
     case 'shoot': tone(950, 560, 0.07, 'square', 0.08); break;
     case 'ice':   tone(1300, 850, 0.08, 'sine', 0.09); break;
     case 'zap':   tone(1600, 180, 0.13, 'sawtooth', 0.14); noiseBurst(0.1, 0.12, 3000); break;
+    case 'laser': tone(1900, 240, 0.2, 'sawtooth', 0.12); tone(2500, 2500, 0.06, 'sine', 0.07); break;
+    case 'punch': tone(240, 110, 0.09, 'square', 0.14); noiseBurst(0.05, 0.1, 1500); break;
+    case 'grab':  tone(500, 1100, 0.18, 'triangle', 0.13); break;
     case 'shred': noiseBurst(0.3, 0.28, 900); tone(160, 60, 0.25, 'square', 0.12); break;
     case 'boom':  noiseBurst(0.45, 0.4, 420); tone(120, 40, 0.35, 'sine', 0.3); break;
     case 'chomp': tone(150, 90, 0.08, 'square', 0.1); break;
@@ -179,58 +187,80 @@ function rollType() {
   }
   return pool[pool.length - 1][0];
 }
-function canOpenBox() {
-  return state === 'playing' && energy >= BOX_COST && hand.length < HAND_MAX;
+
+// 把未开封的盲盒放到场上
+function placeBox(row, col) {
+  if (row < 0 || row >= ROWS || col < 0 || col >= COLS || grid[row][col]) return false;
+  grid[row][col] = {
+    type: 'box', row, col,
+    hp: BOX_HP, maxHp: BOX_HP,
+    openT: BOX_OPEN_TIME,
+    t: 0, cd: 0, chew: 0, spin: 0,
+    flash: 0, recoil: 0, pulse: 0, armed: true,
+  };
+  spawnParts(cellCx(col), cellCy(row) - 20, '#ffc531', 8, 80, 0.4, 'spark');
+  sfx('place');
+  return true;
 }
-function openBox() {
-  if (!canOpenBox()) { sfx('error'); return; }
-  energy -= BOX_COST;
+
+// 盲盒在场上炸开，变成随机机器
+function openBoxOnField(m) {
   const type = rollType();
-  hand.push(type);
-  renderTray();
+  const info = MACHINES[type];
+  history.unshift(type);
+  if (history.length > 8) history.pop();
+  const { row, col } = m;
+  grid[row][col] = {
+    type, row, col,
+    hp: info.hp, maxHp: info.hp,
+    t: rand(0, 0.6), cd: 0, chew: 0, spin: rand(0, TAU),
+    flash: 0, recoil: 0, pulse: 0, armed: true,
+  };
+  // 彩带 + 揭示
+  spawnParts(cellCx(col), cellCy(row), '#ffc531', 10, 150, 0.6, 'paper');
+  spawnParts(cellCx(col), cellCy(row), '#ff5d5d', 8, 140, 0.6, 'paper');
+  spawnParts(cellCx(col), cellCy(row), RARITY_COLOR[info.rarity], 10, 160, 0.7, 'spark');
+  addFloat(cellCx(col), cellCy(row) - 52, info.name + '！', RARITY_COLOR[info.rarity]);
   showReveal(type);
+  renderTray();
   sfx('box');
 }
 
-/* ========== 卡槽 / 选择 ========== */
+/* ========== 状态栏（保底进度 + 最近开出） ========== */
 function renderTray() {
-  const holder = $('cards');
-  holder.innerHTML = '';
-  for (let i = 0; i < HAND_MAX; i++) {
-    const type = hand[i];
-    const el = document.createElement('div');
-    if (!type) {
-      el.className = 'card empty';
-      el.textContent = '空';
-      el.style.justifyContent = 'center';
-      el.style.fontSize = '12px';
-      el.style.color = 'var(--dim)';
-      el.style.minHeight = '74px';
-      holder.appendChild(el);
-      continue;
+  const dots = $('pityDots');
+  if (dots) {
+    dots.innerHTML = '';
+    for (let i = 0; i < 4; i++) {
+      const d = document.createElement('span');
+      d.className = 'dot' + (i < pity ? ' on' : '');
+      dots.appendChild(d);
     }
-    const info = MACHINES[type];
-    el.className = 'card r-' + info.rarity + (sel && sel.mode === 'card' && sel.idx === i ? ' sel' : '');
-    el.title = info.name + '：' + info.desc;
-    const mini = document.createElement('canvas');
-    mini.width = 104; mini.height = 104;
-    const mg = mini.getContext('2d');
-    drawMachine(mg, type, 52, 58, 1.0, {});
-    const nm = document.createElement('div');
-    nm.className = 'nm';
-    nm.textContent = info.name;
-    const tag = document.createElement('div');
-    tag.className = 'tag ' + info.rarity;
-    tag.textContent = RARITY_NAME[info.rarity];
-    el.appendChild(mini); el.appendChild(nm); el.appendChild(tag);
-    el.addEventListener('click', () => {
-      if (state !== 'playing') return;
-      sel = (sel && sel.mode === 'card' && sel.idx === i) ? null : { mode: 'card', idx: i };
-      renderTray();
-    });
-    holder.appendChild(el);
+  }
+  const pulls = $('pulls');
+  if (pulls) {
+    pulls.innerHTML = '';
+    if (!history.length) {
+      const s = document.createElement('span');
+      s.className = 'histEmpty';
+      s.textContent = '还没开过盲盒';
+      pulls.appendChild(s);
+    }
+    for (const type of history) {
+      const info = MACHINES[type];
+      const mini = document.createElement('canvas');
+      mini.width = 72; mini.height = 72;
+      mini.className = 'hist';
+      mini.title = info.name + '：' + info.desc;
+      mini.style.borderColor = RARITY_COLOR[info.rarity];
+      const mg = mini.getContext('2d');
+      mg.scale(0.7, 0.7);
+      drawMachine(mg, type, 51, 58, 1.0, {});
+      pulls.appendChild(mini);
+    }
   }
   $('shovelBtn').classList.toggle('sel', !!(sel && sel.mode === 'shovel'));
+  $('boxBtn').classList.toggle('sel', !!(sel && sel.mode === 'box'));
 }
 
 let revealTimer = null;
@@ -241,6 +271,7 @@ function showReveal(type) {
   card.className = 'r-' + info.rarity;
   const ic = $('revealIcon');
   const rg = ic.getContext('2d');
+  rg.setTransform(1, 0, 0, 1, 0, 0);
   rg.clearRect(0, 0, 192, 192);
   drawMachine(rg, type, 96, 104, 1.9, {});
   $('revealName').textContent = info.name;
@@ -297,7 +328,10 @@ function spawnEnemy(type, row) {
     x: W + 30 + rand(0, 20),
     hp: Math.round(info.hp * hpMult()),
     maxHp: Math.round(info.hp * hpMult()),
+    shield: info.shield ? Math.round(info.shield * hpMult()) : 0,
+    maxShield: info.shield ? Math.round(info.shield * hpMult()) : 0,
     speed: info.speed, dmg: info.dmg, scoreVal: info.score, w: info.w,
+    fly: !!info.fly,
     hitT: 0, slowT: 0, anim: rand(0, TAU), flash: 0,
   });
 }
@@ -315,21 +349,23 @@ function pickRow() {
 function waveEnemies(n) {
   const list = [];
   const push = (t, c) => { for (let i = 0; i < c; i++) list.push(t); };
-  if (n === 1) { push('scrap', 3); }
-  else if (n === 2) { push('scrap', 5); }
+  if (n === 1) { push('scrap', 2); }
+  else if (n === 2) { push('scrap', 4); }
   else if (n === 3) { push('scrap', 5); push('armored', 2); }
   else if (n === 4) { push('scrap', 6); push('armored', 2); push('drone', 2); }
-  else if (n === 5) { push('scrap', 7); push('armored', 3); push('drone', 2); }
-  else if (n === 6) { push('scrap', 7); push('armored', 3); push('drone', 4); }
-  else if (n === 7) { push('scrap', 8); push('armored', 4); push('drone', 3); push('crusher', 1); }
-  else if (n === 8) { push('scrap', 8); push('armored', 5); push('drone', 4); push('crusher', 1); }
-  else if (n === 9) { push('scrap', 9); push('armored', 5); push('drone', 4); push('crusher', 2); }
-  else if (n === 10) { push('scrap', 10); push('armored', 6); push('drone', 5); push('crusher', 3); }
+  else if (n === 5) { push('scrap', 6); push('armored', 3); push('drone', 2); push('bomber', 2); }
+  else if (n === 6) { push('scrap', 6); push('armored', 3); push('drone', 3); push('bomber', 2); push('shieldbot', 1); }
+  else if (n === 7) { push('scrap', 7); push('armored', 4); push('drone', 2); push('bomber', 2); push('shieldbot', 2); push('crusher', 1); }
+  else if (n === 8) { push('scrap', 7); push('armored', 4); push('drone', 3); push('bomber', 3); push('shieldbot', 2); push('crusher', 1); }
+  else if (n === 9) { push('scrap', 8); push('armored', 5); push('drone', 3); push('bomber', 3); push('shieldbot', 3); push('crusher', 2); }
+  else if (n === 10) { push('scrap', 9); push('armored', 5); push('drone', 4); push('bomber', 4); push('shieldbot', 3); push('crusher', 3); }
   else {
     const k = n - TOTAL_WAVES;
-    push('scrap', 10 + k);
-    push('armored', 6 + k);
-    push('drone', 5 + Math.floor(k * 0.8));
+    push('scrap', 9 + k);
+    push('armored', 5 + k);
+    push('drone', 4 + Math.floor(k * 0.6));
+    push('bomber', 4 + Math.floor(k * 0.6));
+    push('shieldbot', 3 + Math.floor(k * 0.5));
     push('crusher', 3 + Math.floor(k / 2));
   }
   // 洗牌，重型碾压车安排在后半段出场
@@ -348,7 +384,8 @@ function startWave() {
   waveState = 'spawn';
   spawnT = 0.6;
   if (!endless && wave === TOTAL_WAVES) banner('⚠️ 最终决战！', '守住这一波就胜利了！');
-  else if (wave === 5) banner('第 5 波来袭！', '一大波机器人正在接近……');
+  else if (wave === 5) banner('第 5 波来袭！', '一大波机器人正在接近……小心自爆无人蜂！');
+  else if (wave === 6) banner('第 6 波来袭！', '盾卫机器人登场：护盾会挡住子弹，用近战机器对付它！');
   else banner('第 ' + wave + ' 波来袭！', '');
   sfx('horn');
 }
@@ -380,7 +417,20 @@ function updateWaves(dt) {
 }
 
 /* ========== 战斗 ========== */
-function damageEnemy(e, d, pierceArmor) {
+// kind: 'ranged' 会先被护盾吸收；'melee' / 'true' 无视护盾
+function damageEnemy(e, d, kind) {
+  if (kind === 'ranged' && e.shield > 0) {
+    const absorbed = Math.min(e.shield, d);
+    e.shield -= absorbed;
+    d -= absorbed;
+    e.flash = 0.12;
+    if (e.shield <= 0) {
+      spawnParts(e.x - e.w / 2, rowCy(e), '#9fdcff', 12, 140, 0.5, 'gear');
+      addFloat(e.x, rowCy(e) - 40, '护盾破碎！', '#4cc2ff');
+      sfx('break');
+    }
+    if (d <= 0) return;
+  }
   e.hp -= d;
   e.flash = 0.12;
   if (e.hp <= 0 && !e.dead) {
@@ -392,7 +442,7 @@ function damageEnemy(e, d, pierceArmor) {
     if (e.type === 'crusher') { shake(0.35, 5); sfx('boom'); }
   }
 }
-function rowCy(e) { return cellCy(e.row) + (e.type === 'drone' ? -22 : 0); }
+function rowCy(e) { return cellCy(e.row) + (e.fly ? -22 : 0); }
 function shake(t, amp) { shakeT = t; shakeAmp = amp; }
 
 function enemiesInRow(row) { return enemies.filter(e => e.row === row); }
@@ -403,14 +453,20 @@ function updateMachines(dt) {
       const m = grid[r][c];
       if (!m) continue;
       const cx = cellCx(c);
-      m.spin += dt * (m.type === 'fan' ? 9 : 1.2);
+      m.spin += dt * (m.type === 'fan' ? 9 : m.type === 'box' ? 10 : 1.2);
       if (m.flash > 0) m.flash -= dt;
       if (m.recoil > 0) m.recoil -= dt;
       if (m.pulse > 0) m.pulse -= dt;
       if (m.chew > 0) m.chew -= dt;
       if (m.cd > 0) m.cd -= dt;
 
-      if (m.type === 'turret') {
+      if (m.type === 'box') {
+        m.openT -= dt;
+        if (Math.random() < dt * 6) {
+          spawnParts(cx + rand(-24, 24), cellCy(r) + rand(-30, 20), '#ffd764', 1, 40, 0.35, 'spark');
+        }
+        if (m.openT <= 0) openBoxOnField(m);
+      } else if (m.type === 'turret') {
         m.t += dt;
         if (m.t >= 1.15) {
           const target = enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
@@ -440,6 +496,45 @@ function updateMachines(dt) {
           });
           sfx('gen');
         }
+      } else if (m.type === 'puncher') {
+        m.t += dt;
+        if (m.t >= 0.9) {
+          const left = GRID_X + c * CELL_W;
+          const prey = enemies.find(e =>
+            e.row === r && !e.dead &&
+            e.x - e.w / 2 <= left + CELL_W + 26 &&
+            e.x > left - 10
+          );
+          if (prey) {
+            m.t = 0; m.recoil = 0.25;
+            damageEnemy(prey, 45, 'melee');
+            spawnParts(prey.x - 6, rowCy(prey), '#ffd764', 5, 100, 0.3, 'spark');
+            sfx('punch');
+          }
+        }
+      } else if (m.type === 'magnet') {
+        m.t += dt;
+        if (m.t >= 6.5) {
+          const targets = enemiesInRow(r).filter(e =>
+            !e.dead && e.type !== 'crusher' &&
+            e.x > cx - 10 && e.x < cx + 5 * CELL_W
+          );
+          if (targets.length) {
+            const prey = targets.reduce((a, b) => (a.x < b.x ? a : b));
+            m.t = 0; m.flash = 0.3;
+            const oldX = prey.x;
+            prey.x = Math.min(prey.x + 2.2 * CELL_W, W - 12);
+            damageEnemy(prey, 30, 'true');
+            zaps.push({
+              pts: [{ x: cx + 14, y: cellCy(r) - 30 }, { x: oldX, y: rowCy(prey) }],
+              t: 0.25, max: 0.25, color: '#ffca6b',
+            });
+            spawnParts(oldX, rowCy(prey), '#ffca6b', 8, 90, 0.4, 'spark');
+            spawnParts(prey.x, rowCy(prey), '#ffca6b', 8, 90, 0.4, 'spark');
+            addFloat(prey.x, rowCy(prey) - 40, '被拖回！', '#ffca6b');
+            sfx('grab');
+          }
+        }
       } else if (m.type === 'tesla') {
         m.t += dt;
         if (m.t >= 2.6) {
@@ -452,10 +547,21 @@ function updateMachines(dt) {
             const pts = [{ x: cx, y: cellCy(r) - 26 }];
             for (const e of targets) {
               pts.push({ x: e.x, y: rowCy(e) });
-              damageEnemy(e, 55);
+              damageEnemy(e, 55, 'ranged');
             }
             zaps.push({ pts, t: 0.22, max: 0.22 });
             sfx('zap');
+          }
+        }
+      } else if (m.type === 'railgun') {
+        m.t += dt;
+        if (m.t >= 3.8) {
+          const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx);
+          if (targets.length) {
+            m.t = 0; m.flash = 0.3;
+            for (const e of targets) damageEnemy(e, 60, 'ranged');
+            beams.push({ row: r, x0: cx + 26, t: 0.28, max: 0.28 });
+            sfx('laser');
           }
         }
       } else if (m.type === 'shredder') {
@@ -468,7 +574,7 @@ function updateMachines(dt) {
           );
           if (prey) {
             m.cd = 9; m.chew = 0.7;
-            damageEnemy(prey, 550, true);
+            damageEnemy(prey, 550, 'true');
             spawnParts(cx + 20, cellCy(r), '#e8edf4', 16, 150, 0.7, 'paper');
             addFloat(cx, cellCy(r) - 46, '咔嚓！', '#ff9d2e');
             sfx('shred');
@@ -499,7 +605,7 @@ function updateBullets(dt) {
       for (const e of enemies) {
         if (e.row === b.row && !e.dead && !b.hit.has(e) && Math.abs(b.x - e.x) < e.w / 2 + 16) {
           b.hit.add(e);
-          damageEnemy(e, b.dmg);
+          damageEnemy(e, b.dmg, 'ranged');
           spawnParts(e.x, rowCy(e), '#ff9d2e', 14, 160, 0.5, 'spark');
         }
       }
@@ -511,7 +617,7 @@ function updateBullets(dt) {
       if (e.row === b.row && !e.dead && Math.abs(b.x - e.x) < e.w / 2 + 6) { hitEnemy = e; break; }
     }
     if (hitEnemy) {
-      damageEnemy(hitEnemy, b.dmg);
+      damageEnemy(hitEnemy, b.dmg, 'ranged');
       if (b.kind === 'ice') {
         hitEnemy.slowT = 3;
         spawnParts(b.x, rowCy(hitEnemy), '#9fdcff', 5, 80, 0.35, 'spark');
@@ -541,6 +647,16 @@ function updateEnemies(dt) {
       if (cand && front <= GRID_X + col * CELL_W + CELL_W * 0.62) m = cand;
     }
     if (m) {
+      if (e.type === 'bomber') {
+        // 自爆：与机器同归于尽
+        damageMachine(m, e.dmg);
+        spawnParts(e.x, rowCy(e), '#ff9d2e', 18, 170, 0.6, 'spark');
+        spawnParts(e.x, rowCy(e), '#5b6470', 10, 90, 0.7, 'smoke');
+        shake(0.2, 3);
+        sfx('boom');
+        damageEnemy(e, e.hp + 1, 'true');
+        continue;
+      }
       e.hitT -= dt;
       if (e.hitT <= 0) {
         e.hitT = e.type === 'crusher' ? 0.8 : 0.95;
@@ -635,6 +751,10 @@ function updateFx(dt) {
     zaps[i].t -= dt;
     if (zaps[i].t <= 0) zaps.splice(i, 1);
   }
+  for (let i = beams.length - 1; i >= 0; i--) {
+    beams[i].t -= dt;
+    if (beams[i].t <= 0) beams.splice(i, 1);
+  }
   if (bannerT > 0) bannerT -= dt;
   if (shakeT > 0) shakeT -= dt;
 }
@@ -668,7 +788,7 @@ function updateHud() {
   else if (endless || wave > TOTAL_WAVES) wtxt = '无尽 · 第' + wave + '波';
   else wtxt = '第' + wave + '/' + TOTAL_WAVES + '波';
   $('waveVal').textContent = wtxt;
-  $('boxBtn').disabled = !canOpenBox();
+  $('boxBtn').disabled = state !== 'playing' || energy < BOX_COST;
 }
 
 /* ========== 游戏流程 ========== */
@@ -676,7 +796,7 @@ function startGame() {
   initGame();
   state = 'playing';
   show('menu', false); show('end', false); show('pauseOv', false);
-  banner('准备布防！', '15 秒后第一波进攻开始');
+  banner('准备布防！', '点"开盲盒"再点空格放置 —— 落地即开！');
 }
 function pauseGame() {
   if (state !== 'playing') return;
@@ -833,20 +953,31 @@ cv.addEventListener('pointerdown', ev => {
     }
     return;
   }
-  if (sel && sel.mode === 'card') {
-    const type = hand[sel.idx];
-    if (!type) { sel = null; renderTray(); return; }
+  if (sel && sel.mode === 'box') {
     if (grid[cell.r][cell.c]) {
       addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '这里已有机器', '#ff5d5d');
       sfx('error');
       return;
     }
-    if (place(type, cell.r, cell.c)) {
-      hand.splice(sel.idx, 1);
+    if (energy < BOX_COST) {
       sel = null;
       renderTray();
+      sfx('error');
+      return;
+    }
+    if (placeBox(cell.r, cell.c)) {
+      energy -= BOX_COST;
+      // 能量足够时保持放置模式，可以连续放
+      if (energy < BOX_COST) {
+        sel = null;
+        renderTray();
+      }
     }
   }
+});
+cv.addEventListener('contextmenu', ev => {
+  ev.preventDefault();
+  if (sel) { sel = null; renderTray(); }
 });
 window.addEventListener('keydown', ev => {
   if (ev.key === 'Escape') {
@@ -862,7 +993,18 @@ document.addEventListener('visibilitychange', () => {
 $('startBtn').addEventListener('click', () => { ensureAc(); startGame(); });
 $('againBtn').addEventListener('click', () => { ensureAc(); startGame(); });
 $('endlessBtn').addEventListener('click', continueEndless);
-$('boxBtn').addEventListener('click', () => { ensureAc(); openBox(); });
+$('boxBtn').addEventListener('click', () => {
+  ensureAc();
+  if (state !== 'playing') return;
+  if (sel && sel.mode === 'box') {
+    sel = null;
+  } else if (energy >= BOX_COST) {
+    sel = { mode: 'box' };
+  } else {
+    sfx('error');
+  }
+  renderTray();
+});
 $('shovelBtn').addEventListener('click', () => {
   if (state !== 'playing') return;
   sel = (sel && sel.mode === 'shovel') ? null : { mode: 'shovel' };
@@ -915,6 +1057,7 @@ function draw() {
       if (e.row === r) drawEnemy(e);
     }
   }
+  drawBeams();
   drawBullets();
   drawZaps();
   drawParts();
@@ -995,12 +1138,16 @@ function drawMachine(ctx, type, x, y, s, m) {
   ctx.ellipse(0, 36, 30, 7, 0, 0, TAU);
   ctx.fill();
   switch (type) {
+    case 'box': drawGiftBox(ctx, m); break;
     case 'turret': drawTurret(ctx, m); break;
     case 'generator': drawGenerator(ctx, m); break;
     case 'barricade': drawBarricade(ctx, m); break;
+    case 'puncher': drawPuncher(ctx, m); break;
     case 'shredder': drawShredder(ctx, m); break;
     case 'fan': drawFan(ctx, m); break;
+    case 'magnet': drawMagnet(ctx, m); break;
     case 'tesla': drawTesla(ctx, m); break;
+    case 'railgun': drawRailgun(ctx, m); break;
     case 'rocket': drawRocket(ctx, m); break;
   }
   ctx.restore();
@@ -1013,6 +1160,40 @@ function drawMachine(ctx, type, x, y, s, m) {
     ctx.fillStyle = ratio > 0.4 ? '#58d68b' : '#ff5d5d';
     ctx.fillRect(x - bw / 2, y - 52 * s, bw * ratio, 5);
   }
+}
+
+function drawGiftBox(ctx, m) {
+  const spin = m && m.spin ? m.spin : 0;
+  const progress = m && m.openT !== undefined ? 1 - m.openT / BOX_OPEN_TIME : 0;
+  const wob = Math.sin(spin * 4) * (0.06 + progress * 0.18);
+  ctx.rotate(wob);
+  const pop = 1 + progress * 0.12;
+  ctx.scale(pop, pop);
+  // 盒身
+  ctx.fillStyle = '#ff9d2e';
+  rr(ctx, -24, -12, 48, 40, 6); ctx.fill();
+  ctx.fillStyle = '#e2820f';
+  rr(ctx, -24, 16, 48, 12, 5); ctx.fill();
+  // 竖缎带
+  ctx.fillStyle = '#ff5d5d';
+  ctx.fillRect(-5, -12, 10, 40);
+  // 盒盖
+  ctx.fillStyle = '#ffc531';
+  rr(ctx, -28, -24, 56, 14, 5); ctx.fill();
+  ctx.fillStyle = '#ff5d5d';
+  ctx.fillRect(-5, -24, 10, 14);
+  // 蝴蝶结
+  ctx.fillStyle = '#ff5d5d';
+  ctx.beginPath(); ctx.ellipse(-9, -29, 7, 5, -0.4, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(9, -29, 7, 5, 0.4, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#d94343';
+  ctx.beginPath(); ctx.arc(0, -28, 3.5, 0, TAU); ctx.fill();
+  // 问号
+  ctx.fillStyle = '#fff7e6';
+  ctx.font = '900 20px "PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('?', 12, 6);
 }
 
 function drawTurret(ctx, m) {
@@ -1126,6 +1307,47 @@ function drawBarricade(ctx, m) {
   }
 }
 
+function drawPuncher(ctx, m) {
+  // 出拳动画：recoil 从 0.25 递减，拳头先伸出再收回
+  let ext = 0;
+  if (m && m.recoil > 0) {
+    const p = 1 - m.recoil / 0.25;
+    ext = Math.sin(p * Math.PI) * 18;
+  }
+  // 底座
+  ctx.fillStyle = '#2f3d4e';
+  rr(ctx, -20, 18, 40, 18, 5); ctx.fill();
+  ctx.fillStyle = '#3c4b5d';
+  rr(ctx, -16, 2, 24, 20, 5); ctx.fill();
+  // 机身
+  ctx.fillStyle = '#71859b';
+  rr(ctx, -18, -22, 26, 28, 6); ctx.fill();
+  ctx.fillStyle = '#ffc531';
+  ctx.beginPath(); ctx.arc(-6, -14, 3, 0, TAU); ctx.fill();
+  // 弹簧（锯齿线）
+  ctx.strokeStyle = '#8ba1b8';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  const sx = 8, len = 12 + ext;
+  ctx.moveTo(sx, -8);
+  for (let i = 0; i <= 5; i++) {
+    ctx.lineTo(sx + (i + 0.5) * len / 6, -8 + (i % 2 === 0 ? -6 : 6));
+  }
+  ctx.lineTo(sx + len, -8);
+  ctx.stroke();
+  // 拳套
+  ctx.fillStyle = '#e04848';
+  ctx.beginPath();
+  ctx.arc(sx + len + 9, -8, 11, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = '#c23636';
+  rr(ctx, sx + len - 2, -16, 8, 16, 3); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.beginPath();
+  ctx.arc(sx + len + 12, -12, 3.5, 0, TAU);
+  ctx.fill();
+}
+
 function drawShredder(ctx, m) {
   const chew = m && m.chew > 0 ? m.chew : 0;
   const ready = !m || !m.cd || m.cd <= 0;
@@ -1215,6 +1437,57 @@ function drawFan(ctx, m) {
   }
 }
 
+function drawMagnet(ctx, m) {
+  const flash = m && m.flash > 0 ? m.flash : 0;
+  // 底座
+  ctx.fillStyle = '#33414e';
+  rr(ctx, -22, 24, 44, 12, 4); ctx.fill();
+  // 塔架
+  ctx.fillStyle = '#4c5b6d';
+  rr(ctx, -20, -30, 9, 56, 3); ctx.fill();
+  ctx.strokeStyle = '#3a4756';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-18, 16); ctx.lineTo(-13, 2);
+  ctx.moveTo(-13, 16); ctx.lineTo(-18, 2);
+  ctx.stroke();
+  // 横臂
+  ctx.fillStyle = '#5d7186';
+  rr(ctx, -22, -34, 48, 8, 3); ctx.fill();
+  // 吊索
+  ctx.strokeStyle = '#8ba1b8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(18, -26);
+  ctx.lineTo(18, -14);
+  ctx.stroke();
+  // 马蹄形磁铁
+  ctx.strokeStyle = '#e04848';
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.arc(18, -8, 9, Math.PI, 0);
+  ctx.stroke();
+  ctx.fillStyle = '#c8d4e0';
+  ctx.fillRect(6, -8, 7, 8);
+  ctx.fillRect(23, -8, 7, 8);
+  // 吸附电弧
+  if (flash > 0) {
+    ctx.strokeStyle = 'rgba(255,202,107,' + (flash * 2.5) + ')';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(10 + i * 8, 2);
+      ctx.lineTo(12 + i * 8 + rand(-3, 3), 12 + rand(0, 6));
+      ctx.stroke();
+    }
+  }
+  // 指示灯
+  ctx.fillStyle = '#ffc531';
+  ctx.beginPath();
+  ctx.arc(-16, -38, 3, 0, TAU);
+  ctx.fill();
+}
+
 function drawTesla(ctx, m) {
   const flash = m && m.flash > 0 ? m.flash * 4 : 0;
   // 底座
@@ -1260,6 +1533,41 @@ function drawTesla(ctx, m) {
   }
 }
 
+function drawRailgun(ctx, m) {
+  const charge = m ? clamp((m.t || 0) / 3.8, 0, 1) : 0.6;
+  const flash = m && m.flash > 0 ? m.flash : 0;
+  // 平台
+  ctx.fillStyle = '#2f3d4e';
+  rr(ctx, -22, 18, 44, 18, 5); ctx.fill();
+  ctx.fillStyle = '#3c4b5d';
+  rr(ctx, -18, 8, 30, 14, 4); ctx.fill();
+  // 双轨炮身
+  ctx.fillStyle = '#57687c';
+  rr(ctx, -14, -16, 50, 7, 3); ctx.fill();
+  rr(ctx, -14, -2, 50, 7, 3); ctx.fill();
+  // 能量线圈
+  for (let i = 0; i < 3; i++) {
+    const cxp = -4 + i * 13;
+    ctx.strokeStyle = flash > 0 ? '#ffd0a8' : 'rgba(255,140,80,' + (0.35 + charge * 0.6) + ')';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cxp, -5.5, 9, -Math.PI * 0.65, Math.PI * 0.65);
+    ctx.stroke();
+  }
+  // 炮口发光
+  ctx.fillStyle = flash > 0 ? '#fff1e0' : 'rgba(255,140,80,' + (0.3 + charge * 0.7) + ')';
+  ctx.beginPath();
+  ctx.arc(38, -5.5, 4 + charge * 2 + flash * 8, 0, TAU);
+  ctx.fill();
+  // 尾部机箱
+  ctx.fillStyle = '#71859b';
+  rr(ctx, -24, -20, 12, 30, 4); ctx.fill();
+  ctx.fillStyle = '#ff8c50';
+  ctx.beginPath();
+  ctx.arc(-18, -24, 3, 0, TAU);
+  ctx.fill();
+}
+
 function drawRocket(ctx, m) {
   const blink = Math.sin((m && m.spin ? m.spin : 0) * 5) > 0;
   // 发射井
@@ -1301,7 +1609,7 @@ function drawEnemy(e) {
   const y = cellCy(e.row);
   const bob = Math.sin(e.anim * 7) * 2.5;
   g.save();
-  if (e.type === 'drone') {
+  if (e.fly) {
     g.translate(e.x, y - 22 + Math.sin(e.anim * 3) * 4);
   } else {
     g.translate(e.x, y + bob * 0.4);
@@ -1312,6 +1620,8 @@ function drawEnemy(e) {
     case 'scrap': drawScrap(e, bob); break;
     case 'armored': drawArmored(e, bob); break;
     case 'drone': drawDrone(e); break;
+    case 'bomber': drawBomber(e); break;
+    case 'shieldbot': drawShieldbot(e, bob); break;
     case 'crusher': drawCrusher(e); break;
   }
   if (flash) {
@@ -1333,8 +1643,8 @@ function drawEnemy(e) {
     g.globalAlpha = 1;
   }
   g.restore();
-  // 血条
-  if (e.hp < e.maxHp) {
+  // 血条 + 护盾条
+  if (e.hp < e.maxHp || (e.maxShield && e.shield < e.maxShield)) {
     const bw = e.type === 'crusher' ? 64 : 40;
     const ratio = clamp(e.hp / e.maxHp, 0, 1);
     const by = rowCy(e) - (e.type === 'crusher' ? 52 : 46);
@@ -1342,6 +1652,10 @@ function drawEnemy(e) {
     g.fillRect(e.x - bw / 2, by, bw, 4.5);
     g.fillStyle = ratio > 0.4 ? '#58d68b' : '#ff5d5d';
     g.fillRect(e.x - bw / 2, by, bw * ratio, 4.5);
+    if (e.maxShield && e.shield > 0) {
+      g.fillStyle = '#4cc2ff';
+      g.fillRect(e.x - bw / 2, by - 5.5, bw * clamp(e.shield / e.maxShield, 0, 1), 3.5);
+    }
   }
 }
 
@@ -1478,6 +1792,108 @@ function drawDrone(e) {
   g.stroke();
 }
 
+function drawBomber(e) {
+  const spin = e.anim * 45;
+  const blink = Math.sin(e.anim * 12) > 0;
+  // 顶部旋翼
+  g.strokeStyle = '#5a6774';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(0, -16); g.lineTo(0, -22);
+  g.stroke();
+  g.fillStyle = 'rgba(180,200,215,0.45)';
+  g.save();
+  g.translate(0, -24);
+  g.scale(1, 0.22);
+  g.beginPath();
+  g.arc(0, 0, 16 + Math.sin(spin) * 2, 0, TAU);
+  g.fill();
+  g.restore();
+  // 蜂体（黄黑条纹）
+  g.save();
+  g.beginPath();
+  g.arc(0, -2, 14, 0, TAU);
+  g.clip();
+  for (let i = -3; i < 4; i++) {
+    g.fillStyle = i % 2 === 0 ? '#ffc531' : '#2a2622';
+    g.save();
+    g.translate(i * 7, -2);
+    g.rotate(-0.5);
+    g.fillRect(-4, -18, 7, 36);
+    g.restore();
+  }
+  g.restore();
+  g.strokeStyle = '#1c1a14';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.arc(0, -2, 14, 0, TAU);
+  g.stroke();
+  // 眼睛（朝基地方向）
+  g.fillStyle = '#0d1117';
+  g.beginPath(); g.arc(-8, -6, 5, 0, TAU); g.fill();
+  g.fillStyle = '#ff5d5d';
+  g.beginPath(); g.arc(-9, -6, 2.5, 0, TAU); g.fill();
+  // 尾刺（炸弹引信）
+  g.fillStyle = '#c8d4e0';
+  g.beginPath();
+  g.moveTo(12, 2); g.lineTo(20, 7); g.lineTo(12, 9);
+  g.closePath();
+  g.fill();
+  // 警示灯
+  g.fillStyle = blink ? '#ff5d5d' : '#5b2020';
+  g.beginPath();
+  g.arc(0, -18, 3, 0, TAU);
+  g.fill();
+}
+
+function drawShieldbot(e, bob) {
+  const leg = Math.sin(e.anim * 7) * 4;
+  const hasShield = e.shield > 0;
+  // 腿
+  g.fillStyle = '#39434f';
+  rr(g, -10, 20, 9, 15 + leg * 0.4, 3); g.fill();
+  rr(g, 5, 20, 9, 15 - leg * 0.4, 3); g.fill();
+  // 身体
+  g.fillStyle = '#55707c';
+  rr(g, -14, -10, 32, 34, 6); g.fill();
+  g.fillStyle = '#68858f';
+  rr(g, -14, -10, 32, 12, 6); g.fill();
+  // 头
+  g.fillStyle = '#78959e';
+  g.beginPath();
+  g.arc(2, -20, 12, 0, TAU);
+  g.fill();
+  g.fillStyle = '#0d1117';
+  rr(g, -8, -24, 14, 6, 3); g.fill();
+  g.fillStyle = '#4cc2ff';
+  rr(g, -6, -23, 5, 4, 1); g.fill();
+  // 持盾臂
+  g.fillStyle = '#46566a';
+  rr(g, -22, -6, 12, 8, 3); g.fill();
+  if (hasShield) {
+    // 塔盾（面向基地）
+    g.fillStyle = '#3f5d78';
+    rr(g, -32, -30, 14, 58, 6); g.fill();
+    g.fillStyle = '#54789a';
+    rr(g, -32, -30, 14, 16, 6); g.fill();
+    g.strokeStyle = '#7fd7ff';
+    g.lineWidth = 2;
+    rr(g, -30, -28, 10, 54, 5); g.stroke();
+    // 观察缝
+    g.fillStyle = '#101820';
+    rr(g, -29, -14, 8, 5, 2); g.fill();
+    // 盾面铆钉
+    g.fillStyle = '#2c4257';
+    for (const py of [-24, 2, 20]) {
+      g.beginPath(); g.arc(-25, py, 1.8, 0, TAU); g.fill();
+    }
+  } else {
+    // 破盾后残余把手
+    g.fillStyle = '#39434f';
+    rr(g, -26, -6, 6, 10, 2); g.fill();
+  }
+}
+
 function drawCrusher(e) {
   const roll = e.anim * 3;
   // 车身
@@ -1529,6 +1945,17 @@ function drawCrusher(e) {
 }
 
 /* ---- 其它绘制 ---- */
+function drawBeams() {
+  for (const b of beams) {
+    const alpha = b.t / b.max;
+    const y = cellCy(b.row) - 8;
+    g.fillStyle = 'rgba(255,140,80,' + (0.3 * alpha) + ')';
+    g.fillRect(b.x0, y - 6, W - b.x0, 12);
+    g.fillStyle = 'rgba(255,220,190,' + (0.85 * alpha) + ')';
+    g.fillRect(b.x0, y - 1.8, W - b.x0, 3.6);
+  }
+}
+
 function drawBullets() {
   for (const b of bullets) {
     const y = cellCy(b.row) - 8;
@@ -1568,7 +1995,8 @@ function drawBullets() {
 function drawZaps() {
   for (const z of zaps) {
     const alpha = z.t / z.max;
-    g.strokeStyle = 'rgba(200,150,255,' + (0.85 * alpha) + ')';
+    const base = z.color || '#c896ff';
+    g.strokeStyle = hexA(base, 0.85 * alpha);
     g.lineWidth = 2.5;
     g.beginPath();
     for (let i = 0; i < z.pts.length - 1; i++) {
@@ -1580,10 +2008,16 @@ function drawZaps() {
       g.lineTo(b.x, b.y);
     }
     g.stroke();
-    g.strokeStyle = 'rgba(240,225,255,' + (0.5 * alpha) + ')';
+    g.strokeStyle = 'rgba(240,235,255,' + (0.5 * alpha) + ')';
     g.lineWidth = 1;
     g.stroke();
   }
+}
+function hexA(hex, a) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const gg = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 'rgba(' + r + ',' + gg + ',' + b + ',' + a + ')';
 }
 
 function drawParts() {
@@ -1668,16 +2102,15 @@ function drawHoverGhost() {
     g.fillRect(x, y, CELL_W, CELL_H);
     return;
   }
-  const type = hand[sel.idx];
-  if (!type) return;
-  g.fillStyle = occupied ? 'rgba(255,93,93,0.22)' : 'rgba(88,214,139,0.16)';
+  // 盲盒放置模式
+  g.fillStyle = occupied ? 'rgba(255,93,93,0.22)' : 'rgba(255,197,49,0.14)';
   g.fillRect(x, y, CELL_W, CELL_H);
-  g.strokeStyle = occupied ? 'rgba(255,93,93,0.7)' : 'rgba(88,214,139,0.7)';
+  g.strokeStyle = occupied ? 'rgba(255,93,93,0.7)' : 'rgba(255,197,49,0.7)';
   g.lineWidth = 2;
   g.strokeRect(x + 1, y + 1, CELL_W - 2, CELL_H - 2);
   if (!occupied) {
     g.globalAlpha = 0.55;
-    drawMachine(g, type, cellCx(cell.c), cellCy(cell.r) + 6, 1.0, {});
+    drawMachine(g, 'box', cellCx(cell.c), cellCy(cell.r) + 6, 1.0, {});
     g.globalAlpha = 1;
   }
 }
@@ -1688,7 +2121,7 @@ function drawBanner() {
   g.globalAlpha = clamp(alpha, 0, 1);
   g.fillStyle = 'rgba(8,12,18,0.55)';
   const y = GRID_Y + ROWS * CELL_H * 0.32;
-  rr(g, W / 2 - 220, y - 34, 440, bannerSub ? 84 : 62, 14);
+  rr(g, W / 2 - 250, y - 34, 500, bannerSub ? 84 : 62, 14);
   g.fill();
   g.fillStyle = '#ffc531';
   g.font = '900 30px "PingFang SC","Microsoft YaHei",sans-serif';
@@ -1707,17 +2140,15 @@ function drawBanner() {
 window.__game = {
   start: startGame,
   addEnergy: n => { energy += n; },
-  openBox,
-  give: t => { if (hand.length < HAND_MAX) { hand.push(t); renderTray(); } },
-  placeAt: (t, r, c) => place(t, r, c),
-  playCard: (idx, r, c) => {
-    const type = hand[idx];
-    if (!type) return false;
-    if (!place(type, r, c)) return false;
-    hand.splice(idx, 1);
-    renderTray();
+  // 花能量在场上放一个盲盒（模拟真实购买）
+  buyBox: (r, c) => {
+    if (state !== 'playing' || energy < BOX_COST) return false;
+    if (!placeBox(r, c)) return false;
+    energy -= BOX_COST;
     return true;
   },
+  placeBox: (r, c) => placeBox(r, c),
+  placeAt: (t, r, c) => place(t, r, c),
   spawn: (t, r) => spawnEnemy(t, r),
   advance: sec => {
     const steps = Math.round(sec * 60);
@@ -1736,8 +2167,10 @@ window.__game = {
   },
   get state() { return state; },
   get energy() { return energy; },
-  get hand() { return hand.slice(); },
+  get history() { return history.slice(); },
+  get pity() { return pity; },
   get enemyCount() { return enemies.length; },
+  get enemyList() { return enemies.map(e => ({ type: e.type, row: e.row, x: e.x, hp: e.hp })); },
   get score() { return score; },
   get kills() { return kills; },
   get wave() { return wave; },
