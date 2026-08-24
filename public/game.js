@@ -215,13 +215,18 @@ const ENEMIES = {
   scrap:     { name: '废铁机器人', hp: 100,  speed: 19, dmg: 45,  score: 10, w: 46 },
   armored:   { name: '装甲机器人', hp: 320,  speed: 15, dmg: 55,  score: 25, w: 50 },
   drone:     { name: '疾速无人机', hp: 70,   speed: 42, dmg: 30,  score: 15, w: 44, fly: true },
-  bomber:    { name: '自爆无人蜂', hp: 90,   speed: 34, dmg: 300, score: 20, w: 44, fly: true },
+  bomber:    { name: '自爆无人蜂', hp: 90,   speed: 34, dmg: 300, score: 20, w: 44, fly: true, suicide: true },
   shieldbot: { name: '盾卫机器人', hp: 260,  speed: 13, dmg: 50,  score: 30, w: 52, shield: 220 },
   runner:    { name: '冲刺机器人', hp: 150,  speed: 20, dmg: 40,  score: 20, w: 46, dash: true },
   jumper:    { name: '弹跳机器人', hp: 170,  speed: 22, dmg: 45,  score: 30, w: 46, jumps: 2 },
   healer:    { name: '维修无人机', hp: 200,  speed: 18, dmg: 20,  score: 40, w: 46, fly: true, heal: true },
-  crusher:   { name: '重型碾压车', hp: 1400, speed: 11, dmg: 240, score: 80, w: 86 },
-  titan:     { name: '钢铁泰坦',   hp: 4200, speed: 8,  dmg: 420, score: 250, w: 104, shield: 600, boss: true, coldResist: 0.5 },
+  crusher:   { name: '重型碾压车', hp: 1400, speed: 11, dmg: 240, score: 80, w: 86, heavy: true },
+  titan:     { name: '钢铁泰坦',   hp: 4200, speed: 8,  dmg: 420, score: 250, w: 104, shield: 600, boss: true, heavy: true, coldResist: 0.5 },
+  // ---- 融合敌人：两种敌人特性合体 ----
+  shieldrunner: { name: '疾冲盾卫', hp: 280,  speed: 17, dmg: 60,  score: 50,  w: 50,  shield: 280, dash: true },
+  jumpbomber:   { name: '弹跳自爆蜂', hp: 140, speed: 25, dmg: 340, score: 45, w: 46,  jumps: 2, suicide: true },
+  medicrusher:  { name: '维修碾压车', hp: 1700, speed: 10, dmg: 230, score: 130, w: 88, heavy: true, heal: true },
+  titancrusher: { name: '碾压泰坦',  hp: 6200, speed: 7,  dmg: 520, score: 420, w: 118, shield: 900, boss: true, heavy: true, coldResist: 0.6 },
 };
 
 const BOX_POOL = {
@@ -609,7 +614,7 @@ function spawnEnemy(type, row) {
     shield: info.shield ? Math.round(info.shield * hpMult()) : 0,
     maxShield: info.shield ? Math.round(info.shield * hpMult()) : 0,
     speed: info.speed, dmg: info.dmg, scoreVal: info.score, w: info.w,
-    fly: !!info.fly, boss: !!info.boss,
+    fly: !!info.fly, boss: !!info.boss, heavy: !!info.heavy, suicide: !!info.suicide,
     coldResist: info.coldResist || 0,
     dash: !!info.dash, dashT: rand(1.5, 3.5), dashing: 0,
     jumpsLeft: info.jumps || 0, jumpT: 0, jumpFrom: 0, jumpTo: 0,
@@ -639,12 +644,13 @@ function waveEnemies(n) {
   else if (n === 5) { push('scrap', 5); push('armored', 3); push('drone', 2); push('bomber', 2); push('jumper', 1); }
   else if (n === 6) { push('scrap', 5); push('armored', 3); push('drone', 2); push('bomber', 2); push('shieldbot', 1); push('jumper', 2); }
   else if (n === 7) { push('scrap', 6); push('armored', 3); push('runner', 2); push('bomber', 2); push('shieldbot', 2); push('healer', 1); push('crusher', 1); }
-  else if (n === 8) { push('scrap', 6); push('armored', 4); push('drone', 3); push('jumper', 2); push('shieldbot', 2); push('healer', 1); push('crusher', 1); }
-  else if (n === 9) { push('scrap', 7); push('armored', 4); push('runner', 3); push('bomber', 3); push('shieldbot', 2); push('healer', 2); push('crusher', 2); }
+  else if (n === 8) { push('scrap', 6); push('armored', 4); push('drone', 3); push('jumper', 2); push('shieldbot', 2); push('healer', 1); push('shieldrunner', 1); push('crusher', 1); }
+  else if (n === 9) { push('scrap', 6); push('armored', 4); push('runner', 2); push('bomber', 2); push('shieldbot', 2); push('healer', 1); push('shieldrunner', 1); push('jumpbomber', 1); push('crusher', 2); }
   else if (n === 10) {
-    push('scrap', 7); push('armored', 4); push('drone', 3); push('bomber', 3);
-    push('runner', 3); push('jumper', 3); push('shieldbot', 3); push('healer', 2);
-    push('crusher', 2); push('titan', 1);
+    push('scrap', 5); push('armored', 3); push('drone', 2); push('bomber', 2);
+    push('runner', 2); push('jumper', 2); push('shieldbot', 2); push('healer', 1);
+    push('shieldrunner', 1); push('jumpbomber', 1); push('medicrusher', 1);
+    push('crusher', 1); push('titan', 1);
   } else {
     const k = n - TOTAL_WAVES;
     push('scrap', 7 + k);
@@ -655,11 +661,15 @@ function waveEnemies(n) {
     push('jumper', 3 + Math.floor(k * 0.4));
     push('shieldbot', 3 + Math.floor(k * 0.5));
     push('healer', 2 + Math.floor(k * 0.3));
+    push('shieldrunner', 2 + Math.floor(k * 0.5));
+    push('jumpbomber', 2 + Math.floor(k * 0.4));
+    push('medicrusher', 1 + Math.floor(k / 3));
     push('crusher', 2 + Math.floor(k / 2));
     push('titan', 1 + Math.floor(k / 3));
+    if (k >= 2) push('titancrusher', Math.floor(k / 2));
   }
   // 洗牌，重型单位安排在后半段出场
-  const isHeavy = t => t === 'crusher' || t === 'titan';
+  const isHeavy = t => t === 'crusher' || t === 'titan' || t === 'medicrusher' || t === 'titancrusher';
   const normal = shuffle(list.filter(t => !isHeavy(t)));
   const heavy = list.filter(isHeavy);
   for (const h of heavy) {
@@ -674,11 +684,13 @@ function startWave() {
   queue = waveEnemies(wave);
   waveState = 'spawn';
   spawnT = 0.6;
-  if (!endless && wave === TOTAL_WAVES) banner('⚠️ 最终决战！', '钢铁泰坦压境——守住这一波就胜利了！');
+  if (!endless && wave === TOTAL_WAVES) banner('⚠️ 最终决战！', '钢铁泰坦与融合军团压境——守住这一波就胜利了！');
   else if (wave === 3) banner('第 3 波来袭！', '冲刺机器人会突然加速冲锋！');
   else if (wave === 5) banner('第 5 波来袭！', '自爆无人蜂和弹跳机器人登场，弹跳者能跳过一台机器！');
   else if (wave === 6) banner('第 6 波来袭！', '盾卫机器人的护盾会挡住子弹，用近战机器对付它！');
   else if (wave === 7) banner('第 7 波来袭！', '维修无人机会治疗同伴，优先集火它！');
+  else if (wave === 8) banner('第 8 波来袭！', '融合敌人出现：疾冲盾卫带着护盾冲锋！');
+  else if (wave === 9) banner('第 9 波来袭！', '弹跳自爆蜂会跳过防线再引爆！');
   else banner('第 ' + wave + ' 波来袭！', '');
   sfx('horn');
 }
@@ -733,7 +745,7 @@ function damageEnemy(e, d, kind, noFlash) {
     score += e.scoreVal;
     spawnParts(e.x, rowCy(e), '#c8935a', 12, 130, 0.6, 'gear');
     spawnParts(e.x, rowCy(e), '#ffd764', 6, 100, 0.4, 'spark');
-    if (e.type === 'crusher' || e.boss) { shake(e.boss ? 0.6 : 0.35, e.boss ? 8 : 5); sfx('boom'); }
+    if (e.heavy) { shake(e.boss ? 0.6 : 0.35, e.boss ? 8 : 5); sfx('boom'); }
     if (e.boss) { addFloat(e.x, rowCy(e) - 60, '泰坦倒下！', '#ffc531'); }
   }
 }
@@ -910,7 +922,7 @@ function updateMachines(dt) {
             let prey = null;
             if (magRange) {
               const targets = enemiesInRow(r).filter(e =>
-                !e.dead && !e.boss && e.type !== 'crusher' && e.x > cx + 20 && e.x < W + 20);
+                !e.dead && !e.heavy && e.x > cx + 20 && e.x < W + 20);
               if (targets.length) prey = targets.reduce((a, b) => (a.x < b.x ? a : b));
             } else {
               prey = enemies.find(e =>
@@ -937,7 +949,7 @@ function updateMachines(dt) {
         } else if (kind === 'magnet') {
           if ((m.mcd.magnet || 0) <= 0 && !hasKind(m, 'shred')) {
             const targets = enemiesInRow(r).filter(e =>
-              !e.dead && !e.boss && e.type !== 'crusher' &&
+              !e.dead && !e.heavy &&
               e.x > cx - 10 && e.x < cx + 5 * CELL_W
             );
             if (targets.length) {
@@ -1303,7 +1315,7 @@ function updateEnemies(dt) {
       if (cand && front <= GRID_X + col * CELL_W + CELL_W * 0.62) m = cand;
     }
     if (m) {
-      if (e.type === 'bomber') {
+      if (e.suicide) {
         // 自爆：与机器同归于尽
         damageMachine(m, e.dmg);
         spawnParts(e.x, rowCy(e), '#ff9d2e', 18, 170, 0.6, 'spark');
@@ -1325,7 +1337,7 @@ function updateEnemies(dt) {
       }
       e.hitT -= dt;
       if (e.hitT <= 0) {
-        e.hitT = (e.type === 'crusher' || e.boss) ? 0.8 : 0.95;
+        e.hitT = e.heavy ? 0.8 : 0.95;
         damageMachine(m, e.dmg);
         spawnParts(front + 6, rowCy(e), '#9fb4c8', 4, 70, 0.3, 'spark');
         sfx('chomp');
@@ -2095,6 +2107,7 @@ function pal(lv) { return TIERS[Math.min(Math.max(lv || 1, 1), 3) - 1]; }
 
 // 斜面金属板：上亮下暗 + 描边
 function panel(ctx, x, y, w, h, r, P, noEdge) {
+  P = themed(P);
   ctx.fillStyle = cachedLG(ctx, x, y, x, y + h, [0, P.light, 0.42, P.base, 1, P.dark]);
   rr(ctx, x, y, w, h, r); ctx.fill();
   if (!noEdge) {
@@ -2141,6 +2154,7 @@ function hazard(ctx, x, y, w, h, r) {
 }
 // 底盘（多数机器共用）
 function pedestal(ctx, P, w, lv) {
+  P = themed(P);
   const half = (w || 42) / 2;
   panel(ctx, -half, 16, half * 2, 20, 6, P);
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -2152,6 +2166,355 @@ function pedestal(ctx, P, w, lv) {
     ctx.fillStyle = P.trim;
     rr(ctx, -half - 3, 14, half * 2 + 6, 4, 2); ctx.fill();
   }
+}
+
+
+/* ===== 杂交主题：副能力会真正改变机体的配色与外挂结构 ===== */
+const KIND_THEME = {
+  frost:  { tint: '#4aa8d8', amt: 0.5,  accent: '#bfe9ff' },
+  zap:    { tint: '#8a5fc4', amt: 0.45, accent: '#d9b8ff' },
+  flame:  { tint: '#c2502a', amt: 0.46, accent: '#ffb347' },
+  poison: { tint: '#5c9a34', amt: 0.46, accent: '#b6f27e' },
+  armor:  { tint: '#7d8b99', amt: 0.34, accent: '#d4e2ef' },
+  energy: { tint: '#c9962a', amt: 0.38, accent: '#ffe08a' },
+  shred:  { tint: '#7d8a97', amt: 0.3,  accent: '#e2ecf5' },
+  magnet: { tint: '#c47420', amt: 0.42, accent: '#ffca6b' },
+  laser:  { tint: '#c25f2e', amt: 0.42, accent: '#ffb98a' },
+  rocket: { tint: '#b8413f', amt: 0.42, accent: '#ff8f8f' },
+  melee:  { tint: '#a83636', amt: 0.38, accent: '#ff9a8f' },
+  mine:   { tint: '#8a5c2c', amt: 0.36, accent: '#e0b077' },
+  mortar: { tint: '#a07c48', amt: 0.36, accent: '#e7c894' },
+  sniper: { tint: '#b39a68', amt: 0.32, accent: '#ffe9c0' },
+  repair: { tint: '#3d9a63', amt: 0.42, accent: '#9df5c2' },
+  shot:   { tint: '#b9932f', amt: 0.3,  accent: '#ffe08a' },
+};
+let curTheme = null;          // 当前正在绘制的机体主题
+const _mixCache = new Map();
+function mixHex(a, b, t) {
+  const k = a + b + t;
+  let v = _mixCache.get(k);
+  if (v) return v;
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const r = Math.round((pa >> 16 & 255) * (1 - t) + (pb >> 16 & 255) * t);
+  const gg = Math.round((pa >> 8 & 255) * (1 - t) + (pb >> 8 & 255) * t);
+  const bl = Math.round((pa & 255) * (1 - t) + (pb & 255) * t);
+  v = '#' + ((1 << 24) + (r << 16) + (gg << 8) + bl).toString(16).slice(1);
+  _mixCache.set(k, v);
+  return v;
+}
+const _palCache = new Map();
+// 把材质按主题染色（结果缓存，零额外开销）
+function themed(P) {
+  if (!curTheme) return P;
+  const T = KIND_THEME[curTheme];
+  if (!T) return P;
+  const k = P.base + '|' + curTheme;
+  let v = _palCache.get(k);
+  if (v) return v;
+  v = {
+    base: mixHex(P.base, T.tint, T.amt),
+    dark: mixHex(P.dark, T.tint, T.amt * 0.75),
+    light: mixHex(P.light, T.tint, T.amt * 0.5),
+    trim: mixHex(P.trim, T.accent, T.amt),
+    seam: P.seam,
+    led: T.accent,
+  };
+  _palCache.set(k, v);
+  return v;
+}
+
+// 副能力的外挂结构：直接改变机体轮廓
+function drawThemeDeco(ctx, kind, m, slot) {
+  const T = KIND_THEME[kind];
+  if (!T) return;
+  const A = T.accent;
+  const side = slot === 0 ? -1 : 1;   // 第一个挂左边，第二个挂右边
+  ctx.save();
+  switch (kind) {
+    case 'frost': {
+      // 机体上凝结的冰晶 + 冷雾
+      ctx.fillStyle = 'rgba(190,235,255,0.16)';
+      ctx.beginPath(); ctx.arc(0, 0, 40, 0, TAU); ctx.fill();
+      const spikes = [[-26, 24, 13, -1], [24, 20, 11, 1], [-16, -28, 10, -1], [18, -26, 9, 1]];
+      for (const [sx, sy, len, dir] of spikes) {
+        const grd = cachedLG(ctx, sx, sy, sx + dir * 4, sy - len, [0, '#eaf8ff', 1, '#7fc4e8']);
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.moveTo(sx - 4.5, sy);
+        ctx.lineTo(sx + dir * 3, sy - len);
+        ctx.lineTo(sx + 4.5, sy - 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+      }
+      // 飘动的雪花
+      for (let i = 0; i < 3; i++) {
+        const ph = (time * 0.6 + i * 0.37) % 1;
+        ctx.globalAlpha = (1 - ph) * 0.7;
+        ctx.strokeStyle = '#dff2ff';
+        ctx.lineWidth = 1.2;
+        const fx = -20 + i * 18, fy = 26 - ph * 44;
+        for (let k = 0; k < 3; k++) {
+          const a = k * Math.PI / 3;
+          ctx.beginPath();
+          ctx.moveTo(fx - Math.cos(a) * 3, fy - Math.sin(a) * 3);
+          ctx.lineTo(fx + Math.cos(a) * 3, fy + Math.sin(a) * 3);
+          ctx.stroke();
+        }
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'zap': {
+      // 侧挂线圈 + 噼啪电弧
+      const cx0 = side * 27;
+      ctx.fillStyle = '#3b3352';
+      rr(ctx, cx0 - 5, -14, 10, 22, 3); ctx.fill();
+      ctx.strokeStyle = '#8f7ab5';
+      ctx.lineWidth = 1.8;
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath(); ctx.moveTo(cx0 - 5, -11 + i * 5.5); ctx.lineTo(cx0 + 5, -11 + i * 5.5); ctx.stroke();
+      }
+      emissive(ctx, 'rgba(199,123,255,0.9)', 10, () => {
+        ctx.fillStyle = A;
+        ctx.beginPath(); ctx.arc(cx0, -19, 5.5, 0, TAU); ctx.fill();
+      });
+      ctx.strokeStyle = 'rgba(216,180,255,0.75)';
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 2; i++) {
+        const a = rand(0, TAU);
+        ctx.beginPath();
+        ctx.moveTo(cx0 + Math.cos(a) * 6, -19 + Math.sin(a) * 6);
+        ctx.lineTo(cx0 + Math.cos(a) * 13, -19 + Math.sin(a) * 13);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'flame': {
+      // 侧挂燃料罐 + 常燃喷口
+      const cx0 = side * 28;
+      ctx.fillStyle = cachedLG(ctx, cx0 - 7, 0, cx0 + 7, 0, [0, '#7a3b2a', 1, '#b0522f']);
+      rr(ctx, cx0 - 7, -12, 14, 30, 6); ctx.fill();
+      ctx.fillStyle = '#ffc531';
+      rr(ctx, cx0 - 6, -7, 12, 3.4, 1.5); ctx.fill();
+      emissive(ctx, 'rgba(255,140,50,0.9)', 9, () => {
+        ctx.fillStyle = A;
+        ctx.beginPath();
+        ctx.ellipse(cx0, -18 - Math.sin(time * 13) * 1.5, 3.6, 6 + Math.sin(time * 11) * 1.5, 0, 0, TAU);
+        ctx.fill();
+      });
+      break;
+    }
+    case 'poison': {
+      // 侧挂毒剂罐 + 滴落
+      const cx0 = side * 27;
+      ctx.fillStyle = cachedLG(ctx, cx0 - 8, -14, cx0 + 8, 16, [0, 'rgba(150,230,120,0.92)', 1, 'rgba(52,118,44,0.95)']);
+      rr(ctx, cx0 - 8, -14, 16, 30, 7); ctx.fill();
+      ctx.strokeStyle = '#8be04a';
+      ctx.lineWidth = 1.6;
+      rr(ctx, cx0 - 8, -14, 16, 30, 7); ctx.stroke();
+      ctx.fillStyle = 'rgba(220,255,190,0.7)';
+      for (let i = 0; i < 2; i++) {
+        ctx.beginPath();
+        ctx.arc(cx0 - 3 + i * 6, 8 - ((time * 20 + i * 14) % 22), 1.8, 0, TAU);
+        ctx.fill();
+      }
+      const dp = (time * 1.2) % 1;
+      ctx.fillStyle = 'rgba(139,224,74,' + (1 - dp) + ')';
+      ctx.beginPath(); ctx.ellipse(cx0, 17 + dp * 14, 2, 3.2, 0, 0, TAU); ctx.fill();
+      break;
+    }
+    case 'armor': {
+      // 加挂装甲裙板
+      const P = themed(pal(2));
+      ctx.fillStyle = cachedLG(ctx, side * 30, -20, side * 30, 26, [0, P.light, 1, P.dark]);
+      ctx.beginPath();
+      ctx.moveTo(side * 22, -20);
+      ctx.lineTo(side * 34, -14);
+      ctx.lineTo(side * 34, 20);
+      ctx.lineTo(side * 22, 26);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.fillStyle = A;
+      rr(ctx, side * 24 - 3, -16, 6, 4, 1.5); ctx.fill();
+      bolt(ctx, side * 28, -8, { light: A });
+      bolt(ctx, side * 28, 14, { light: A });
+      break;
+    }
+    case 'energy': {
+      // 侧挂能量电池组 + 导线
+      const cx0 = side * 27;
+      ctx.fillStyle = '#2b3a4a';
+      rr(ctx, cx0 - 7, -10, 14, 26, 4); ctx.fill();
+      emissive(ctx, 'rgba(255,197,49,0.85)', 8, () => {
+        ctx.fillStyle = A;
+        rr(ctx, cx0 - 4, -6, 8, 18, 2); ctx.fill();
+        rr(ctx, cx0 - 3, -14, 6, 4, 1.5); ctx.fill();
+      });
+      ctx.strokeStyle = '#c9962a';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(cx0 - side * 7, 2);
+      ctx.quadraticCurveTo(cx0 - side * 16, 10, cx0 - side * 20, -2);
+      ctx.stroke();
+      break;
+    }
+    case 'shred': {
+      // 底盘旋转锯盘
+      const cx0 = side * 26;
+      ctx.save();
+      ctx.translate(cx0, 20);
+      ctx.rotate(time * 4);
+      ctx.fillStyle = '#8592a0';
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, TAU); ctx.fill();
+      ctx.fillStyle = A;
+      for (let i = 0; i < 8; i++) {
+        const a = i * TAU / 8;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 9, Math.sin(a) * 9);
+        ctx.lineTo(Math.cos(a + 0.25) * 14, Math.sin(a + 0.25) * 14);
+        ctx.lineTo(Math.cos(a + 0.5) * 9, Math.sin(a + 0.5) * 9);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = '#39434f';
+      ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, TAU); ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'magnet': {
+      // 顶部悬浮马蹄磁铁
+      const hov = Math.sin(time * 2.4) * 2;
+      ctx.strokeStyle = '#8ba1b8';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.moveTo(side * 16, -30); ctx.lineTo(side * 16, -38 + hov); ctx.stroke();
+      emissive(ctx, 'rgba(224,72,72,0.55)', 7, () => {
+        ctx.strokeStyle = '#e04848';
+        ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(side * 16, -40 + hov, 7, Math.PI, 0); ctx.stroke();
+      });
+      ctx.fillStyle = '#dbe6ef';
+      ctx.fillRect(side * 16 - 10, -40 + hov, 5.5, 6);
+      ctx.fillRect(side * 16 + 4.5, -40 + hov, 5.5, 6);
+      break;
+    }
+    case 'laser': {
+      // 侧挂聚焦透镜臂
+      const cx0 = side * 28;
+      ctx.fillStyle = '#4a5a68';
+      rr(ctx, cx0 - 6, -8, 12, 20, 3); ctx.fill();
+      ctx.fillStyle = 'rgba(20,30,42,0.9)';
+      ctx.beginPath(); ctx.ellipse(cx0, -13, 4.5, 7, 0, 0, TAU); ctx.fill();
+      emissive(ctx, 'rgba(255,140,80,0.9)', 10, () => {
+        ctx.fillStyle = A;
+        ctx.beginPath(); ctx.ellipse(cx0, -13, 2.6, 5, 0, 0, TAU); ctx.fill();
+      });
+      break;
+    }
+    case 'rocket': {
+      // 侧挂导弹巢
+      const cx0 = side * 28;
+      ctx.fillStyle = '#4c5b6d';
+      rr(ctx, cx0 - 7, -14, 14, 30, 4); ctx.fill();
+      for (let i = 0; i < 2; i++) {
+        const my = -9 + i * 13;
+        ctx.fillStyle = '#dde5ee';
+        rr(ctx, cx0 - 4, my, 8, 11, 2); ctx.fill();
+        ctx.fillStyle = A;
+        ctx.beginPath();
+        ctx.moveTo(cx0 - 4, my); ctx.lineTo(cx0, my - 6); ctx.lineTo(cx0 + 4, my);
+        ctx.closePath(); ctx.fill();
+      }
+      break;
+    }
+    case 'melee': {
+      // 侧挂弹簧拳
+      const cx0 = side * 22;
+      const ext = m && m.recoil > 0 ? Math.sin((1 - m.recoil / 0.25) * Math.PI) * 10 : 0;
+      ctx.strokeStyle = '#9db1c4';
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      const L = 10 + ext;
+      ctx.moveTo(cx0, 6);
+      for (let i = 0; i <= 4; i++) ctx.lineTo(cx0 + side * (i + 0.5) * L / 5, 6 + (i % 2 === 0 ? -4.5 : 4.5));
+      ctx.lineTo(cx0 + side * L, 6);
+      ctx.stroke();
+      ctx.fillStyle = cachedRG(ctx, cx0 + side * (L + 6), 3, 1, cx0 + side * (L + 6), 6, 9, [0, '#ff9a8f', 1, '#a83636']);
+      ctx.beginPath(); ctx.arc(cx0 + side * (L + 6), 6, 7.5, 0, TAU); ctx.fill();
+      break;
+    }
+    case 'mine': {
+      // 底部地雷挂架
+      ctx.fillStyle = '#4a4136';
+      rr(ctx, side * 14, 26, 26, 7, 3); ctx.fill();
+      for (let i = 0; i < 2; i++) {
+        const mx = side * 20 + i * side * 12;
+        ctx.fillStyle = '#7a5a34';
+        ctx.beginPath(); ctx.ellipse(mx, 24, 6, 4, 0, 0, TAU); ctx.fill();
+        emissive(ctx, 'rgba(255,93,93,0.8)', 5, () => {
+          ctx.fillStyle = '#ff5d5d';
+          ctx.beginPath(); ctx.arc(mx, 21, 1.7, 0, TAU); ctx.fill();
+        });
+      }
+      break;
+    }
+    case 'mortar': {
+      // 背后斜插的迫击炮管
+      ctx.save();
+      ctx.translate(side * 22, -6);
+      ctx.rotate(side * 0.65);
+      ctx.fillStyle = cachedLG(ctx, -6, 0, 6, 0, [0, '#c8b28a', 1, '#6b5a3c']);
+      rr(ctx, -6, -26, 12, 30, 4); ctx.fill();
+      ctx.fillStyle = A;
+      ctx.beginPath(); ctx.ellipse(0, -28, 4, 5.5, 0, 0, TAU); ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'sniper': {
+      // 顶部瞄准镜
+      ctx.fillStyle = '#2b3644';
+      rr(ctx, side * 8 - 14, -40, 28, 10, 5); ctx.fill();
+      emissive(ctx, 'rgba(255,224,168,0.9)', 8, () => {
+        ctx.fillStyle = A;
+        ctx.beginPath(); ctx.arc(side * 8 + 10, -35, 3.2, 0, TAU); ctx.fill();
+      });
+      ctx.strokeStyle = '#5d7186';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(side * 8, -30); ctx.lineTo(side * 8, -24); ctx.stroke();
+      break;
+    }
+    case 'repair': {
+      // 悬浮维修十字 + 光环
+      const hov = Math.sin(time * 2.2) * 2;
+      ctx.strokeStyle = 'rgba(143,242,182,0.55)';
+      ctx.lineWidth = 2;
+      ctx.save();
+      ctx.translate(side * 20, -34 + hov);
+      ctx.rotate(time * 0.9);
+      ctx.beginPath(); ctx.ellipse(0, 0, 13, 4.5, 0, 0, TAU); ctx.stroke();
+      ctx.restore();
+      emissive(ctx, 'rgba(88,214,139,0.9)', 10, () => {
+        ctx.fillStyle = A;
+        rr(ctx, side * 20 - 2.6, -42 + hov, 5.2, 15, 1.6); ctx.fill();
+        rr(ctx, side * 20 - 7.5, -37 + hov, 15, 5.2, 1.6); ctx.fill();
+      });
+      break;
+    }
+    case 'shot': {
+      // 侧挂副炮管
+      const cx0 = side * 20;
+      ctx.fillStyle = cachedLG(ctx, 0, 8, 0, 18, [0, '#8ba1b8', 1, '#46566a']);
+      rr(ctx, cx0, 8, side > 0 ? 22 : -22, 9, 4); ctx.fill();
+      ctx.fillStyle = '#39485a';
+      rr(ctx, cx0 + side * 20, 6, side * 7, 13, 3); ctx.fill();
+      break;
+    }
+  }
+  ctx.restore();
 }
 
 function drawMachine(ctx, type, x, y, s, m) {
@@ -2174,7 +2537,15 @@ function drawMachine(ctx, type, x, y, s, m) {
   }
   const pri = mods[0];
   if (pri) drawLevelDecor(ctx, totalLv(mods));
+  // 副能力决定机体配色；经典组合保留自己的专属造型，不再额外染色
+  const classicPair = type === 'arcturret' || type === 'magshredder' || type === 'frostwall' || type === 'frostcannon';
+  curTheme = (!classicPair && mods[1]) ? mods[1].kind : null;
   drawChassis(ctx, type, pri, m);
+  curTheme = null;
+  // 副能力的外挂结构（最多两件，最强的两个副模块）
+  if (!classicPair) {
+    for (let i = 1; i < mods.length && i <= 2; i++) drawThemeDeco(ctx, mods[i].kind, m, i - 1);
+  }
   // 副能力徽章：环绕机体排布，数量不限（超过 8 个显示 +N）
   const extra = mods.length - 1;
   const shown = Math.min(extra, EMBLEM_POS.length);
@@ -2440,12 +2811,9 @@ function drawTurret(ctx, m) {
   rr(ctx, 30 - rec, -18, 9, 16, 3); ctx.fill();
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.beginPath(); ctx.ellipse(38 - rec, -10, 2, 5, 0, 0, TAU); ctx.fill();
-  // 炮塔球
-  const dome = ctx.createRadialGradient(-9, -14, 2, -4, -8, 20);
-  dome.addColorStop(0, '#b7cade');
-  dome.addColorStop(0.5, P.base);
-  dome.addColorStop(1, P.dark);
-  ctx.fillStyle = dome;
+  // 炮塔球（跟随杂交主题染色）
+  const TP = themed(P);
+  ctx.fillStyle = cachedRG(ctx, -9, -14, 2, -4, -8, 20, [0, mixHex('#b7cade', TP.base, 0.35), 0.5, TP.base, 1, TP.dark]);
   ctx.beginPath(); ctx.arc(-4, -8, 17, 0, TAU); ctx.fill();
   ctx.strokeStyle = 'rgba(0,0,0,0.3)';
   ctx.lineWidth = 1.4;
@@ -2481,11 +2849,8 @@ function drawTwinturret(ctx, m) {
     for (let i = 0; i < 3; i++) { rr(ctx, 8 + i * 7 - r0, oy - 1, 2.5, 12, 1); ctx.fill(); }
   }
   // 炮塔
-  const dome = ctx.createRadialGradient(-9, -18, 2, -4, -10, 22);
-  dome.addColorStop(0, '#e4f3ff');
-  dome.addColorStop(0.45, P.base);
-  dome.addColorStop(1, P.dark);
-  ctx.fillStyle = dome;
+  const TP = themed(P);
+  ctx.fillStyle = cachedRG(ctx, -9, -18, 2, -4, -10, 22, [0, mixHex('#e4f3ff', TP.base, 0.3), 0.45, TP.base, 1, TP.dark]);
   ctx.beginPath(); ctx.arc(-4, -10, 18, 0, TAU); ctx.fill();
   ctx.strokeStyle = P.seam;
   ctx.lineWidth = 2;
@@ -2527,11 +2892,8 @@ function drawGatling(ctx, m) {
   rr(ctx, 18 - rec, -20, 6, 24, 3); ctx.fill();
   rr(ctx, 36 - rec, -19, 5, 22, 2.5); ctx.fill();
   // 炮塔（暗金）
-  const dome = ctx.createRadialGradient(-10, -18, 2, -4, -10, 22);
-  dome.addColorStop(0, '#cbb8f5');
-  dome.addColorStop(0.45, P.base);
-  dome.addColorStop(1, P.dark);
-  ctx.fillStyle = dome;
+  const TP = themed(P);
+  ctx.fillStyle = cachedRG(ctx, -10, -18, 2, -4, -10, 22, [0, mixHex('#cbb8f5', TP.base, 0.3), 0.45, TP.base, 1, TP.dark]);
   ctx.beginPath(); ctx.arc(-4, -10, 18, 0, TAU); ctx.fill();
   ctx.strokeStyle = P.trim;
   ctx.lineWidth = 2.2;
@@ -3873,6 +4235,10 @@ function drawEnemy(e) {
     case 'healer': drawHealer(e); break;
     case 'crusher': drawCrusher(e); break;
     case 'titan': drawTitan(e); break;
+    case 'shieldrunner': drawShieldRunner(e, bob); break;
+    case 'jumpbomber': drawJumpBomber(e, bob); break;
+    case 'medicrusher': drawMediCrusher(e); break;
+    case 'titancrusher': drawTitanCrusher(e); break;
   }
   if (flash) {
     g.globalAlpha = 0.34;
@@ -3949,8 +4315,8 @@ function drawEnemy(e) {
   g.restore();
   // 血条 + 护盾条
   if (e.hp < e.maxHp || (e.maxShield && e.shield < e.maxShield)) {
-    const bw = e.boss ? 80 : e.type === 'crusher' ? 64 : 40;
-    const by = rowCy(e) - (e.boss ? 72 : e.type === 'crusher' ? 52 : 46);
+    const bw = e.boss ? 84 : e.heavy ? 64 : 40;
+    const by = rowCy(e) - (e.boss ? 74 : e.heavy ? 52 : 46);
     drawBar(g, e.x, by, bw, 4.5, clamp(e.hp / e.maxHp, 0, 1));
     if (e.maxShield && e.shield > 0) {
       drawBar(g, e.x, by - 6.5, bw, 3.5, clamp(e.shield / e.maxShield, 0, 1), '#4cc2ff');
@@ -4840,6 +5206,351 @@ function drawTitan(e) {
       for (let k = 0; k < 6; k++) {
         const ha = k * TAU / 6;
         g[k ? 'lineTo' : 'moveTo'](hx + Math.cos(ha) * 9, hy + Math.sin(ha) * 9);
+      }
+      g.closePath(); g.stroke();
+    }
+  }
+}
+
+
+/* ===== 融合敌人：两种敌人的特征合体 ===== */
+
+// 疾冲盾卫（盾卫 + 冲刺机器人）：带塔盾冲锋
+function drawShieldRunner(e, bob) {
+  const dashing = e.dashing > 0;
+  const hasShield = e.shield > 0;
+  const leg = Math.sin(e.anim * (dashing ? 20 : 10)) * 6;
+  g.save();
+  g.rotate(dashing ? 0.24 : 0.08);
+  if (dashing) {
+    g.strokeStyle = 'rgba(140,215,255,0.5)';
+    g.lineWidth = 2.2;
+    for (let i = 0; i < 3; i++) {
+      const oy = -14 + i * 14;
+      g.beginPath(); g.moveTo(22 + i * 6, oy); g.lineTo(44 + i * 10, oy); g.stroke();
+    }
+  }
+  // 反关节腿
+  for (const [sx, ph] of [[-8, 1], [7, -1]]) {
+    const k = leg * ph * 0.5;
+    g.strokeStyle = '#37454d';
+    g.lineWidth = 5;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(sx, 13); g.lineTo(sx - 5 + k * 0.4, 23); g.lineTo(sx + 3 + k, 33);
+    g.stroke();
+    g.lineCap = 'butt';
+    g.fillStyle = '#22303a';
+    rr(g, sx - 2 + k, 32, 13, 5, 2.5); g.fill();
+  }
+  // 躯干（盾卫的青钢 + 冲刺者的流线）
+  g.fillStyle = cachedLG(g, -14, -14, 14, 22, [0, '#a4cfdd', 0.5, '#557682', 1, '#2b3f47']);
+  g.beginPath(); g.ellipse(0, 3, 15, 18, 0, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.45)';
+  g.lineWidth = 1.4;
+  g.stroke();
+  // 胸口护盾徽记
+  emissive(g, 'rgba(76,194,255,0.85)', 8, () => {
+    g.strokeStyle = '#7fd7ff';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(0, -6); g.lineTo(7, -2.5); g.lineTo(7, 3);
+    g.quadraticCurveTo(7, 8, 0, 10);
+    g.quadraticCurveTo(-7, 8, -7, 3);
+    g.lineTo(-7, -2.5); g.closePath();
+    g.stroke();
+  });
+  // 推进背包 + 尾焰
+  eBody(8, -8, 13, 18, 5, '#5a7a86', '#26363d');
+  if (dashing) {
+    emissive(g, 'rgba(130,215,255,0.95)', 15, () => {
+      g.fillStyle = cachedLG(g, 20, 2, 44, 2, [0, 'rgba(225,248,255,0.95)', 0.5, 'rgba(110,200,255,0.65)', 1, 'rgba(60,150,220,0)']);
+      g.beginPath();
+      g.moveTo(20, -3);
+      g.quadraticCurveTo(33, -8 - rand(0, 4), 43 + rand(0, 7), 3);
+      g.quadraticCurveTo(33, 13 + rand(0, 4), 20, 7);
+      g.closePath(); g.fill();
+    });
+  } else {
+    emissive(g, 'rgba(76,194,255,0.7)', 6, () => {
+      g.fillStyle = '#4cc2ff';
+      g.beginPath(); g.ellipse(21, 2, 3.2, 4.2, 0, 0, TAU); g.fill();
+    });
+  }
+  // 头 + 目镜
+  g.fillStyle = cachedLG(g, 0, -30, 0, -10, [0, '#b3d5e2', 1, '#48626d']);
+  g.beginPath(); g.ellipse(-2, -17, 12.5, 11, -0.15, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.4)';
+  g.lineWidth = 1.3;
+  g.stroke();
+  g.fillStyle = '#080d10';
+  g.save(); g.translate(-3, -19); g.rotate(-0.16);
+  rr(g, -10, -4, 17, 8, 3.5); g.fill();
+  g.restore();
+  emissive(g, 'rgba(76,194,255,0.95)', 10, () => {
+    g.fillStyle = dashing ? '#bfefff' : '#4cc2ff';
+    g.save(); g.translate(-3, -19); g.rotate(-0.16);
+    rr(g, -8, -2.4, 7, 4.6, 2); g.fill();
+    g.restore();
+  });
+  // 前突的小圆盾
+  if (hasShield) {
+    g.fillStyle = cachedLG(g, -34, -22, -18, 22, [0, '#8fc2e2', 0.5, '#3f6d8b', 1, '#22404f']);
+    g.beginPath();
+    g.moveTo(-20, -22); g.quadraticCurveTo(-38, -14, -38, 2);
+    g.quadraticCurveTo(-38, 18, -20, 24);
+    g.closePath(); g.fill();
+    g.strokeStyle = '#16303d';
+    g.lineWidth = 2;
+    g.stroke();
+    emissive(g, 'rgba(127,215,255,0.85)', 8, () => {
+      g.strokeStyle = 'rgba(170,235,255,0.9)';
+      g.lineWidth = 2;
+      g.beginPath(); g.moveTo(-30, -12); g.lineTo(-30, 14); g.stroke();
+      g.beginPath(); g.arc(-30, 1, 7, -1.1, 1.1); g.stroke();
+    });
+  }
+  g.restore();
+}
+
+// 弹跳自爆蜂（弹跳机器人 + 自爆无人蜂）
+function drawJumpBomber(e, bob) {
+  const inAir = e.jumpT > 0;
+  const pulse = (Math.sin(e.anim * 11) * 0.5 + 0.5);
+  const squash = inAir ? 0.92 : 1 + Math.sin(e.anim * 9) * 0.07;
+  g.save();
+  g.translate(0, inAir ? -Math.sin((1 - e.jumpT / 0.55) * Math.PI) * 46 : 0);
+  g.scale(1 / squash, squash);
+  const legLen = inAir ? 24 : 13;
+  // 弹簧腿
+  g.strokeStyle = '#c4ae7a';
+  g.lineWidth = 3.4;
+  g.beginPath();
+  g.moveTo(0, 12);
+  for (let i = 0; i <= 5; i++) g.lineTo((i % 2 === 0 ? -8 : 8), 12 + (i + 1) * legLen / 5);
+  g.stroke();
+  eBody(-13, 12 + legLen, 26, 7, 3.5, '#6b6152', '#332e26');
+  // 蜂体：黄黑条纹圆身
+  g.save();
+  g.beginPath(); g.ellipse(0, -4, 16, 14.5, 0, 0, TAU); g.clip();
+  g.fillStyle = cachedLG(g, 0, -18, 0, 11, [0, '#ffd45c', 1, '#c88f14']);
+  g.fillRect(-20, -20, 40, 34);
+  for (let i = -2; i < 4; i++) {
+    g.fillStyle = 'rgba(28,24,18,0.92)';
+    g.save(); g.translate(i * 9 - 2, -4); g.rotate(-0.45);
+    g.fillRect(-3, -20, 5.5, 40);
+    g.restore();
+  }
+  g.fillStyle = 'rgba(255,255,255,0.25)';
+  g.beginPath(); g.ellipse(-5, -11, 8, 3.6, -0.3, 0, TAU); g.fill();
+  g.restore();
+  g.strokeStyle = '#1a1712';
+  g.lineWidth = 2;
+  g.beginPath(); g.ellipse(0, -4, 16, 14.5, 0, 0, TAU); g.stroke();
+  // 侧减震柱（弹跳机器人特征）
+  for (const sx of [-22, 15]) {
+    eBody(sx, -9, 7, 15, 3, '#e6d7a8', '#8a7a4e');
+    g.fillStyle = '#39434f';
+    rr(g, sx - 1, -3 + (inAir ? -2 : 2), 9, 3.2, 1.5); g.fill();
+  }
+  // 腹部炸弹核心
+  emissive(g, 'rgba(255,60,40,' + (0.5 + pulse * 0.5) + ')', 10 + pulse * 12, () => {
+    g.fillStyle = cachedRG(g, 0, 5, 1, 0, 5, 9, [0, '#fff1d8', 0.4, '#ff6a3a', 1, '#a52010']);
+    g.beginPath(); g.arc(0, 5, 5.5 + pulse * 1.5, 0, TAU); g.fill();
+  });
+  eEye(-8, -8, 4.6, '#ff5d5d', 9);
+  // 引信
+  g.strokeStyle = '#ff9d2e';
+  g.lineWidth = 1.6;
+  g.beginPath();
+  g.moveTo(14, -1);
+  g.quadraticCurveTo(21, -5 + Math.sin(e.anim * 12) * 2, 24, -1);
+  g.stroke();
+  // 剩余跳跃
+  for (let i = 0; i < e.jumpsLeft; i++) {
+    emissive(g, 'rgba(255,215,100,0.9)', 6, () => {
+      g.fillStyle = '#ffd764';
+      g.beginPath(); g.arc(-5 + i * 7, -24, 2.4, 0, TAU); g.fill();
+    });
+  }
+  g.restore();
+}
+
+// 维修碾压车（维修无人机 + 碾压车）
+function drawMediCrusher(e) {
+  const roll = e.anim * 3;
+  const glow = e.healT < 0.6;
+  eTread(-6, 6, 44, 18, 6, '#41544c', '#1f2a26');
+  // 车体（医疗白绿涂装）
+  g.fillStyle = cachedLG(g, 0, -30, 0, 18, [0, '#e2f2ea', 0.45, '#8fb5a4', 1, '#3d5b4e']);
+  rr(g, -14, -28, 56, 44, 8); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.42)';
+  g.lineWidth = 1.6;
+  rr(g, -14, -28, 56, 44, 8); g.stroke();
+  eRim(-14, -28, 56, 44, 8, 0.25);
+  // 医疗十字
+  emissive(g, glow ? 'rgba(88,214,139,0.95)' : 'rgba(88,214,139,0.45)', glow ? 14 : 7, () => {
+    g.fillStyle = '#2fae66';
+    rr(g, 8, -22, 7, 22, 2); g.fill();
+    rr(g, 3.5, -14.5, 16, 7, 2); g.fill();
+  });
+  // 驾驶舱
+  eBody(20, -25, 20, 18, 5, '#5b7a6d', '#243830');
+  g.fillStyle = cachedLG(g, 23, -22, 34, -10, [0, '#d9f5e6', 1, '#66a487']);
+  rr(g, 23, -21, 11, 10, 2.5); g.fill();
+  // 排气
+  eBody(33, -44, 8, 20, 3, '#4c554f', '#232824');
+  g.fillStyle = 'rgba(160,200,180,0.22)';
+  for (let i = 0; i < 3; i++) {
+    const ph = (time * 0.9 + i * 0.33) % 1;
+    g.beginPath(); g.arc(37 + Math.sin(ph * 5) * 4, -46 - ph * 22, 3 + ph * 6, 0, TAU); g.fill();
+  }
+  // 侧置修理机械臂
+  g.strokeStyle = '#7b8f86';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(8, 8);
+  g.quadraticCurveTo(20, 20 + Math.sin(time * 2) * 3, 34, 14);
+  g.stroke();
+  emissive(g, 'rgba(143,242,182,0.85)', 7, () => {
+    g.fillStyle = '#8ff2b6';
+    g.beginPath(); g.arc(35, 14, 3.4, 0, TAU); g.fill();
+  });
+  hazard(g, -14, 8, 56, 9, 3);
+  // 前滚筒
+  g.fillStyle = cachedRG(g, -30, 6, 3, -26, 12, 24, [0, '#a8bdb2', 1, '#3a4a43']);
+  g.beginPath(); g.arc(-26, 12, 22, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.5)';
+  g.lineWidth = 2;
+  g.beginPath(); g.arc(-26, 12, 22, 0, TAU); g.stroke();
+  g.fillStyle = '#37453e';
+  g.beginPath(); g.arc(-26, 12, 14, 0, TAU); g.fill();
+  for (let i = 0; i < 9; i++) {
+    const a = roll + i * TAU / 9;
+    const px = -26 + Math.cos(a) * 19, py = 12 + Math.sin(a) * 19;
+    g.fillStyle = Math.cos(a) < 0 ? '#9db0a6' : '#61756b';
+    g.save(); g.translate(px, py); g.rotate(a);
+    g.beginPath(); g.moveTo(-3.4, -3); g.lineTo(5, 0); g.lineTo(-3.4, 3); g.closePath(); g.fill();
+    g.restore();
+  }
+  // 治疗光环
+  if (glow) {
+    g.strokeStyle = 'rgba(88,214,139,0.45)';
+    g.lineWidth = 2.2;
+    g.beginPath(); g.arc(6, -4, 48 + Math.sin(time * 8) * 3, 0, TAU); g.stroke();
+  }
+}
+
+// 碾压泰坦（钢铁泰坦 + 重型碾压车）：终极 Boss
+function drawTitanCrusher(e) {
+  const step = Math.sin(e.anim * 3.4) * 6;
+  const roll = e.anim * 2.6;
+  const hasShield = e.shield > 0;
+  const t = time;
+  // 履带式下盘（碾压车基因）
+  eTread(-30, 20, 62, 22, 8, '#4b525c', '#20242b');
+  g.fillStyle = '#2b3038';
+  g.beginPath(); g.arc(-18, 31, 8, 0, TAU); g.fill();
+  g.beginPath(); g.arc(20, 31, 8, 0, TAU); g.fill();
+  // 腰部
+  eBody(-22, 4, 46, 18, 5, '#6a5145', '#31231d');
+  // 躯干重甲（泰坦基因）
+  g.fillStyle = cachedLG(g, -34, -36, 34, 24, [0, '#b98276', 0.4, '#82503f', 1, '#3d241d']);
+  rr(g, -34, -36, 68, 56, 11); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.52)';
+  g.lineWidth = 2.2;
+  rr(g, -34, -36, 68, 56, 11); g.stroke();
+  eRim(-34, -36, 68, 56, 11, 0.22);
+  // 胸口双反应炉
+  g.fillStyle = '#1c1512';
+  rr(g, -22, -26, 44, 28, 6); g.fill();
+  for (const cxp of [-11, 11]) {
+    emissive(g, 'rgba(255,120,40,0.9)', 12, () => {
+      g.fillStyle = cachedRG(g, cxp, -12, 1, cxp, -12, 11, [0, '#fff0d0', 0.4, '#ff9d2e', 1, 'rgba(190,60,10,0.12)']);
+      g.beginPath(); g.arc(cxp, -12, 8.5 + Math.sin(t * 3 + cxp) * 1, 0, TAU); g.fill();
+    });
+    g.strokeStyle = '#e8c877';
+    g.lineWidth = 1.8;
+    g.beginPath(); g.arc(cxp, -12, 10.5, 0, TAU); g.stroke();
+  }
+  // 散热格栅
+  g.fillStyle = '#ff7a2e';
+  for (let i = 0; i < 3; i++) { rr(g, -30, -22 + i * 7, 5, 4, 1.5); g.fill(); }
+  for (let i = 0; i < 3; i++) { rr(g, 25, -22 + i * 7, 5, 4, 1.5); g.fill(); }
+  // 肩甲 + 尖刺
+  for (const sx of [-54, 34]) {
+    eBody(sx, -40, 21, 29, 8, '#a6bcd0', '#3f4f5e');
+    g.fillStyle = '#e8c877';
+    rr(g, sx + 2, -36, 17, 5, 2); g.fill();
+    g.fillStyle = '#c3d5e6';
+    for (let i = 0; i < 2; i++) {
+      g.beginPath();
+      g.moveTo(sx + 4 + i * 10, -40);
+      g.lineTo(sx + 7.5 + i * 10, -53);
+      g.lineTo(sx + 11 + i * 10, -40);
+      g.closePath(); g.fill();
+    }
+  }
+  // 头部
+  eBody(-16, -58, 32, 25, 7, '#8ba2b8', '#3f4d5c');
+  g.fillStyle = '#c3d5e6';
+  rr(g, -3.5, -65, 7, 9, 2.5); g.fill();
+  g.fillStyle = '#080b0f';
+  rr(g, -12, -52, 24, 9, 3); g.fill();
+  emissive(g, 'rgba(255,60,50,0.95)', 13, () => {
+    g.fillStyle = '#ff5d5d';
+    rr(g, -9.5, -50.5, 8, 6, 2); g.fill();
+    rr(g, 1.5, -50.5, 8, 6, 2); g.fill();
+  });
+  // 排气烟柱
+  eBody(30, -64, 11, 26, 3, '#4a3b36', '#241c19');
+  g.fillStyle = 'rgba(130,120,115,0.26)';
+  for (let i = 0; i < 3; i++) {
+    const ph = (t * 0.75 + i * 0.33) % 1;
+    g.beginPath(); g.arc(36 + Math.sin(ph * 5) * 5, -66 - ph * 28, 4.5 + ph * 8, 0, TAU); g.fill();
+  }
+  // 前置巨型碾压滚筒（融合的核心特征）
+  g.fillStyle = cachedRG(g, -46, 8, 4, -42, 16, 30, [0, '#9aa7b4', 1, '#333c46']);
+  g.beginPath(); g.arc(-42, 16, 27, 0, TAU); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,0.55)';
+  g.lineWidth = 2.4;
+  g.beginPath(); g.arc(-42, 16, 27, 0, TAU); g.stroke();
+  g.fillStyle = '#2f3841';
+  g.beginPath(); g.arc(-42, 16, 17, 0, TAU); g.fill();
+  emissive(g, 'rgba(255,120,40,0.7)', 9, () => {
+    g.fillStyle = '#ff9d2e';
+    g.beginPath(); g.arc(-42, 16, 6, 0, TAU); g.fill();
+  });
+  // 滚筒尖钉
+  for (let i = 0; i < 11; i++) {
+    const a = roll + i * TAU / 11;
+    const px = -42 + Math.cos(a) * 23, py = 16 + Math.sin(a) * 23;
+    g.fillStyle = Math.cos(a) < 0 ? '#c3d0dc' : '#5d6a77';
+    g.save(); g.translate(px, py); g.rotate(a);
+    g.beginPath(); g.moveTo(-4, -3.6); g.lineTo(7, 0); g.lineTo(-4, 3.6); g.closePath(); g.fill();
+    g.restore();
+  }
+  // 连接臂
+  eBody(-30, 2, 16, 20, 4, '#7a5a49', '#3d2a21');
+  // 能量护盾
+  if (hasShield) {
+    const sa = 0.45 + Math.sin(t * 4) * 0.13;
+    emissive(g, 'rgba(255,170,90,0.7)', 13, () => {
+      g.strokeStyle = 'rgba(255,205,140,' + sa + ')';
+      g.lineWidth = 3.2;
+      g.beginPath(); g.ellipse(-6, -12, 62, 58, 0, 0, TAU); g.stroke();
+    });
+    g.fillStyle = 'rgba(255,170,90,0.06)';
+    g.beginPath(); g.ellipse(-6, -12, 62, 58, 0, 0, TAU); g.fill();
+    g.strokeStyle = 'rgba(255,205,140,0.16)';
+    g.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const a = t * 0.55 + i * TAU / 3;
+      const hx = -6 + Math.cos(a) * 38, hy = -12 + Math.sin(a) * 34;
+      g.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const ha = k * TAU / 6;
+        g[k ? 'lineTo' : 'moveTo'](hx + Math.cos(ha) * 10, hy + Math.sin(ha) * 10);
       }
       g.closePath(); g.stroke();
     }
