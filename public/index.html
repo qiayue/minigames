@@ -128,13 +128,14 @@
   .tag.common { background: var(--common); }
   .tag.rare { background: var(--rare); }
   .tag.epic { background: var(--epic); }
-  #shovelBtn {
+  #shovelBtn, #fuseBtn {
     min-width: 60px; border-radius: 12px; border: 2px solid var(--line);
     background: var(--panel2); color: var(--text); font-size: 13px; font-weight: 700;
     cursor: pointer; line-height: 1.3;
   }
-  #shovelBtn .big { font-size: 20px; display: block; }
+  #shovelBtn .big, #fuseBtn .big { font-size: 20px; display: block; }
   #shovelBtn.sel { border-color: var(--danger); box-shadow: 0 0 12px rgba(255, 93, 93, .45); }
+  #fuseBtn.sel { border-color: var(--epic); box-shadow: 0 0 12px rgba(199, 123, 255, .5); }
 
   #stage {
     position: relative; border-radius: 14px; overflow: hidden;
@@ -253,12 +254,13 @@
       <span class="big">🎁</span>开盲盒 <span id="boxCost">50</span>⚡
     </button>
     <div id="trayInfo">
-      <div id="trayTip">🎁 点"开盲盒"，再点战场空格放下盲盒 —— <b>落地即开，开出什么就地服役！</b></div>
+      <div id="trayTip">🎁 点"开盲盒"→点空格放置，<b>落地即开！</b> 🧪 两台机器还能<b>合成</b>更强机型</div>
       <div id="trayRow2">
         <span class="lbl">保底进度</span><span id="pityDots"></span>
         <span class="lbl" id="histLbl">最近开出</span><span id="pulls"></span>
       </div>
     </div>
+    <button id="fuseBtn" title="选中后依次点击场上两台机器进行合成：弹簧拳机+冷冻风扇=冰冻弹簧炮 | 自动炮台+自动炮台=双管炮台 | 发电机+发电机=聚变电站 | 自动炮台+特斯拉线圈=电弧机炮 | 碎纸机+磁力吊塔=磁力碎纸机 | 装甲路障+冷冻风扇=寒冰壁垒"><span class="big">🧪</span>合成</button>
     <button id="shovelBtn" title="选中后点击场上的机器将其拆除"><span class="big">🔧</span>拆除</button>
   </div>
 
@@ -273,6 +275,7 @@
         <div>🎲 <b>拼手气</b>：10 种机器分普通/稀有/史诗，连开 4 次普通后必出稀有以上</div>
         <div>⚡ <b>能量</b>：点击掉落的电池收集能量，发电机也会产电</div>
         <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎；🥊 弹簧拳机近战无视护盾</div>
+        <div>🧪 <b>合成</b>：两台机器可融合！弹簧拳机＋冷冻风扇＝<b>冰冻弹簧炮</b>（冻结整行 2 秒），共 6 种配方等你发现</div>
         <div>⚠️ <b>新威胁</b>：自爆无人蜂撞机自爆、盾卫机器人的护盾能挡住子弹！</div>
         <div>🛡️ <b>目标</b>：守住 10 波进攻，别让机器人冲进左侧基地</div>
       </div>
