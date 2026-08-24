@@ -1,0 +1,13 @@
+{
+  "name": "minigames",
+  "private": true,
+  "type": "module",
+  "description": "机械防线：盲盒塔防 — 部署在 Cloudflare Workers 上的网页小游戏",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.27.0"
+  }
+}
