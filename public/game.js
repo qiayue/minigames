@@ -394,10 +394,21 @@ const $ = id => document.getElementById(id);
 /* ========== DOM ========== */
 const cv = $('cv');
 const g = cv.getContext('2d');
-const DPR = Math.min(window.devicePixelRatio || 1, 2);
-cv.width = W * DPR;
-cv.height = H * DPR;
+// 渲染倍率可变：辉光都关光了还是掉帧（弱手机的常态），就降采样。
+// 画布 CSS 尺寸不变，所以布局、点击坐标都不受影响。
+const DPR_MAX = Math.min(window.devicePixelRatio || 1, 2);
+let DPR = DPR_MAX;
+cv.width = Math.round(W * DPR);
+cv.height = Math.round(H * DPR);
 cv.style.aspectRatio = W + ' / ' + H;
+function setRenderScale(k) {
+  const d = clamp(DPR_MAX * k, 0.6, DPR_MAX);
+  if (Math.abs(d - DPR) < 0.03) return;
+  DPR = d;
+  cv.width = Math.round(W * DPR);
+  cv.height = Math.round(H * DPR);
+  bgCanvas = null;            // 背景缓存按新倍率重建
+}
 
 /* ========== 游戏状态 ========== */
 let state = 'menu';        // menu | playing | paused | over | win
@@ -582,15 +593,26 @@ function tone(f0, f1, dur, type, vol, delay) {
   o.connect(gn).connect(ac.destination);
   o.start(t0); o.stop(t0 + dur + 0.02);
 }
+// 白噪声缓冲很贵：一次 boom 就要现填两万个采样。
+// 按 25ms 分档缓存复用，听感没差别，开火密集时 CPU 省下一大截。
+const _noiseBufs = new Map();
+function noiseBuf(dur) {
+  const key = Math.max(1, Math.round(dur * 40));
+  let buf = _noiseBufs.get(key);
+  if (!buf) {
+    const n = Math.floor(ac.sampleRate * (key / 40));
+    buf = ac.createBuffer(1, n, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    _noiseBufs.set(key, buf);
+  }
+  return buf;
+}
 function noiseBurst(dur, vol, freq, delay) {
   if (!ac) return;
   const t0 = ac.currentTime + (delay || 0);
-  const n = Math.floor(ac.sampleRate * dur);
-  const buf = ac.createBuffer(1, n, ac.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
   const src = ac.createBufferSource();
-  src.buffer = buf;
+  src.buffer = noiseBuf(dur);
   const f = ac.createBiquadFilter();
   f.type = 'lowpass'; f.frequency.value = freq || 1200;
   const gn = ac.createGain();
@@ -599,10 +621,25 @@ function noiseBurst(dur, vol, freq, delay) {
   src.connect(f).connect(gn).connect(ac.destination);
   src.start(t0);
 }
+// 几十台神机同时开火时，同一个音效一帧内会被触发上百次：
+// 听起来完全一样，代价却是上百个 WebAudio 节点。给高频音效设最小重触发间隔。
+const SFX_GAP = {
+  shoot: 0.055, ice: 0.055, zap: 0.06, laser: 0.07, snipe: 0.07,
+  punch: 0.05, chomp: 0.06, hit: 0.05, gen: 0.08, coin: 0.045,
+  boom: 0.05, break: 0.06, shred: 0.09, freeze: 0.09, grab: 0.08,
+};
+const _sfxLast = new Map();
 function sfx(name) {
   if (muted) return;
   ensureAc();
   if (!ac) return;
+  const gap = SFX_GAP[name];
+  if (gap !== undefined) {
+    const now = ac.currentTime;
+    const last = _sfxLast.get(name);
+    if (last !== undefined && now - last < gap) return;
+    _sfxLast.set(name, now);
+  }
   switch (name) {
     case 'coin':  tone(880, 1500, 0.12, 'sine', 0.18); break;
     case 'place': tone(300, 140, 0.1, 'square', 0.15); noiseBurst(0.06, 0.1, 2000); break;
@@ -1224,8 +1261,9 @@ function modStat(kind, prop, lv) {
 function godStat(kind, prop, lv, tier) {
   if (prop === 'interval' || prop === 'cd' || prop === 'shellCd') {
     // 攻速/产速拉满（留一点余量，别让弹幕把帧率打穿）
-    const base = prop === 'interval' ? 0.09 : prop === 'shellCd' ? 0.6 : 0.2;
-    return Math.max(base / Math.max(tier, 1), 0.03);
+    const base = prop === 'interval' ? 0.11 : prop === 'shellCd' ? 0.6 : 0.2;
+    // 阶位加成到 3 阶封顶：再快也只是把弹丸叠在一起，帧率却要付全价
+    return Math.max(base / Math.min(Math.max(tier, 1), 3), 0.055);
   }
   if (prop === 'val') return GOD_LV;                 // 每次产能 99999
   if (prop === 'dmg') return GOD_LV * Math.max(tier, 1);
@@ -1238,6 +1276,10 @@ function godStat(kind, prop, lv, tier) {
 function bulletTier(lv) { return clamp(Math.floor((lv - 1) / 2) + 1, 1, 5); }
 // 高等级一次打出多发（受弹幕预算约束）
 function volleyCount(lv) { return lv >= 12 ? 4 : lv >= 8 ? 3 : lv >= 4 ? 2 : 1; }
+// 齐射代价：只对最高档的 4 连发收，一次多等 0.7 倍间隔、每发伤害同比放大。
+// DPS 不变，但每秒出膛数量少了四成——弹幕正是从这一档开始糊屏的。
+// 低档不收：那里单发伤害本来就压着杂兵血线，再放大只会浪费在溢出伤害上。
+function volleyIvMul(n) { return n >= 4 ? 1.7 : 1; }
 
 function enemyAhead(r, cx) {
   return enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
@@ -1309,26 +1351,29 @@ function updateMachines(dt) {
           : (prop) => modStat(kind, prop, lv);
         if (kind === 'shot') {
           m.mt.shot = (m.mt.shot || 0) + mdt;
-          if (m.mt.shot >= st('interval') && enemyAhead(r, cx) && bulletBudget()) {
+          const vN = volleyCount(lv);
+          const vMul = volleyIvMul(vN);
+          if (m.mt.shot >= st('interval') * vMul && enemyAhead(r, cx) && bulletBudget()) {
             m.mt.shot = 0;
             m.recoil = 0.12;
             m.altBarrel = !m.altBarrel;
             // 模块协同：带雷电→电弧弹跳，带冰霜→冰弹减速
             const bk = hasKind(m, 'zap') ? 'arc' : hasKind(m, 'frost') ? 'ice' : 'shot';
             const bt = bulletTier(lv);
-            const n = volleyCount(lv);
+            const n = vN;
+            const bdmg = st('dmg') * vMul;   // 出膛慢了，单发就更重，DPS 不变
             // 齐射：等级越高一次打出越多发，扇形铺开
             for (let i = 0; i < n; i++) {
               if (!bulletBudget()) break;
               const spread = n === 1 ? 0 : (i - (n - 1) / 2) * 11;
               bullets.push({
-                kind: bk, row: r, x: cx + 34, dmg: st('dmg'), speed: 340 + bt * 26,
+                kind: bk, row: r, x: cx + 34, dmg: bdmg, speed: 340 + bt * 26,
                 dy: (lv >= 2 ? (m.altBarrel ? -10 : 2) : 0) + spread,
                 bt, pierce: bt >= 5 ? 3 : 0, hit: bt >= 5 ? new Set() : null,
                 spin: 0,
               });
             }
-            if (bt >= 4) { m.recoil = 0.2; shake(0.05, 1.2); }
+            if (bt >= 4) { m.recoil = 0.2; if (shakeT <= 0.02) shake(0.05, 1.2); }
             sfx(bk === 'arc' ? 'zap' : bk === 'ice' ? 'ice' : 'shoot');
           }
         } else if (kind === 'energy') {
@@ -1989,15 +2034,21 @@ function updateShells(dt) {
   }
 }
 
-// 弹幕总量上限：神位模式下几十台神机同时开火，必须封顶
-const BULLET_CAP = 380;
+// 弹幕总量上限：神位模式下几十台神机同时开火，必须封顶——
+// 超过这个数，多出来的弹丸只会互相遮挡，看不出差别。
+// 上限刻意不跟画质挂钩：掉帧时再砍火力，等于把性能问题转嫁成难度问题。
+const BULLET_CAP = 260;
 function bulletBudget() { return bullets.length < BULLET_CAP; }
+// 碎屑与冲击波同样封顶，避免高等级连击把粒子池撑爆
+const PART_CAP = 240;
+const PART_CAP_LOW = 130;
+const SHOCK_CAP = 16;
 
 // 命中表现：档位越高冲击越大；满血一击必杀会打出「处决」
 function onBulletHit(b, e, wasFull) {
   const bt = b.bt || 1;
   const y = rowCy(e);
-  if (bt >= 3) {
+  if (bt >= 3 && shocks.length < SHOCK_CAP) {
     shocks.push({ x: b.x, y, t: 0.26, max: 0.26, reach: 26 + bt * 12,
       color: b.kind === 'ice' ? '#bfe9ff' : b.kind === 'arc' ? '#d9b8ff' : '#ffe08a' });
     spawnParts(b.x, y, '#ffe08a', 4 + bt * 2, 110 + bt * 20, 0.35, 'spark');
@@ -2008,7 +2059,8 @@ function onBulletHit(b, e, wasFull) {
       if (o === e || o.dead || o.row !== e.row) continue;
       if (Math.abs(o.x - b.x) < 46) damageEnemy(o, b.dmg * 0.35, 'ranged', true);
     }
-    shake(0.08, 2);
+    // 每发都抖屏会又糊又卡，密集弹幕下只抖一部分
+    if (shakeT <= 0.02) shake(0.08, 2);
   }
   if (wasFull && e.dead && !e.boss) {
     addFloat(e.x, y - 46, '处决！', '#ffe08a');
@@ -2034,6 +2086,7 @@ function updateBullets(dt) {
     // 5 档光矛：贯穿多个敌人
     if (b.pierce) {
       for (const e of enemies) {
+        if (Math.abs(b.x - e.x) >= 70) continue;   // 粗筛：先按 x 距离刷掉绝大多数
         if (e.row !== b.row || e.dead || b.hit.has(e)) continue;
         if (Math.abs(b.x - e.x) >= e.w / 2 + 10) continue;
         b.hit.add(e);
@@ -2336,6 +2389,8 @@ function tryCollectOrb(x, y) {
 
 /* ========== 特效 ========== */
 function spawnParts(x, y, color, n, speed, life, shape) {
+  if (fxQuality < 0.7) n = Math.ceil(n * 0.5);
+  n = Math.min(n, (fxQuality < 0.7 ? PART_CAP_LOW : PART_CAP) - parts.length);
   for (let i = 0; i < n; i++) {
     const a = rand(0, TAU);
     const sp = rand(speed * 0.3, speed);
@@ -2351,7 +2406,9 @@ function spawnParts(x, y, color, n, speed, life, shape) {
     });
   }
 }
+const FLOAT_CAP = 22;
 function addFloat(x, y, txt, color) {
+  if (floats.length >= FLOAT_CAP) return;
   floats.push({ x, y, txt, color, t: 1.3 });
 }
 function updateFx(dt) {
@@ -2422,6 +2479,27 @@ let last = performance.now();
 function frame(now) {
   const dt = clamp((now - last) / 1000, 0, 0.05);
   last = now;
+  // 真实帧率反馈：单位数量只是负载的估算，弱机（尤其手机）单位不多也可能吃力。
+  // 阈值按「这台设备自己最好能跑多少」来定，而不是写死 60——
+  // 否则 30Hz 屏或省电模式下会被永久判成卡顿，画面白白变素。
+  if (dt > 0.0005) {
+    fpsAvg += (1 / dt - fpsAvg) * 0.06;
+    fpsBest = Math.max(fpsAvg, fpsBest - 0.02);   // 缓慢回落，跟得上刷新率变化
+    // 相对判据（照顾 30Hz 屏与省电模式）＋ 绝对下限（照顾一直就很慢的机器）
+    const ref = Math.min(fpsBest, 62);
+    const slow = fpsAvg < ref * 0.72 || fpsAvg < 26;
+    const easy = fpsAvg > ref * 0.9 && fpsAvg > 40;
+    if (slow) fxLoad = Math.max(0.35, fxLoad - 0.02);
+    else if (easy) fxLoad = Math.min(1, fxLoad + 0.008);
+    // 特效已经降到底还是跟不上，就降分辨率——最后也最有效的一档。
+    // 改分辨率要重建背景缓存，代价不小，所以走离散档位 + 冷却，别来回抖。
+    resHold -= dt;
+    if (resHold <= 0 && fxLoad <= 0.36 && slow && resIdx < RES_STEPS.length - 1) {
+      resHold = 3; setRenderScale(RES_STEPS[++resIdx]);
+    } else if (resHold <= 0 && fxLoad >= 0.99 && easy && resIdx > 0) {
+      resHold = 8; setRenderScale(RES_STEPS[--resIdx]);
+    }
+  }
   if (state === 'playing') update(dt);
   draw();
   updateHud();
@@ -3282,11 +3360,12 @@ function draw() {
     g.translate(rand(-1, 1) * shakeAmp * shakeT * 3, rand(-1, 1) * shakeAmp * shakeT * 3);
   }
   if (!bgCanvas) buildBackground();
-  // 负载自适应：单位很多时压低辉光半径（视觉几乎无差别，开销大幅下降）
+  // 负载自适应：单位很多时压低辉光半径（视觉几乎无差别，开销大幅下降）；
+  // 再叠加一层真实帧率反馈，两者取低。
   {
     let units = enemies.length;
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c]) units++;
-    fxQuality = units > 58 ? 0.35 : units > 38 ? 0.65 : 1;
+    fxQuality = Math.min(units > 58 ? 0.35 : units > 38 ? 0.65 : 1, fxLoad);
   }
   g.drawImage(bgCanvas, 0, 0, W, H);
   for (let r = 0; r < ROWS; r++) {
@@ -3584,15 +3663,33 @@ function bolt(ctx, x, y, P, rad) {
     ctx.beginPath(); ctx.arc(x - R * 0.22, y - R * 0.24, R * 0.5, 0, TAU); ctx.fill();
   }
 }
-// 发光包装（辉光半径随场上单位数自适应，保证密集战斗时的帧率）
+// 画质自适应：辉光半径与特效密度随负载浮动，保证密集战斗时的帧率
 let fxQuality = 1;
+let fpsAvg = 60;      // 平滑后的实时帧率
+let fpsBest = 60;     // 这台设备空闲时能跑到的帧率（降档阈值的参照系）
+let fxLoad = 1;       // 帧率反馈出来的画质上限
+const RES_STEPS = [1, 0.84, 0.7, 0.58];   // 渲染倍率档位
+let resIdx = 0;       // 当前档位
+let resHold = 0;      // 换档冷却（秒）
+// shadowBlur 是 Canvas 2D 里最贵的一步（每次描边都要跑一遍高斯模糊）。
+// 单位一多就直接跳过——此时画面本来就挤满了东西，少一层辉光看不出来，帧率却能回来一大截。
 function emissive(ctx, color, blur, fn) {
-  if (fxQuality <= 0) { fn(); return; }
+  if (fxQuality < 0.5) { fn(); return; }
   ctx.save();
   ctx.shadowBlur = blur * fxQuality;
   ctx.shadowColor = color;
   fn();
   ctx.restore();
+}
+// 廉价辉光：先描一圈粗而淡的，再描一圈细而亮的。
+// 观感接近 shadowBlur，代价只有两次普通描边。
+function haloStroke(ctx, color, wide, thin, alpha, path) {
+  ctx.strokeStyle = hexA(color, 0.18 * alpha);
+  ctx.lineWidth = wide;
+  path();
+  ctx.strokeStyle = hexA(color, alpha);
+  ctx.lineWidth = thin;
+  path();
 }
 // 警戒斜纹条
 function hazard(ctx, x, y, w, h, r) {
@@ -4811,12 +4908,10 @@ function drawEmpTower(ctx, m, lv) {
 function drawGodAura(ctx, tier) {
   const t = time;
   const p = Math.sin(t * 3) * 0.06;
-  // 地面金环
+  // 地面金环（廉价双描边辉光，几十台神机同屏也不掉帧）
   ctx.fillStyle = 'rgba(255,215,100,' + (0.07 + p * 0.5) + ')';
   ctx.beginPath(); ctx.ellipse(0, 34, 38, 10.5, 0, 0, TAU); ctx.fill();
-  emissive(ctx, 'rgba(255,215,100,0.85)', 12, () => {
-    ctx.strokeStyle = 'rgba(255,232,160,' + (0.7 + p) + ')';
-    ctx.lineWidth = 2.6;
+  haloStroke(ctx, '#ffe8a0', 7, 2.6, 0.7 + p, () => {
     ctx.beginPath(); ctx.ellipse(0, 34, 38, 10.5, 0, 0, TAU); ctx.stroke();
   });
   // 旋转神纹环（2 阶起）
@@ -4845,18 +4940,16 @@ function drawGodAura(ctx, tier) {
   }
   // 头顶星冕（4 阶起）
   if (tier >= 4) {
-    emissive(ctx, 'rgba(255,225,150,0.9)', 14, () => {
-      ctx.strokeStyle = 'rgba(255,240,190,0.85)';
-      ctx.lineWidth = 2.2;
+    haloStroke(ctx, '#fff0be', 6.5, 2.2, 0.85, () => {
       ctx.beginPath(); ctx.ellipse(0, -74, 20, 6, Math.sin(t) * 0.25, 0, TAU); ctx.stroke();
-      const spikes = Math.min(tier, 8);
-      ctx.fillStyle = 'rgba(255,240,190,0.9)';
-      for (let i = 0; i < spikes; i++) {
-        const a = t * 1.4 + i * TAU / spikes;
-        const px = Math.cos(a) * 20, py = -74 + Math.sin(a) * 6;
-        ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
-      }
     });
+    const spikes = Math.min(tier, fxQuality > 0.5 ? 8 : 4);
+    ctx.fillStyle = 'rgba(255,240,190,0.9)';
+    for (let i = 0; i < spikes; i++) {
+      const a = t * 1.4 + i * TAU / spikes;
+      const px = Math.cos(a) * 20, py = -74 + Math.sin(a) * 6;
+      ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
+    }
   }
   // 上浮神光粒子（5 阶起）
   if (tier >= 5 && fxQuality > 0.5) {
@@ -4882,11 +4975,9 @@ function drawGodPlate(ctx, tier) {
   const y = -52;
   ctx.fillStyle = 'rgba(28,20,6,0.88)';
   rr(ctx, -w / 2, y - 8, w, 16, 8); ctx.fill();
-  emissive(ctx, 'rgba(255,215,100,0.8)', 8, () => {
-    ctx.strokeStyle = 'rgba(255,215,100,0.9)';
-    ctx.lineWidth = 1.3;
-    rr(ctx, -w / 2, y - 8, w, 16, 8); ctx.stroke();
-  });
+  ctx.strokeStyle = 'rgba(255,215,100,0.9)';
+  ctx.lineWidth = 1.3;
+  rr(ctx, -w / 2, y - 8, w, 16, 8); ctx.stroke();
   ctx.fillStyle = '#ffe89a';
   ctx.fillText(label, 0, y);
 }
@@ -9292,15 +9383,20 @@ function drawBeams() {
 
 function drawBullets() {
   g.save();
+  // 弹幕一密，逐发 shadowBlur 就成了帧率杀手；此时改用实心光晕圈代替
+  const glow = fxQuality >= 0.65 && bullets.length <= 70;
+  if (!glow) g.shadowBlur = 0;
   for (const b of bullets) {
     const y = cellCy(b.row) - 8 + (b.dy || 0);
     // 弹体光晕
-    g.shadowBlur = b.kind === 'rocket' ? 14 : 10;
-    g.shadowColor = b.kind === 'ice' || b.kind === 'frost' ? 'rgba(140,215,255,0.9)'
-      : b.kind === 'arc' ? 'rgba(199,123,255,0.9)'
-      : b.kind === 'rocket' ? 'rgba(255,140,60,0.9)'
-      : b.kind === 'flak' ? 'rgba(168,232,255,0.9)'
-      : 'rgba(255,205,80,0.9)';
+    if (glow) {
+      g.shadowBlur = b.kind === 'rocket' ? 14 : 10;
+      g.shadowColor = b.kind === 'ice' || b.kind === 'frost' ? 'rgba(140,215,255,0.9)'
+        : b.kind === 'arc' ? 'rgba(199,123,255,0.9)'
+        : b.kind === 'rocket' ? 'rgba(255,140,60,0.9)'
+        : b.kind === 'flak' ? 'rgba(168,232,255,0.9)'
+        : 'rgba(255,205,80,0.9)';
+    }
     if (b.kind === 'rocket') {
       // 尾焰
       g.fillStyle = 'rgba(255,157,46,0.7)';
@@ -9372,7 +9468,7 @@ function drawBullets() {
       const bt = b.bt;
       b.spin = (b.spin || 0) + 0.35;
       const R = 4 + bt * 2.4;
-      g.shadowBlur = 8 + bt * 4;
+      if (glow) g.shadowBlur = 8 + bt * 4;
       // 拖尾
       g.fillStyle = 'rgba(255,205,80,0.24)';
       g.beginPath();
@@ -9392,7 +9488,7 @@ function drawBullets() {
         g.closePath(); g.fill();
         // 尾部能量羽
         g.fillStyle = 'rgba(255,220,140,0.5)';
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0, fn = glow ? 3 : 1; i < fn; i++) {
           const o = 10 + i * 12;
           g.beginPath();
           g.moveTo(b.x - 30 - o, y); g.lineTo(b.x - 18 - o, y - 5 - i); g.lineTo(b.x - 18 - o, y + 5 + i);
@@ -9478,25 +9574,30 @@ function hexA(hex, a) {
 }
 
 function drawParts() {
+  if (!parts.length) return;
   for (const p of parts) {
     const alpha = clamp(p.t / p.max, 0, 1);
+    const sh = p.shape;
+    // 圆形碎屑没有朝向：直接画，省掉 save/translate/rotate/restore 四件套。
+    // 同屏两百多个碎屑时，这一条就能省下可观的开销。
+    if (sh !== 'paper' && sh !== 'gear') {
+      g.globalAlpha = sh === 'smoke' ? alpha * 0.5 : alpha;
+      g.fillStyle = p.color;
+      g.beginPath();
+      g.arc(p.x, p.y, sh === 'smoke' ? p.size * 2.2 : p.size / 1.6, 0, TAU);
+      g.fill();
+      continue;
+    }
     g.save();
     g.globalAlpha = alpha;
     g.translate(p.x, p.y);
     g.rotate(p.rot);
     g.fillStyle = p.color;
-    if (p.shape === 'paper') {
-      g.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
-    } else if (p.shape === 'smoke') {
-      g.globalAlpha = alpha * 0.5;
-      g.beginPath(); g.arc(0, 0, p.size * 2.2, 0, TAU); g.fill();
-    } else if (p.shape === 'gear') {
-      g.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
-    } else {
-      g.beginPath(); g.arc(0, 0, p.size / 1.6, 0, TAU); g.fill();
-    }
+    if (sh === 'paper') g.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+    else g.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
     g.restore();
   }
+  g.globalAlpha = 1;
 }
 
 function drawOrbs() {
@@ -9507,9 +9608,11 @@ function drawOrbs() {
     g.globalAlpha = fade;
     g.translate(o.x, o.y);
     g.scale(pulse, pulse);
-    // 光晕
-    g.shadowBlur = 16;
-    g.shadowColor = 'rgba(255,197,49,0.85)';
+    // 光晕（拥挤时省掉模糊，用实心晕圈顶上）
+    if (fxQuality >= 0.65) {
+      g.shadowBlur = 16;
+      g.shadowColor = 'rgba(255,197,49,0.85)';
+    }
     g.fillStyle = 'rgba(255,197,49,0.22)';
     g.beginPath(); g.arc(0, 0, 24, 0, TAU); g.fill();
     g.shadowBlur = 0;
@@ -9536,16 +9639,17 @@ function drawOrbs() {
 }
 
 function drawFloats() {
+  if (!floats.length) return;
   const fs = Math.round(17 * uiScale);
+  g.font = '800 ' + fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.strokeStyle = 'rgba(0,0,0,0.75)';
+  g.lineWidth = 3 * uiScale;
   for (const f of floats) {
     const alpha = clamp(f.t, 0, 1);
     g.globalAlpha = alpha;
     g.fillStyle = f.color;
-    g.font = '800 ' + fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.strokeStyle = 'rgba(0,0,0,0.75)';
-    g.lineWidth = 3 * uiScale;
     g.strokeText(f.txt, f.x, f.y);
     g.fillText(f.txt, f.x, f.y);
     g.globalAlpha = 1;
@@ -9829,11 +9933,20 @@ window.__game = {
     allies.length = 0; shocks.length = 0;
   },
   setEnemyX: (i, x) => { if (enemies[i]) enemies[i].x = x; },
+  enemyState: i => (enemies[i] ? { hp: enemies[i].hp, maxHp: enemies[i].maxHp, x: enemies[i].x } : null),
+  // 测伤害用的血包：定住不动、血量拉高，直接读掉血量
+  makeDummy: (i, hp) => {
+    const e = enemies[i]; if (!e) return false;
+    e.hp = e.maxHp = hp; e.speed = 0; e.x = W - 120;
+    e.shield = 0; e.cloakT = 0; e.affix = null; e.aura = 0;
+    return true;
+  },
   get mineCount() { return mines.length; },
   get shellCount() { return shells.length; },
   get sawCount() { return saws.length; },
   get allyCount() { return allies.length; },
   get shockCount() { return shocks.length; },
+  get partCount() { return parts.length; },
   get ebulletCount() { return ebullets.length; },
   machineInfo: (r, c) => {
     const m = grid[r][c];
@@ -9933,6 +10046,7 @@ window.__game = {
   get history() { return history.slice(); },
   get pity() { return pity; },
   get enemyCount() { return enemies.length; },
+  get fxQuality() { return fxQuality; },
   get enemyList() {
     return enemies.map(e => ({
       type: e.type, row: e.row, x: e.x, hp: e.hp, shield: e.shield, boss: !!e.boss,
