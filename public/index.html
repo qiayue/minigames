@@ -191,6 +191,57 @@
     touch-action: none; user-select: none; -webkit-user-select: none;
   }
 
+  /* ===== 创造模式：双击机器调等级 ===== */
+  #lvPanel {
+    position: absolute; z-index: 30; display: none;
+    transform: translate(-50%, -100%);
+    background: rgba(18, 24, 33, .96); border: 1px solid var(--epic);
+    border-radius: 12px; padding: 8px 10px 9px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .55), 0 0 18px rgba(199, 123, 255, .28);
+    min-width: 190px; max-width: 260px;
+    font-size: 12px; user-select: none;
+  }
+  #lvPanel.show { display: block; }
+  #lvPanel::after {
+    content: ''; position: absolute; left: 50%; bottom: -7px; margin-left: -7px;
+    border: 7px solid transparent; border-top-color: var(--epic); border-bottom: 0;
+  }
+  #lvPanel.below { transform: translate(-50%, 0); }
+  #lvPanel.below::after { bottom: auto; top: -7px; border-top: 0; border-bottom-color: var(--epic); }
+  #lvpHead {
+    display: flex; align-items: center; gap: 6px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--line); margin-bottom: 6px;
+  }
+  #lvpName { flex: 1; font-weight: 800; font-size: 12.5px; color: var(--accent); line-height: 1.25; }
+  #lvpTotal { font-size: 10px; color: var(--dim); font-weight: 700; white-space: nowrap; }
+  #lvpClose {
+    border: 0; background: transparent; color: var(--dim); cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 0 2px;
+  }
+  #lvpClose:hover { color: var(--danger); }
+  #lvpRows { display: flex; flex-direction: column; gap: 4px; max-height: 168px; overflow-y: auto; }
+  .lvpRow { display: flex; align-items: center; gap: 5px; }
+  .lvpRow i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
+  .lvpRow .nm { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lvpRow b { min-width: 26px; text-align: center; font-size: 12px; color: var(--accent2); }
+  .lvpBtn {
+    width: 21px; height: 21px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+    font-size: 13px; font-weight: 800; line-height: 1; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lvpBtn:hover { background: var(--panel); border-color: var(--accent); }
+  .lvpBtn:disabled { opacity: .3; cursor: not-allowed; }
+  #lvpFoot { display: flex; gap: 5px; margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+  #lvpFoot button {
+    flex: 1; border-radius: 7px; border: 1px solid var(--line); background: var(--panel2);
+    color: var(--text); font-size: 11px; font-weight: 700; padding: 4px 0; cursor: pointer;
+  }
+  #lvpFoot button:hover { background: var(--panel); border-color: var(--epic); }
+  body.compact #lvPanel { min-width: 160px; font-size: 11px; padding: 6px 8px 7px; }
+  body.compact #lvpRows { max-height: 132px; }
+  body.compact .lvpBtn { width: 19px; height: 19px; }
+
   .ov {
     position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; text-align: center;
@@ -437,6 +488,19 @@
   <div id="stage">
     <canvas id="cv"></canvas>
 
+    <div id="lvPanel">
+      <div id="lvpHead">
+        <div id="lvpName"></div>
+        <div id="lvpTotal"></div>
+        <button id="lvpClose" title="关闭">✕</button>
+      </div>
+      <div id="lvpRows"></div>
+      <div id="lvpFoot">
+        <button data-all="-1">全体 −1</button>
+        <button data-all="1">全体 +1</button>
+      </div>
+    </div>
+
     <div class="ov show" id="menu">
       <h1>⚙️ 机械防线 <span class="gold">盲盒塔防</span></h1>
       <div class="sub">废铁机器人大军来袭，开盲盒抽机器，守住你的基地！</div>
@@ -446,6 +510,7 @@
         <div>⚡ <b>能量</b>：点击掉落的电池收集能量，发电机也会产电</div>
         <div>🧤 <b>手套</b>：把已放置的机器随意搬到别的格子，<b>没有冷却</b>；🚀 火箭井发射后会自动装填</div>
         <div>🛠️ <b>创造模式</b>：能量无限、机器免费无冷却、敌潮可随时开关，尽情实验杂交组合</div>
+        <div>🔬 <b>调等级</b>（创造模式）：机器<b>总等级到 Lv3</b> 后，<b>双击</b>它就能逐条能力加减等级</div>
         <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎；🥊 弹簧拳机近战无视护盾</div>
         <div>🧪 <b>杂交</b>：<b>任意两台机器都能合成</b>！同类升级（炮台→双管→<b>加特林</b>）；异类叠能力，一台机器最多同时拥有 <b>5 种能力</b></div>
         <div>⚠️ <b>新威胁</b>：自爆无人蜂撞机自爆、盾卫机器人的护盾能挡住子弹！</div>
@@ -503,6 +568,7 @@
 
   <footer>
     电脑：鼠标操作 · <b>F</b> 键或 ⛶ 全屏 · Esc 取消选择/暂停<br>
+    创造模式：双击 Lv3 以上的机器可直接调等级<br>
     手机：直接点触 · 竖屏会自动横过来 · 点 ⛶ 进入全屏<br>
     部署于 Cloudflare Workers · 开源于 <a href="https://github.com/qiayue/minigames" target="_blank" rel="noreferrer">GitHub</a>
   </footer>

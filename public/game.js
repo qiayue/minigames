@@ -304,7 +304,10 @@ const BOX_POOL = {
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 function rr(g, x, y, w, h, r) {
-  r = Math.min(r, w / 2, h / 2);
+  // 允许传负的宽高（从右往左画），内部归一化
+  if (w < 0) { x += w; w = -w; }
+  if (h < 0) { y += h; h = -h; }
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
   g.beginPath();
   g.moveTo(x + r, y);
   g.arcTo(x + w, y, x + w, y + h, r);
@@ -648,9 +651,26 @@ function doFuse(r1, c1, r2, c2) {
   return result;
 }
 
+// 就地把机器换成另一套模块（保留位置、血量比例与护盾）
+function retuneMachine(row, col, mods) {
+  const old = grid[row][col];
+  if (!old || !mods.length) return null;
+  const ratio = old.maxHp ? clamp(old.hp / old.maxHp, 0.05, 1) : 1;
+  const keep = { sh: old.sh, maxSh: old.maxSh, spin: old.spin };
+  grid[row][col] = null;
+  if (!place(typeOfModules(mods), row, col, mods)) { grid[row][col] = old; return null; }
+  const now = grid[row][col];
+  now.hp = Math.max(1, Math.round(now.maxHp * ratio));
+  now.sh = Math.min(keep.sh, keep.maxSh);
+  now.maxSh = keep.maxSh;
+  now.spin = keep.spin;
+  return now;
+}
+
 function removeMachine(row, col, silent) {
   const m = grid[row][col];
   if (!m) return;
+  if (lvTarget && lvTarget === m) closeLevelPanel();
   grid[row][col] = null;
   spawnParts(cellCx(col), cellCy(row), '#8fa1b8', 14, 120, 0.55, 'gear');
   if (!silent) sfx('break');
@@ -2058,6 +2078,7 @@ function updateHud() {
 
 /* ========== 游戏流程 ========== */
 function startGame(m) {
+  closeLevelPanel();
   if (m === 'box' || m === 'classic' || m === 'creative') mode = m;
   wavesOn = true;
   $('wavesBtn').textContent = '🌊 敌潮：开';
@@ -2225,6 +2246,173 @@ async function submitScore() {
   $('board').style.display = '';
 }
 
+/* ========== 创造模式：双击机器调等级（总等级到 Lv3 才解锁） ========== */
+const LEVEL_PANEL_MIN = 3;      // 总等级达到这个数才允许双击调整
+let lvTarget = null;            // 正在调整的机器（存引用，搬家也跟着走）
+// 机器还在场上就返回它的格子，否则返回 null
+function lvCell() {
+  if (!lvTarget) return null;
+  const r = lvTarget.row, c = lvTarget.col;
+  if (r === undefined || c === undefined) return null;
+  return grid[r] && grid[r][c] === lvTarget ? { r, c } : null;
+}
+
+function canTuneLevel(m) {
+  return !!(creative() && m && m.type !== 'box' && m.modules && totalLv(m.modules) >= LEVEL_PANEL_MIN);
+}
+
+function openLevelPanel(r, c) {
+  const m = grid[r][c];
+  if (!m) return false;
+  if (!creative()) return false;
+  if (m.type === 'box') {
+    addFloat(cellCx(c), cellCy(r) - 30, '盲盒还没开封', '#ff5d5d');
+    sfx('error');
+    return false;
+  }
+  if (!canTuneLevel(m)) {
+    addFloat(cellCx(c), cellCy(r) - 34,
+      '需要 Lv' + LEVEL_PANEL_MIN + ' 以上才能调等级（当前 Lv' + totalLv(m.modules) + '）', '#ff5d5d');
+    sfx('error');
+    return false;
+  }
+  lvTarget = m;
+  renderLevelPanel();
+  sfx('grab');
+  return true;
+}
+
+function closeLevelPanel() {
+  lvTarget = null;
+  $('lvPanel').classList.remove('show');
+}
+
+function renderLevelPanel() {
+  const panel = $('lvPanel');
+  const at = lvCell();
+  if (!at) { closeLevelPanel(); return; }
+  const m = lvTarget;
+  // 机器没了 / 掉到 Lv3 以下 / 离开创造模式，就自动收起
+  if (!canTuneLevel(m)) { closeLevelPanel(); return; }
+
+  $('lvpName').textContent = machineName(m);
+  $('lvpTotal').textContent = 'Lv' + totalLv(m.modules);
+
+  const rows = $('lvpRows');
+  rows.innerHTML = '';
+  const mods = m.modules;
+  for (const mod of mods) {
+    const row = document.createElement('div');
+    row.className = 'lvpRow';
+
+    const dot = document.createElement('i');
+    dot.style.background = EMBLEM_COLOR[mod.kind] || '#8fa1b8';
+    row.appendChild(dot);
+
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = KIND_ADJ[mod.kind] || mod.kind;
+    nm.title = KIND_DESC[mod.kind] || '';
+    row.appendChild(nm);
+
+    const minus = document.createElement('button');
+    minus.className = 'lvpBtn';
+    minus.textContent = '−';
+    // 只剩 1 级时再点就是移除这条能力（机器至少要保留一条）
+    const lastOne = mods.length <= 1;
+    minus.disabled = mod.lv <= 1 && lastOne;
+    minus.title = mod.lv <= 1 ? '移除这条能力' : '降一级';
+    minus.addEventListener('click', () => bumpModule(mod.kind, -1));
+    row.appendChild(minus);
+
+    const val = document.createElement('b');
+    val.textContent = mod.lv;
+    row.appendChild(val);
+
+    const plus = document.createElement('button');
+    plus.className = 'lvpBtn';
+    plus.textContent = '+';
+    plus.title = '升一级';
+    plus.addEventListener('click', () => bumpModule(mod.kind, 1));
+    row.appendChild(plus);
+
+    rows.appendChild(row);
+  }
+
+  // 贴到机器上方；上方放不下就翻到下方，再放不下就贴边
+  const gx = cellCx(at.c);
+  const gy = cellCy(at.r);
+  const stage = $('stage');
+  panel.classList.remove('below');
+  panel.style.left = clamp(gx / W * 100, 10, 90) + '%';
+  panel.style.top = (gy - 46) / H * 100 + '%';
+  panel.classList.add('show');
+  // 量出真实高度再决定朝上还是朝下（能力多的时候面板会很高）
+  const sh = stage.clientHeight || 1;
+  const ph = panel.offsetHeight;
+  if ((gy - 46) / H * sh - ph < 4) {
+    panel.classList.add('below');
+    const want = (gy + 44) / H * sh;
+    panel.style.top = clamp(want, 4, Math.max(4, sh - ph - 4)) / sh * 100 + '%';
+  }
+}
+
+// 调整某条能力的等级；降到 0 视为移除该能力
+function bumpModule(kind, delta) {
+  const at = lvCell();
+  if (!at) { closeLevelPanel(); return; }
+  const m = lvTarget;
+  if (!canTuneLevel(m)) { closeLevelPanel(); return; }
+  const mods = m.modules.map(x => ({ kind: x.kind, lv: x.lv }));
+  const target = mods.find(x => x.kind === kind);
+  if (!target) return;
+  const next = target.lv + delta;
+  if (next > 99) { sfx('error'); return; }
+  let out;
+  if (next <= 0) {
+    if (mods.length <= 1) { sfx('error'); return; }   // 至少保留一条能力
+    out = mods.filter(x => x.kind !== kind);
+  } else {
+    target.lv = next;
+    out = mods;
+  }
+  applyTune(sortModules(out), delta);
+}
+
+// 全体能力一起加减
+function bumpAll(delta) {
+  const at = lvCell();
+  if (!at) { closeLevelPanel(); return; }
+  const m = lvTarget;
+  if (!canTuneLevel(m)) { closeLevelPanel(); return; }
+  const mods = m.modules.map(x => ({ kind: x.kind, lv: clamp(x.lv + delta, 1, 99) }));
+  if (totalLv(mods) === totalLv(m.modules)) { sfx('error'); return; }
+  applyTune(sortModules(mods), delta);
+}
+
+function applyTune(mods, delta) {
+  const at = lvCell();
+  if (!at) { closeLevelPanel(); return; }
+  const { r, c } = at;
+  const before = totalLv(lvTarget.modules);
+  const now = retuneMachine(r, c, mods);
+  if (!now) { sfx('error'); return; }
+  lvTarget = now;                    // 换了机体，面板跟到新对象上
+  const after = totalLv(mods);
+  spawnParts(cellCx(c), cellCy(r), delta > 0 ? '#ffc531' : '#8fa1b8', 12, 130, 0.5, 'spark');
+  addFloat(cellCx(c), cellCy(r) - 56,
+    (after > before ? '↑ ' : '↓ ') + machineName(now) + ' Lv' + after,
+    after > before ? '#58d68b' : '#8fa1b8');
+  sfx(after > before ? 'fuse' : 'place');
+  // 调完可能跌破 Lv3，renderLevelPanel 会自己收起
+  renderLevelPanel();
+}
+
+$('lvpClose').addEventListener('click', closeLevelPanel);
+for (const b of document.querySelectorAll('#lvpFoot button')) {
+  b.addEventListener('click', () => bumpAll(+b.dataset.all));
+}
+
 /* ========== 输入 ========== */
 function toGame(ev) {
   const rect = cv.getBoundingClientRect();
@@ -2242,12 +2430,30 @@ function toGame(ev) {
 }
 cv.addEventListener('pointermove', ev => { mouse = toGame(ev); });
 cv.addEventListener('pointerleave', () => { mouse = { x: -1, y: -1 }; });
+let lastTap = { t: -1e9, x: 0, y: 0, r: -1, c: -1 };
 cv.addEventListener('pointerdown', ev => {
   ensureAc();
   if (state !== 'playing') return;
   const p = toGame(ev);
+  const cell0 = cellAt(p.x, p.y);
+  // 创造模式：空手双击同一台机器 → 打开等级面板
+  const now = performance.now();
+  const isDouble = cell0 && now - lastTap.t < 340
+    && lastTap.r === cell0.r && lastTap.c === cell0.c
+    && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 40;
+  lastTap = { t: now, x: p.x, y: p.y, r: cell0 ? cell0.r : -1, c: cell0 ? cell0.c : -1 };
+  if (isDouble && creative() && !sel && grid[cell0.r][cell0.c]) {
+    lastTap.t = -1e9;                    // 吃掉这一次，避免三连击反复开关
+    openLevelPanel(cell0.r, cell0.c);
+    return;
+  }
+  // 点别处就收起面板
+  if (lvTarget) {
+    const at = lvCell();
+    if (!at || !cell0 || cell0.r !== at.r || cell0.c !== at.c) closeLevelPanel();
+  }
   if (tryCollectOrb(p.x, p.y)) return;
-  const cell = cellAt(p.x, p.y);
+  const cell = cell0;
   if (!cell) return;
   if (sel && sel.mode === 'shovel') {
     if (grid[cell.r][cell.c]) {
@@ -2278,6 +2484,7 @@ cv.addEventListener('pointerdown', ev => {
     spawnParts(cellCx(sel.from.c), cellCy(sel.from.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
     src.row = cell.r;
     src.col = cell.c;
+    if (lvTarget === src) renderLevelPanel();
     spawnParts(cellCx(cell.c), cellCy(cell.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
     addFloat(cellCx(cell.c), cellCy(cell.r) - 40, '搬运完成', '#4cc2ff');
     sfx('place');
@@ -2468,6 +2675,7 @@ window.addEventListener('keydown', ev => {
     return;
   }
   if (ev.key === 'Escape') {
+    if (lvTarget) { closeLevelPanel(); return; }
     if (sel) { sel = null; renderTray(); return; }
     if (state === 'playing') pauseGame();
     else if (state === 'paused') resumeGame();
@@ -3242,12 +3450,15 @@ function drawThemeDeco(ctx, kind, m, slot) {
       break;
     }
     case 'shot': {
-      // 侧挂副炮管
+      // 侧挂副炮管（朝机体外侧伸出）
       const cx0 = side * 20;
       ctx.fillStyle = cachedLG(ctx, 0, 8, 0, 18, [0, '#8ba1b8', 1, '#46566a']);
-      rr(ctx, cx0, 8, side > 0 ? 22 : -22, 9, 4); ctx.fill();
+      rr(ctx, cx0, 8, side * 22, 9, 4); ctx.fill();
       ctx.fillStyle = '#39485a';
       rr(ctx, cx0 + side * 20, 6, side * 7, 13, 3); ctx.fill();
+      // 炮口
+      ctx.fillStyle = '#151b21';
+      rr(ctx, cx0 + side * 25, 10, side * 4, 5, 2); ctx.fill();
       break;
     }
   }
@@ -8627,6 +8838,7 @@ window.__game = {
     grid[r1][c1] = null;
     grid[r2][c2] = src;
     src.row = r2; src.col = c2;
+    if (lvTarget === src) renderLevelPanel();
     return true;
   },
   get wavesOn() { return wavesOn; },
@@ -8696,6 +8908,28 @@ window.__game = {
     return got;
   },
   ladderType: (k, lv) => ladderType(k, lv),
+  // 等级面板（创造模式双击）
+  openLevelPanel: (r, c) => openLevelPanel(r, c),
+  closeLevelPanel: () => closeLevelPanel(),
+  get levelPanel() {
+    const at = lvCell();
+    if (!at) return null;
+    const el = $('lvPanel');
+    return {
+      row: at.r, col: at.c,
+      shown: el.classList.contains('show'),
+      name: $('lvpName').textContent,
+      total: $('lvpTotal').textContent,
+      rows: [...el.querySelectorAll('.lvpRow')].map(x => ({
+        nm: x.querySelector('.nm').textContent,
+        lv: +x.querySelector('b').textContent,
+        minusDisabled: x.querySelector('.lvpBtn').disabled,
+      })),
+    };
+  },
+  canTune: (r, c) => canTuneLevel(grid[r][c]),
+  bumpModule: (kind, d) => bumpModule(kind, d),
+  bumpAll: d => bumpAll(d),
   get rotated() { return rotated; },
   get side() { return document.body.classList.contains('side'); },
   get stageBox() {
