@@ -9,6 +9,9 @@ const COLS = 9, ROWS = 5;
 const CELL_W = 96, CELL_H = 100;
 const GRID_X = 64, GRID_Y = 14;
 const W = GRID_X + COLS * CELL_W + 12;   // 940
+// 战场右边界：敌人越过这条线才算「上场」。
+// 在这之前双方都不能互相攻击——否则火力会在出生点就把敌人打光，前线永远推不起来。
+const FIELD_X = GRID_X + COLS * CELL_W;  // 928
 const H = GRID_Y + ROWS * CELL_H + 12;   // 526
 const TOTAL_WAVES = 10;
 /* ===== 神位争夺模式 ===== */
@@ -251,6 +254,28 @@ function nameOfModules(mods) {
 }
 function descOfModules(mods) {
   return mods.map(mod => KIND_DESC[mod.kind] + (mod.lv > 1 ? '×' + mod.lv : '')).join('，');
+}
+// 会索敌的模块（用来算这台机器的射程）。狙击/激光/火箭没有 range 属性＝覆盖整行。
+const RANGED_KINDS = ['shot', 'frost', 'poison', 'zap', 'aa', 'prism', 'mortar',
+                      'flame', 'sonic', 'sniper', 'laser', 'rocket'];
+// 返回这台机器的最远索敌距离（格）；Infinity 表示整行
+function machineReach(m) {
+  if (!m || !m.modules) return 0;
+  let best = 0;
+  for (const mod of m.modules) {
+    if (RANGED_KINDS.indexOf(mod.kind) < 0) continue;
+    const r = m.god ? godStat(mod.kind, 'range', mod.lv, m.god)
+                    : modStat(mod.kind, 'range', mod.lv);
+    if (r === undefined) return Infinity;
+    best = Math.max(best, r);
+  }
+  return best;
+}
+function reachText(m) {
+  const r = machineReach(m);
+  if (r === Infinity) return '整行';
+  if (r <= 0) return '近身';
+  return r.toFixed(1) + ' 格';
 }
 function hpOfModules(mods) {
   let hp = 300;
@@ -952,7 +977,7 @@ function spawnEnemy(type, row, affixKey) {
     jumpsLeft: info.jumps || 0, jumpT: 0, jumpFrom: 0, jumpTo: 0,
     heal: !!info.heal, healT: rand(1, 3),
     range: info.range || 0, rdmg: info.rdmg || 0, rcd: info.rcd || 2, rt: rand(0.4, 1.4), rkind: info.rkind || 'shell',
-    charge: info.charge || 0, chargeT: 0, aimX: 0, aimY: 0,
+    charge: info.charge || 0, chargeT: 0, aimX: 0, aimY: 0, pressT: 0,
     splits: info.splits || 0, regen: info.regen || 0,
     cloak: !!info.cloak, cloakT: 0, cloakCd: rand(2, 4),
     burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0, stunT: 0,
@@ -1062,6 +1087,8 @@ function startWave() {
   surgeDone = false;
   surgeAt = Math.floor(queue.length * 0.55);
   if (!endless && wave === TOTAL_WAVES) banner('⚠️ 最终决战！', '钢铁泰坦、远程部队与融合军团压境——守住这一波就胜利了！');
+  else if (wave === 1) banner('第 1 波来袭！', '机器有射程：摆得靠前才够得着入口——点一下机器就能看到它的射程范围。');
+  else if (wave === 2) banner('第 2 波来袭！', '后排机器够不到前线，只能当第二道防线；狙击塔、激光炮、火箭发射井覆盖整行。');
   else if (wave === 3) banner('第 3 波来袭！', '冲刺机器人会突然加速冲锋！');
   else if (wave === 4) banner('第 4 波来袭！', '远程机枪兵登场：它会停在远处开火，需要射程更远的火力反制！');
   else if (wave === 5) banner('第 5 波来袭！', '自爆无人蜂、弹跳机器人与分裂机器人登场！');
@@ -1084,8 +1111,13 @@ function updateWaves(dt) {
   } else if (waveState === 'spawn') {
     spawnT -= dt;
     if (spawnT <= 0 && queue.length) {
-      spawnEnemy(queue.shift(), pickRow());
-      spawnT = (godMode() ? 0.28 : 1) * (Math.max(0.7, 1.95 - wave * 0.09) + rand(0, 0.65));
+      // 成群推进：一次放一小队，队伍随波次变大。
+      // 一个一个地放，全场火力永远集中在同一个目标上，敌人还没走进战场就没了；
+      // 成群来才会分散火力，前线才推得进来。总量和平均节奏不变（间隔按人数同比拉长）。
+      const grp = Math.min(queue.length, 1 + Math.floor(rand(0, 1 + Math.min(3, wave * 0.4))));
+      for (let i = 0; i < grp; i++) spawnEnemy(queue.shift(), pickRow());
+      spawnT = (godMode() ? 0.28 : 1) * grp
+             * (Math.max(0.7, 1.95 - wave * 0.09) + rand(0, 0.65));
       // 波次推进到一半时有概率来一次五路突袭
       if (!surgeDone && wave >= 5 && queue.length && queue.length <= surgeAt && Math.random() < 0.3) {
         surgeDone = true;
@@ -1108,6 +1140,8 @@ function updateWaves(dt) {
 // kind: 'ranged' 会先被护盾吸收；'melee' / 'true' 无视护盾
 // noFlash: 持续伤害（灼烧/中毒）每帧都会调用，不能每帧触发受击白闪
 function damageEnemy(e, d, kind, noFlash) {
+  // 出生保护：还没走进战场的敌人不受伤害（远程敌人本来就有对称的限制）
+  if (e.x > FIELD_X) return;
   // 隐匿状态免疫远程攻击
   if (kind === 'ranged' && e.cloakT > 0) {
     if (Math.random() < 0.08) addFloat(e.x, rowCy(e) - 40, '隐匿', '#c0a8f0');
@@ -1135,6 +1169,7 @@ function damageEnemy(e, d, kind, noFlash) {
     e.dead = true;
     kills++;
     score += e.scoreVal;
+    if (killLog) killLog.push({ x: Math.round(e.x), col: Math.floor((e.x - GRID_X) / CELL_W), wave, type: e.type });
     spawnParts(e.x, rowCy(e), '#c8935a', 12, 130, 0.6, 'gear');
     spawnParts(e.x, rowCy(e), '#ffd764', 6, 100, 0.4, 'spark');
     if (e.heavy) { shake(e.boss ? 0.6 : 0.35, e.boss ? 8 : 5); sfx('boom'); }
@@ -1143,7 +1178,7 @@ function damageEnemy(e, d, kind, noFlash) {
       for (let i = 0; i < e.splits; i++) {
         spawnEnemy('scrap', e.row);
         const ne = enemies[enemies.length - 1];
-        ne.x = clamp(e.x + (i === 0 ? -18 : 18), GRID_X + 10, W + 20);
+        ne.x = clamp(e.x + (i === 0 ? -18 : 18), GRID_X + 10, FIELD_X);
         ne.hp = ne.maxHp = Math.round(ne.maxHp * 0.9);
       }
       spawnParts(e.x, rowCy(e), '#9fb4c8', 12, 130, 0.5, 'gear');
@@ -1178,19 +1213,19 @@ function enemiesInRow(row) { return enemies.filter(e => e.row === row); }
 
 // 模块参数表：每种模块 1/2/3 级的数值（更高等级由 modStat 外推，无上限）
 const MOD_STAT = {
-  shot:   { interval: [1.15, 0.6, 0.32], dmg: [25, 28, 30] },
+  shot:   { interval: [1.15, 0.6, 0.32], dmg: [25, 28, 30], range: [4.2, 4.8, 5.4] },
   energy: { interval: [7, 5, 3.5], val: [25, 40, 60] },
   melee:  { interval: [0.9, 0.6, 0.42], dmg: [45, 55, 68] },
-  frost:  { interval: [1.3, 0.9, 0.6], shellCd: [0, 6.5, 5], freeze: [0, 1.6, 2.2] },
+  frost:  { interval: [1.3, 0.9, 0.6], shellCd: [0, 6.5, 5], freeze: [0, 1.6, 2.2], range: [3.8, 4.4, 5.0] },
   shred:  { cd: [9, 6.5, 4.5], dmg: [550, 650, 800] },
   magnet: { cd: [6.5, 5, 3.5] },
-  zap:    { cd: [2.6, 1.9, 1.3], dmg: [55, 65, 75], targets: [4, 5, 6] },
+  zap:    { cd: [2.6, 1.9, 1.3], dmg: [55, 65, 75], targets: [4, 5, 6], range: [3.4, 4.0, 4.6] },
   laser:  { cd: [3.8, 2.9, 2.1], dmg: [60, 72, 85] },
   rocket: { cd: [15, 11, 8] },
   mine:   { cd: [7, 5, 3.5], dmg: [220, 320, 450] },
   flame:  { interval: [0.28, 0.22, 0.16], dmg: [9, 13, 18], range: [1.6, 2.0, 2.4], burn: [10, 16, 24] },
-  poison: { interval: [1.6, 1.2, 0.9], dmg: [14, 18, 24], dot: [16, 26, 38], dur: [4, 5, 6] },
-  mortar: { cd: [3.2, 2.4, 1.8], dmg: [70, 95, 125], splash: [58, 68, 80] },
+  poison: { interval: [1.6, 1.2, 0.9], dmg: [14, 18, 24], dot: [16, 26, 38], dur: [4, 5, 6], range: [3.6, 4.2, 4.8] },
+  mortar: { cd: [3.2, 2.4, 1.8], dmg: [70, 95, 125], splash: [58, 68, 80], range: [6.5, 7.3, 8.1] },
   sniper: { cd: [2.8, 2.1, 1.5], dmg: [150, 210, 300] },
   repair: { cd: [2.2, 1.6, 1.1], heal: [40, 70, 110] },
   spikes: { interval: [0.5, 0.4, 0.3], dmg: [13, 20, 30] },
@@ -1198,12 +1233,12 @@ const MOD_STAT = {
   booster:{ haste: [0.4, 0.7, 1.05] },
   saw:    { cd: [4.5, 3.4, 2.5], dmg: [48, 65, 88] },
   emp:    { cd: [7.5, 5.8, 4.2], stun: [1.3, 1.9, 2.6] },
-  aa:     { interval: [0.9, 0.62, 0.42], dmg: [40, 55, 75] },
+  aa:     { interval: [0.9, 0.62, 0.42], dmg: [40, 55, 75], range: [5.0, 5.6, 6.2] },
   deflect:{ cd: [2.4, 1.6, 1.0], reach: [3.0, 4.0, 5.0] },
   sonic:  { cd: [3.4, 2.6, 1.9], dmg: [38, 52, 70], push: [46, 66, 90], range: [2.6, 3.2, 3.8] },
   drone:  { cd: [7, 5, 3.5], dmg: [22, 30, 42], life: [12, 14, 16], cap: [2, 3, 4] },
   gravity:{ cd: [6, 4.5, 3.2], hold: [1.2, 1.8, 2.5], radius: [1.8, 2.3, 2.9] },
-  prism:  { cd: [2.6, 2.0, 1.4], dmg: [42, 56, 74] },
+  prism:  { cd: [2.6, 2.0, 1.4], dmg: [42, 56, 74], range: [4.4, 5.0, 5.6] },
   armor:  {},
 };
 // 3 级以上的成长规则：等级无上限
@@ -1221,7 +1256,7 @@ const STAT_GROWTH = {
   haste:    { add: 0.3, max: 6 },
   stun:     { add: 0.5, max: 12 },
   freeze:   { add: 0.35, max: 10 },
-  range:    { add: 0.35, max: 9 },
+  range:    { add: 0.5, max: 9 },     // 升级会拉长射程：投资越多，防线推得越靠前
   splash:   { add: 10, max: 260 },
   dur:      { add: 0.8, max: 20 },
   reach:    { add: 0.6, max: 9 },
@@ -1281,8 +1316,15 @@ function volleyCount(lv) { return lv >= 12 ? 4 : lv >= 8 ? 3 : lv >= 4 ? 2 : 1; 
 // 低档不收：那里单发伤害本来就压着杂兵血线，再放大只会浪费在溢出伤害上。
 function volleyIvMul(n) { return n >= 4 ? 1.7 : 1; }
 
-function enemyAhead(r, cx) {
-  return enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x < W + 30);
+// 索敌射程（像素）。没有 range 属性的模块＝覆盖整行——
+// 狙击、激光、火箭的看家本领就是「够得着」，不该被削。
+function modReach(st) {
+  const r = st('range');
+  return r === undefined ? Infinity : r * CELL_W;
+}
+function enemyAhead(r, cx, reach) {
+  const far = cx + (reach === undefined ? Infinity : reach);
+  return enemies.some(e => e.row === r && e.x > cx - CELL_W / 2 && e.x <= Math.min(far, FIELD_X));
 }
 
 function enemiesInRange(r, cx, cells) {
@@ -1353,7 +1395,7 @@ function updateMachines(dt) {
           m.mt.shot = (m.mt.shot || 0) + mdt;
           const vN = volleyCount(lv);
           const vMul = volleyIvMul(vN);
-          if (m.mt.shot >= st('interval') * vMul && enemyAhead(r, cx) && bulletBudget()) {
+          if (m.mt.shot >= st('interval') * vMul && enemyAhead(r, cx, modReach(st)) && bulletBudget()) {
             m.mt.shot = 0;
             m.recoil = 0.12;
             m.altBarrel = !m.altBarrel;
@@ -1413,7 +1455,7 @@ function updateMachines(dt) {
           }
         } else if (kind === 'frost') {
           m.mt.frost = (m.mt.frost || 0) + mdt;
-          if (m.mt.frost >= st('interval') && enemyAhead(r, cx)) {
+          if (m.mt.frost >= st('interval') && enemyAhead(r, cx, modReach(st))) {
             m.mt.frost = 0;
             bullets.push({ kind: 'ice', row: r, x: cx + 30, dmg: 12, speed: 320 });
             sfx('ice');
@@ -1421,7 +1463,7 @@ function updateMachines(dt) {
           // 2 级起：定期轰出冻结整行的冰冻炮弹
           if (lv >= 2) {
             m.mt.frostShell = (m.mt.frostShell || 0) + mdt;
-            if (m.mt.frostShell >= st('shellCd') && enemyAhead(r, cx)) {
+            if (m.mt.frostShell >= st('shellCd') && enemyAhead(r, cx, modReach(st))) {
               m.mt.frostShell = 0;
               m.recoil = 0.25;
               bullets.push({ kind: 'frost', row: r, x: cx + 34, dmg: 60, speed: 300, freeze: st('freeze') });
@@ -1447,7 +1489,7 @@ function updateMachines(dt) {
             let prey = null;
             if (magRange) {
               const targets = enemiesInRow(r).filter(e =>
-                !e.dead && !e.heavy && e.x > cx + 20 && e.x < W + 20);
+                !e.dead && !e.heavy && e.x > cx + 20 && e.x <= FIELD_X);
               if (targets.length) prey = targets.reduce((a, b) => (a.x < b.x ? a : b));
             } else {
               prey = enemies.find(e =>
@@ -1498,7 +1540,7 @@ function updateMachines(dt) {
           m.mt.zap = (m.mt.zap || 0) + mdt;
           if (m.mt.zap >= st('cd')) {
             const targets = enemiesInRow(r)
-              .filter(e => e.x > cx - 20 && e.x < W + 20)
+              .filter(e => e.x > cx - 20 && e.x <= Math.min(cx + modReach(st), FIELD_X))
               .sort((a, b) => a.x - b.x)
               .slice(0, Math.round(st('targets')));
             if (targets.length) {
@@ -1519,7 +1561,7 @@ function updateMachines(dt) {
           m.mt.laser = (m.mt.laser || 0) + mdt;
           m.charge = clamp(m.mt.laser / st('cd'), 0, 1);
           if (m.mt.laser >= st('cd')) {
-            const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx);
+            const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx && e.x <= FIELD_X);
             if (targets.length) {
               m.mt.laser = 0;
               m.flash = 0.3;
@@ -1580,7 +1622,7 @@ function updateMachines(dt) {
           }
         } else if (kind === 'poison') {
           m.mt.poison = (m.mt.poison || 0) + mdt;
-          if (m.mt.poison >= st('interval') && enemyAhead(r, cx)) {
+          if (m.mt.poison >= st('interval') && enemyAhead(r, cx, modReach(st))) {
             m.mt.poison = 0;
             m.recoil = 0.14;
             bullets.push({
@@ -1591,7 +1633,8 @@ function updateMachines(dt) {
           }
         } else if (kind === 'mortar') {
           if ((m.mcd.mortar || 0) <= 0) {
-            const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx);
+            const far = Math.min(cx + modReach(st), FIELD_X);
+            const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx && e.x <= far);
             if (targets.length) {
               const prey = targets.reduce((a, b) => (a.x > b.x ? a : b));
               m.mcd.mortar = st('cd');
@@ -1606,7 +1649,7 @@ function updateMachines(dt) {
         } else if (kind === 'sniper') {
           if ((m.mcd.sniper || 0) <= 0) {
             // 跨行狙击：全场血量最高的敌人
-            const alive = enemies.filter(e => !e.dead && e.x < W + 20);
+            const alive = enemies.filter(e => !e.dead && e.x <= FIELD_X);
             if (alive.length) {
               const prey = alive.reduce((a, b) => (b.hp + b.shield > a.hp + a.shield ? b : a));
               m.mcd.sniper = st('cd');
@@ -1701,7 +1744,8 @@ function updateMachines(dt) {
           // 防空速射：优先锁定飞行单位，对空双倍
           m.mt.aa = (m.mt.aa || 0) + mdt;
           if (m.mt.aa >= st('interval')) {
-            const row = enemiesInRow(r).filter(e => !e.dead && e.x > cx - 10).sort((a, b2) => a.x - b2.x);
+            const far = Math.min(cx + modReach(st), FIELD_X);
+            const row = enemiesInRow(r).filter(e => !e.dead && e.x > cx - 10 && e.x <= far).sort((a, b2) => a.x - b2.x);
             const tgt = (row.find(e => e.fly) || row[0]);
             if (tgt && bulletBudget()) {
               m.mt.aa = 0;
@@ -1728,7 +1772,7 @@ function updateMachines(dt) {
               for (const e of hits) {
                 const side = e.row === r ? 1 : 0.5;
                 damageEnemy(e, st('dmg') * side, 'ranged');
-                if (!e.boss) e.x = Math.min(W + 20, e.x + st('push') * side);
+                if (!e.boss) e.x = Math.min(FIELD_X, e.x + st('push') * side);
                 spawnParts(e.x, rowCy(e), '#ffe9b0', 4, 90, 0.3, 'spark');
               }
               shocks.push({ x: cx + 18, y: cellCy(r) - 8, t: 0.42, max: 0.42, reach: reach, color: '#ffe9b0' });
@@ -1759,14 +1803,15 @@ function updateMachines(dt) {
           }
         } else if (kind === 'prism') {
           // 棱镜激光：贯穿本行，命中处再分裂到上下行
-          if ((m.mcd.prism || 0) <= 0 && enemyAhead(r, cx)) {
+          if ((m.mcd.prism || 0) <= 0 && enemyAhead(r, cx, modReach(st))) {
             m.mcd.prism = st('cd');
             m.flash = 0.22;
             m.recoil = 0.16;
             const dmg = st('dmg');
             let splitX = null;
+            const pfar = Math.min(cx + modReach(st), FIELD_X);
             for (const e of enemiesInRow(r)) {
-              if (e.dead || e.x < cx) continue;
+              if (e.dead || e.x < cx || e.x > pfar) continue;
               if (splitX === null) splitX = e.x;
               damageEnemy(e, dmg, 'ranged');
               spawnParts(e.x, rowCy(e), '#ffa8e0', 5, 90, 0.3, 'spark');
@@ -2087,7 +2132,7 @@ function updateBullets(dt) {
     if (b.pierce) {
       for (const e of enemies) {
         if (Math.abs(b.x - e.x) >= 70) continue;   // 粗筛：先按 x 距离刷掉绝大多数
-        if (e.row !== b.row || e.dead || b.hit.has(e)) continue;
+        if (e.row !== b.row || e.dead || b.hit.has(e) || e.x > FIELD_X) continue;
         if (Math.abs(b.x - e.x) >= e.w / 2 + 10) continue;
         b.hit.add(e);
         const wasFull = e.hp >= e.maxHp && e.shield <= 0;
@@ -2100,7 +2145,8 @@ function updateBullets(dt) {
     }
     let hitEnemy = null;
     for (const e of enemies) {
-      if (e.row === b.row && !e.dead && Math.abs(b.x - e.x) < e.w / 2 + 6) { hitEnemy = e; break; }
+      if (e.row === b.row && !e.dead && e.x <= FIELD_X
+          && Math.abs(b.x - e.x) < e.w / 2 + 6) { hitEnemy = e; break; }
     }
     if (hitEnemy) {
       const wasFull = hitEnemy.hp >= hitEnemy.maxHp && hitEnemy.shield <= 0;
@@ -2262,17 +2308,21 @@ function updateEnemies(dt) {
         }
       }
     }
-    // 远程敌人：先走进战场，再在本行射程内找机器停下开火
+    // 远程敌人：先走进战场，再在本行射程内找机器停下开火。
+    // 站桩会「失去耐心」：每多打一秒就往前压一点，站到最后必然走进防线的射程里。
+    // 没有这条，射程比防御远的远程兵会永远停在场边对射，波次清不掉。
     if (e.range && e.x <= W - e.w * 0.5 - 8) {
       const front = e.x - e.w / 2;
+      const standoff = Math.max(0.8, e.range - e.pressT * 0.22) * CELL_W;
       let tgt = null;
       for (let cc = COLS - 1; cc >= 0; cc--) {
         const o = grid[e.row][cc];
         if (!o || isWalkable(o)) continue;
         const ox = cellCx(cc);
-        if (ox < front && front - ox <= e.range * CELL_W) { tgt = { o, ox }; break; }
+        if (ox < front && front - ox <= standoff) { tgt = { o, ox }; break; }
       }
       if (tgt) {
+        e.pressT += dt;
         e.rt -= dt;
         e.firing = 0.25;
         e.aimX = tgt.ox;
@@ -2781,13 +2831,15 @@ function renderLevelPanel() {
   panel.classList.toggle('readonly', lvReadonly);
 
   $('lvpName').textContent = machineName(m);
-  $('lvpTotal').textContent = m.god ? godTierName(m.god) : 'Lv' + totalLv(m.modules);
+  const reachStr = machineReach(m) ? ' · 射程 ' + reachText(m) : '';
+  $('lvpTotal').textContent = (m.god ? godTierName(m.god) : 'Lv' + totalLv(m.modules)) + reachStr;
   if (lvReadonly) {
     const hp = Math.round(m.hp), mx = Math.round(m.maxHp);
     $('lvpInfo').innerHTML =
       '耐久 <b>' + fmtBig(hp) + ' / ' + fmtBig(mx) + '</b>'
       + (m.sh > 0 ? ' · 护盾 <b>' + fmtBig(Math.round(m.sh)) + '</b>' : '')
       + (m.haste > 0 ? ' · 超频 <b>+' + Math.round(m.haste * 100) + '%</b>' : '')
+      + ' · 射程 <b>' + reachText(m) + '</b>'
       + '<br>' + descOfModules(m.modules);
   }
 
@@ -3377,6 +3429,7 @@ function draw() {
       if (e.row === r) drawEnemy(e);
     }
   }
+  drawReachHint();
   drawFuseHints();
   drawMines();
   drawBeams();
@@ -3398,6 +3451,7 @@ function draw() {
 }
 
 /* ---- 背景（一次性预渲染到离屏画布，细节更足、每帧更省） ---- */
+let killLog = null;      // 调试用：记录每个敌人倒下的位置
 let bgCanvas = null;
 let vignetteGrad = null;
 function buildBackground() {
@@ -9688,12 +9742,65 @@ function drawFuseHints() {
   }
 }
 
+// 射程可视化：看着面板的机器时，把它够得到的范围画出来。
+// 没有这个，后排机器不开火会被当成 bug 而不是「摆错位置」。
+function drawReachHint() {
+  const at = lvCell();
+  if (!at || state !== 'playing') return;
+  const m = lvTarget;
+  const reach = machineReach(m);
+  if (!reach) return;
+  const cx = cellCx(at.c);
+  const far = Math.min(cx + (reach === Infinity ? 1e6 : reach * CELL_W), FIELD_X);
+  if (far <= cx) return;
+  const y = GRID_Y + at.r * CELL_H;
+  g.save();
+  g.fillStyle = 'rgba(120,200,255,0.15)';
+  g.fillRect(cx, y + 3, far - cx, CELL_H - 6);
+  const pulse = 0.6 + Math.sin(time * 4) * 0.25;
+  g.strokeStyle = 'rgba(150,220,255,' + pulse + ')';
+  g.lineWidth = 2;
+  g.setLineDash([7, 5]);
+  g.beginPath(); g.moveTo(far, y + 6); g.lineTo(far, y + CELL_H - 6); g.stroke();
+  g.setLineDash([]);
+  // 边界上标一下射程数值
+  const label = reach === Infinity ? '整行' : reach.toFixed(1) + ' 格';
+  g.font = 'bold ' + Math.round(11 * uiScale) + 'px "PingFang SC", system-ui, sans-serif';
+  g.textAlign = 'right';
+  g.textBaseline = 'middle';
+  const tw = g.measureText(label).width;
+  g.fillStyle = 'rgba(10,18,28,0.85)';
+  rr(g, far - tw - 12, y + 6, tw + 10, 16, 5); g.fill();
+  g.fillStyle = '#bfe4ff';
+  g.fillText(label, far - 7, y + 14);
+  g.restore();
+}
+
 function drawHoverGhost() {
   if (state !== 'playing' || !sel || mouse.x < 0) return;
   const cell = cellAt(mouse.x, mouse.y);
   if (!cell) return;
   const x = GRID_X + cell.c * CELL_W, y = GRID_Y + cell.r * CELL_H;
   const occupied = !!grid[cell.r][cell.c];
+  // 摆卡预览：先把这台机器在这一格能覆盖到哪画出来，摆位才有依据
+  if (sel.mode === 'card' && sel.type && !occupied) {
+    let pmods = modulesOfType(sel.type);
+    if (pmods && godMode()) pmods = pmods.map(x => ({ kind: x.kind, lv: GOD_LV }));
+    const reach = pmods ? machineReach({ modules: pmods, god: godMode() ? 1 : 0 }) : 0;
+    if (reach) {
+      const pcx = cellCx(cell.c);
+      const far = Math.min(pcx + (reach === Infinity ? 1e6 : reach * CELL_W), FIELD_X);
+      if (far > pcx) {
+        g.fillStyle = 'rgba(120,200,255,0.09)';
+        g.fillRect(pcx, y + 3, far - pcx, CELL_H - 6);
+        g.strokeStyle = 'rgba(150,220,255,0.45)';
+        g.lineWidth = 1.6;
+        g.setLineDash([6, 5]);
+        g.beginPath(); g.moveTo(far, y + 6); g.lineTo(far, y + CELL_H - 6); g.stroke();
+        g.setLineDash([]);
+      }
+    }
+  }
   if (sel.mode === 'shovel') {
     g.fillStyle = occupied ? 'rgba(255,93,93,0.25)' : 'rgba(255,255,255,0.06)';
     g.fillRect(x, y, CELL_W, CELL_H);
@@ -9934,6 +10041,8 @@ window.__game = {
   },
   setEnemyX: (i, x) => { if (enemies[i]) enemies[i].x = x; },
   enemyState: i => (enemies[i] ? { hp: enemies[i].hp, maxHp: enemies[i].maxHp, x: enemies[i].x } : null),
+  startKillLog: () => { killLog = []; },
+  get killLog() { return killLog ? killLog.slice() : null; },
   // 测伤害用的血包：定住不动、血量拉高，直接读掉血量
   makeDummy: (i, hp) => {
     const e = enemies[i]; if (!e) return false;
@@ -9947,6 +10056,15 @@ window.__game = {
   get allyCount() { return allies.length; },
   get shockCount() { return shocks.length; },
   get partCount() { return parts.length; },
+  reachOf: (r, c) => (grid[r][c] ? reachText(grid[r][c]) : null),
+  get deepestCol() {
+    let best = null;
+    for (const e of enemies) if (!e.dead) {
+      const c = Math.floor((e.x - GRID_X) / CELL_W);
+      if (best === null || c < best) best = c;
+    }
+    return best;
+  },
   get ebulletCount() { return ebullets.length; },
   machineInfo: (r, c) => {
     const m = grid[r][c];
