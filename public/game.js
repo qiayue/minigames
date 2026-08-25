@@ -2464,33 +2464,22 @@ cv.addEventListener('pointerdown', ev => {
     return;
   }
   if (sel && sel.mode === 'move') {
-    const m = grid[cell.r][cell.c];
-    if (m) {
+    if (!sel.from) {
+      // 空手：把这一格的机器拿起来（按住不放可以直接拖）
+      const m = grid[cell.r][cell.c];
+      if (!m) return;
       if (m.type === 'box') {
         addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '盲盒还没开封', '#ff5d5d');
         sfx('error');
         return;
       }
-      if (sel.from && sel.from.r === cell.r && sel.from.c === cell.c) { sel.from = null; return; }
       sel.from = { r: cell.r, c: cell.c };
+      sel.grabbed = true;          // 记住这次是按下拿起的，抬手时判断是不是拖拽
       sfx('place');
       return;
     }
-    if (!sel.from) return;
-    const src = grid[sel.from.r][sel.from.c];
-    if (!src) { sel.from = null; return; }
-    grid[sel.from.r][sel.from.c] = null;
-    grid[cell.r][cell.c] = src;
-    spawnParts(cellCx(sel.from.c), cellCy(sel.from.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
-    src.row = cell.r;
-    src.col = cell.c;
-    if (lvTarget === src) renderLevelPanel();
-    spawnParts(cellCx(cell.c), cellCy(cell.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
-    addFloat(cellCx(cell.c), cellCy(cell.r) - 40, '搬运完成', '#4cc2ff');
-    sfx('place');
-    // 手套没有冷却：保持搬运模式，可以连着搬
-    sel.from = null;
-    renderTray();
+    // 手上有机器：点自己=放回原地，点空格=搬过去，点别的机器=直接杂交
+    dropCarried(cell.r, cell.c);
     return;
   }
   if (sel && sel.mode === 'fuse') {
@@ -2510,7 +2499,8 @@ cv.addEventListener('pointerdown', ev => {
     const a = grid[sel.first.r][sel.first.c];
     if (!a) { sel.first = { r: cell.r, c: cell.c }; return; }
     doFuse(sel.first.r, sel.first.c, cell.r, cell.c);
-    sel = null;
+    // 杂交模式保持激活，可以接着选下一对，不用再点按钮
+    sel.first = null;
     renderTray();
     return;
   }
@@ -2562,6 +2552,57 @@ cv.addEventListener('pointerdown', ev => {
     }
   }
 });
+// 手套放下：空格→搬运，别的机器→杂交，原地→放回
+function dropCarried(r, c) {
+  if (!sel || sel.mode !== 'move' || !sel.from) return false;
+  const src = grid[sel.from.r][sel.from.c];
+  if (!src) { sel.from = null; sel.grabbed = false; return false; }
+  if (sel.from.r === r && sel.from.c === c) { sel.from = null; sel.grabbed = false; return false; }
+
+  const dst = grid[r][c];
+  if (dst) {
+    // 拖到另一台机器身上 → 直接杂交，手套保持激活可以接着拖
+    if (dst.type === 'box') {
+      addFloat(cellCx(c), cellCy(r) - 30, '盲盒还没开封', '#ff5d5d');
+      sfx('error');
+      return false;
+    }
+    doFuse(sel.from.r, sel.from.c, r, c);
+    sel.from = null;
+    sel.grabbed = false;
+    renderTray();
+    return true;
+  }
+  // 空格 → 搬运
+  grid[sel.from.r][sel.from.c] = null;
+  grid[r][c] = src;
+  spawnParts(cellCx(sel.from.c), cellCy(sel.from.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
+  src.row = r;
+  src.col = c;
+  if (lvTarget === src) renderLevelPanel();
+  spawnParts(cellCx(c), cellCy(r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
+  addFloat(cellCx(c), cellCy(r) - 40, '搬运完成', '#4cc2ff');
+  sfx('place');
+  // 手套没有冷却：保持搬运模式，可以连着搬
+  sel.from = null;
+  sel.grabbed = false;
+  renderTray();
+  return true;
+}
+
+cv.addEventListener('pointercancel', () => { if (sel && sel.mode === 'move') sel.grabbed = false; });
+// 按住拖动：抬手时如果已经离开原格，就在这里落下
+cv.addEventListener('pointerup', ev => {
+  if (state !== 'playing') return;
+  if (!sel || sel.mode !== 'move' || !sel.from || !sel.grabbed) return;
+  const p = toGame(ev);
+  const cell = cellAt(p.x, p.y);
+  sel.grabbed = false;                       // 抬手后转为「点一下放下」模式
+  if (!cell) return;
+  if (cell.r === sel.from.r && cell.c === sel.from.c) return;   // 原地抬手 = 继续拿着
+  dropCarried(cell.r, cell.c);
+});
+
 cv.addEventListener('contextmenu', ev => {
   ev.preventDefault();
   if (sel) { sel = null; renderTray(); }
@@ -8736,22 +8777,55 @@ function drawHoverGhost() {
     return;
   }
   if (sel.mode === 'move') {
-    if (sel.from && !occupied) {
-      const src = grid[sel.from.r][sel.from.c];
-      g.fillStyle = 'rgba(76,194,255,0.14)';
-      g.fillRect(x, y, CELL_W, CELL_H);
-      g.strokeStyle = 'rgba(76,194,255,0.7)';
-      g.lineWidth = 2;
-      g.strokeRect(x + 1, y + 1, CELL_W - 2, CELL_H - 2);
-      if (src) {
-        g.globalAlpha = 0.5;
-        drawMachine(g, src.type, cellCx(cell.c), cellCy(cell.r) + 6, 1.0, src);
-        g.globalAlpha = 1;
-      }
-    } else {
+    const src = sel.from ? grid[sel.from.r][sel.from.c] : null;
+    if (!src) {
+      // 空手：高亮可以拿起的机器
       g.fillStyle = occupied ? 'rgba(76,194,255,0.16)' : 'rgba(255,255,255,0.05)';
       g.fillRect(x, y, CELL_W, CELL_H);
+      return;
     }
+    const self = sel.from.r === cell.r && sel.from.c === cell.c;
+    const dst = grid[cell.r][cell.c];
+    const willFuse = !!dst && !self && dst.type !== 'box';
+    const bad = !!dst && dst.type === 'box';
+    // 落点框：杂交=紫、搬运=蓝、不能放=红
+    const col = bad ? '255,93,93' : willFuse ? '199,123,255' : self ? '150,165,180' : '76,194,255';
+    g.fillStyle = 'rgba(' + col + ',0.16)';
+    g.fillRect(x, y, CELL_W, CELL_H);
+    g.strokeStyle = 'rgba(' + col + ',0.8)';
+    g.lineWidth = 2;
+    g.strokeRect(x + 1, y + 1, CELL_W - 2, CELL_H - 2);
+    if (willFuse) {
+      // 预告杂交结果
+      const out = nameOfModules(mergeModules(src.modules, dst.modules));
+      g.font = 'bold 12px "PingFang SC", system-ui, sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'bottom';
+      const tw = g.measureText(out).width;
+      const ty = y - 4;
+      g.fillStyle = 'rgba(10,14,20,0.85)';
+      rr(g, x + CELL_W / 2 - tw / 2 - 7, ty - 17, tw + 14, 18, 6); g.fill();
+      g.strokeStyle = 'rgba(199,123,255,0.85)';
+      g.lineWidth = 1.2;
+      rr(g, x + CELL_W / 2 - tw / 2 - 7, ty - 17, tw + 14, 18, 6); g.stroke();
+      g.fillStyle = '#e2ccff';
+      g.fillText(out, x + CELL_W / 2, ty - 3);
+      // 连线
+      g.strokeStyle = 'rgba(199,123,255,' + (0.5 + Math.sin(time * 8) * 0.25) + ')';
+      g.lineWidth = 2.4;
+      g.setLineDash([6, 5]);
+      g.beginPath();
+      g.moveTo(cellCx(sel.from.c), cellCy(sel.from.r));
+      g.lineTo(cellCx(cell.c), cellCy(cell.r));
+      g.stroke();
+      g.setLineDash([]);
+    }
+    // 手上的机器跟着指针走
+    g.save();
+    g.globalAlpha = 0.62;
+    const fy = cellCy(cell.r) + 6 - (willFuse ? 16 : 0);
+    drawMachine(g, src.type, cellCx(cell.c), fy, willFuse ? 0.85 : 1.0, src);
+    g.restore();
     return;
   }
   if (sel.mode === 'card') {
@@ -8832,6 +8906,29 @@ window.__game = {
   get mode() { return mode; },
   get cooldowns() { return { ...classicCd }; },
   get moveCooldown() { return 0; },   // 手套已取消冷却
+  // 手套：拿起一台机器
+  grab: (r, c) => {
+    if (state !== 'playing') return false;
+    sel = { mode: 'move', from: null, grabbed: false };
+    const m = grid[r][c];
+    if (!m || m.type === 'box') return false;
+    sel.from = { r, c };
+    renderTray();
+    return true;
+  },
+  // 手套：把手上的机器落到目标格（空格=搬运，有机器=杂交）
+  drop: (r, c) => dropCarried(r, c),
+  // 一步到位：从 (r1,c1) 拖到 (r2,c2)
+  drag: (r1, c1, r2, c2) => {
+    if (state !== 'playing') return false;
+    const m = grid[r1][c1];
+    if (!m || m.type === 'box') return false;
+    sel = { mode: 'move', from: { r: r1, c: c1 }, grabbed: true };
+    const ok = dropCarried(r2, c2);
+    renderTray();
+    return ok;
+  },
+  get carrying() { return sel && sel.mode === 'move' && sel.from ? { ...sel.from } : null; },
   move: (r1, c1, r2, c2) => {
     const src = grid[r1][c1];
     if (!src || src.type === 'box' || grid[r2][c2]) return false;
