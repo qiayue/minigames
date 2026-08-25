@@ -226,6 +226,12 @@ npx wrangler kv namespace create SCORES
 - `POST /api/scores` — 提交成绩 `{ name, score, wave, mode }`
 - `GET /api/health` — 健康检查（`storage` 字段显示是否已启用 KV）
 
+## 📐 开发规范
+
+想用同一套做法开下一个游戏？[docs/GAME-DEV-GUIDE.md](docs/GAME-DEV-GUIDE.md) 沉淀了这个项目的
+架构模式（数据表驱动、模块化能力系统）、纯矢量美术规范、移动端适配、
+`window.__game` 调试接口 + Playwright 自动化测试流程、平衡与性能调参方法，以及踩过的坑清单。
+
 ## 🛠️ 技术说明
 
 - 前端：原生 JavaScript + Canvas 2D，所有画面均为程序绘制，零图片资源、零依赖、单页即玩
