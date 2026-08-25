@@ -406,6 +406,8 @@ function applyModeUI() {
     : godMode() ? '神位争夺'
     : mode === 'classic' ? '普通模式' : '盲盒塔防';
   document.body.classList.toggle('godmode', godMode());
+  document.body.classList.toggle('boxmode', mode === 'box');
+  if (mode === 'box') closeDeck();
   $('godPill').style.display = godMode() ? '' : 'none';
 }
 
@@ -447,6 +449,74 @@ function renderClassicTray() {
     classicCardEls[type] = { el, cdOv };
   }
 }
+
+/* ========== 手机：一屏选机器面板 ========== */
+let deckEls = {};
+let deckOpen = false;
+
+function canAfford(type) {
+  if (creative() || godMode()) return true;
+  return energy >= CLASSIC_COST[type] && (classicCd[type] || 0) <= 0;
+}
+
+function renderDeck() {
+  const grid2 = $('deckGrid');
+  grid2.innerHTML = '';
+  deckEls = {};
+  for (const type of CLASSIC_ORDER) {
+    const info = MACHINES[type];
+    const el = document.createElement('div');
+    el.className = 'dcard r-' + info.rarity;
+    el.title = info.desc;
+    const mini = document.createElement('canvas');
+    mini.width = 96; mini.height = 96;
+    drawMachine(mini.getContext('2d'), type, 48, 54, 0.92, {});
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = info.name;
+    const cost = document.createElement('div');
+    cost.className = 'cost';
+    cost.textContent = (creative() || godMode()) ? '免费' : CLASSIC_COST[type] + '⚡';
+    el.appendChild(mini); el.appendChild(nm); el.appendChild(cost);
+    el.addEventListener('click', () => {
+      if (state !== 'playing') return;
+      if (!canAfford(type)) { sfx('error'); return; }
+      sel = { mode: 'card', type };
+      closeDeck();
+      renderTray();
+      addFloat(W / 2, GRID_Y + 34, '已选：' + info.name + ' —— 点空格放置', '#4cc2ff');
+    });
+    grid2.appendChild(el);
+    deckEls[type] = el;
+  }
+  refreshDeckState();
+}
+
+function refreshDeckState() {
+  for (const type in deckEls) {
+    deckEls[type].classList.toggle('off', !canAfford(type));
+    deckEls[type].classList.toggle('sel', !!(sel && sel.mode === 'card' && sel.type === type));
+  }
+}
+
+function openDeck() {
+  if (state !== 'playing' || mode === 'box') return;
+  closeLevelPanel();
+  renderDeck();
+  deckOpen = true;
+  $('deck').classList.add('show');
+  $('deckTitle').textContent = godMode() ? '选择神机' : '选择机器';
+  $('deckHint').textContent = (creative() || godMode()) ? '全部免费无冷却' : '灰掉的是能量不够或还在冷却';
+  renderTray();
+}
+
+function closeDeck() {
+  deckOpen = false;
+  $('deck').classList.remove('show');
+  renderTray();
+}
+
+function toggleDeck() { deckOpen ? closeDeck() : openDeck(); }
 
 /* ========== 音效（WebAudio 合成） ========== */
 let ac = null;
@@ -614,6 +684,7 @@ function renderTray() {
   }
   $('shovelBtn').classList.toggle('sel', !!(sel && sel.mode === 'shovel'));
   $('boxBtn').classList.toggle('sel', !!(sel && sel.mode === 'box'));
+  $('allBtn').classList.toggle('sel', deckOpen);
   $('fuseBtn').classList.toggle('sel', !!(sel && sel.mode === 'fuse'));
   $('moveBtn').classList.toggle('sel', !!(sel && sel.mode === 'move'));
 }
@@ -2157,6 +2228,7 @@ function frame(now) {
 }
 
 function updateHud() {
+  if (deckOpen) refreshDeckState();
   $('energyVal').textContent = creative() ? '∞' : fmtBig(energy);
   $('scoreVal').textContent = score;
   if (godMode()) {
@@ -2189,6 +2261,7 @@ function updateHud() {
 /* ========== 游戏流程 ========== */
 function startGame(m) {
   closeLevelPanel();
+  closeDeck();
   if (m === 'box' || m === 'classic' || m === 'creative' || m === 'god') mode = m;
   wavesOn = true;
   $('wavesBtn').textContent = '🌊 敌潮：开';
@@ -2219,6 +2292,7 @@ function resumeGame() {
 }
 function endGame(win) {
   if (state === 'over' || state === 'win') return;
+  closeDeck();
   state = win ? 'win' : 'over';
   sel = null;
   renderTray();
@@ -2363,6 +2437,7 @@ async function submitScore() {
 /* ========== 创造模式：双击机器调等级（总等级到 Lv3 才解锁） ========== */
 const LEVEL_PANEL_MIN = 3;      // 总等级达到这个数才允许双击调整
 let lvTarget = null;            // 正在调整的机器（存引用，搬家也跟着走）
+let lvReadonly = false;         // 只看不改（长按查看，手机上没有 hover 提示）
 // 机器还在场上就返回它的格子，否则返回 null
 function lvCell() {
   if (!lvTarget) return null;
@@ -2375,9 +2450,22 @@ function canTuneLevel(m) {
   return !!(creative() && m && m.type !== 'box' && m.modules && totalLv(m.modules) >= LEVEL_PANEL_MIN);
 }
 
+// 长按查看机器信息（只读）；创造模式且 Lv3 以上会变成可调等级
+function openInfoPanel(r, c) {
+  const m = grid[r][c];
+  if (!m || m.type === 'box') return false;
+  if (creative() && canTuneLevel(m)) return openLevelPanel(r, c);
+  lvTarget = m;
+  lvReadonly = true;
+  renderLevelPanel();
+  sfx('grab');
+  return true;
+}
+
 function openLevelPanel(r, c) {
   const m = grid[r][c];
   if (!m) return false;
+  lvReadonly = false;
   if (!creative()) return false;
   if (m.type === 'box') {
     addFloat(cellCx(c), cellCy(r) - 30, '盲盒还没开封', '#ff5d5d');
@@ -2398,7 +2486,9 @@ function openLevelPanel(r, c) {
 
 function closeLevelPanel() {
   lvTarget = null;
+  lvReadonly = false;
   $('lvPanel').classList.remove('show');
+  $('lvPanel').classList.remove('readonly');
 }
 
 function renderLevelPanel() {
@@ -2406,16 +2496,40 @@ function renderLevelPanel() {
   const at = lvCell();
   if (!at) { closeLevelPanel(); return; }
   const m = lvTarget;
-  // 机器没了 / 掉到 Lv3 以下 / 离开创造模式，就自动收起
-  if (!canTuneLevel(m)) { closeLevelPanel(); return; }
+  // 可调模式下掉出条件就收起；只读模式下机器还在就继续显示
+  if (!lvReadonly && !canTuneLevel(m)) { closeLevelPanel(); return; }
+  if (!m.modules) { closeLevelPanel(); return; }
+  panel.classList.toggle('readonly', lvReadonly);
 
   $('lvpName').textContent = machineName(m);
-  $('lvpTotal').textContent = 'Lv' + totalLv(m.modules);
+  $('lvpTotal').textContent = m.god ? godTierName(m.god) : 'Lv' + totalLv(m.modules);
+  if (lvReadonly) {
+    const hp = Math.round(m.hp), mx = Math.round(m.maxHp);
+    $('lvpInfo').innerHTML =
+      '耐久 <b>' + fmtBig(hp) + ' / ' + fmtBig(mx) + '</b>'
+      + (m.sh > 0 ? ' · 护盾 <b>' + fmtBig(Math.round(m.sh)) + '</b>' : '')
+      + (m.haste > 0 ? ' · 超频 <b>+' + Math.round(m.haste * 100) + '%</b>' : '')
+      + '<br>' + descOfModules(m.modules);
+  }
 
   const rows = $('lvpRows');
   rows.innerHTML = '';
   const mods = m.modules;
   for (const mod of mods) {
+    if (lvReadonly) {
+      const row0 = document.createElement('div');
+      row0.className = 'lvpRow';
+      const dot0 = document.createElement('i');
+      dot0.style.background = EMBLEM_COLOR[mod.kind] || '#8fa1b8';
+      const nm0 = document.createElement('span');
+      nm0.className = 'nm';
+      nm0.textContent = KIND_ADJ[mod.kind] || mod.kind;
+      const v0 = document.createElement('b');
+      v0.textContent = m.god ? '神' : 'Lv' + mod.lv;
+      row0.appendChild(dot0); row0.appendChild(nm0); row0.appendChild(v0);
+      rows.appendChild(row0);
+      continue;
+    }
     const row = document.createElement('div');
     row.className = 'lvpRow';
 
@@ -2522,6 +2636,9 @@ function applyTune(mods, delta) {
   renderLevelPanel();
 }
 
+$('allBtn').addEventListener('click', () => { ensureAc(); toggleDeck(); });
+$('deckClose').addEventListener('click', closeDeck);
+$('deck').addEventListener('click', ev => { if (ev.target === $('deck')) closeDeck(); });
 $('lvpClose').addEventListener('click', closeLevelPanel);
 for (const b of document.querySelectorAll('#lvpFoot button')) {
   b.addEventListener('click', () => bumpAll(+b.dataset.all));
@@ -2545,6 +2662,11 @@ function toGame(ev) {
 cv.addEventListener('pointermove', ev => { mouse = toGame(ev); });
 cv.addEventListener('pointerleave', () => { mouse = { x: -1, y: -1 }; });
 let lastTap = { t: -1e9, x: 0, y: 0, r: -1, c: -1 };
+let pressTimer = 0, pressCell = null, pressPt = null;
+function cancelLongPress() {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = 0; }
+  pressCell = null; pressPt = null;
+}
 cv.addEventListener('pointerdown', ev => {
   ensureAc();
   if (state !== 'playing') return;
@@ -2556,6 +2678,19 @@ cv.addEventListener('pointerdown', ev => {
     && lastTap.r === cell0.r && lastTap.c === cell0.c
     && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 40;
   lastTap = { t: now, x: p.x, y: p.y, r: cell0 ? cell0.r : -1, c: cell0 ? cell0.c : -1 };
+  // 长按查看机器信息（空手时才触发，免得和手套拖拽打架）
+  cancelLongPress();
+  if (cell0 && !sel && grid[cell0.r][cell0.c] && grid[cell0.r][cell0.c].type !== 'box') {
+    pressCell = { r: cell0.r, c: cell0.c };
+    pressPt = { x: p.x, y: p.y };
+    pressTimer = setTimeout(() => {
+      pressTimer = 0;
+      if (pressCell && grid[pressCell.r][pressCell.c]) {
+        lastTap.t = -1e9;                 // 长按之后别再当成双击
+        openInfoPanel(pressCell.r, pressCell.c);
+      }
+    }, 420);
+  }
   if (isDouble && creative() && !sel && grid[cell0.r][cell0.c]) {
     lastTap.t = -1e9;                    // 吃掉这一次，避免三连击反复开关
     openLevelPanel(cell0.r, cell0.c);
@@ -2704,9 +2839,16 @@ function dropCarried(r, c) {
   return true;
 }
 
-cv.addEventListener('pointercancel', () => { if (sel && sel.mode === 'move') sel.grabbed = false; });
+cv.addEventListener('pointercancel', () => { cancelLongPress(); if (sel && sel.mode === 'move') sel.grabbed = false; });
+// 手指/鼠标移开就取消长按
+cv.addEventListener('pointermove', ev => {
+  if (!pressTimer || !pressPt) return;
+  const p = toGame(ev);
+  if (Math.hypot(p.x - pressPt.x, p.y - pressPt.y) > 26) cancelLongPress();
+});
 // 按住拖动：抬手时如果已经离开原格，就在这里落下
 cv.addEventListener('pointerup', ev => {
+  cancelLongPress();
   if (state !== 'playing') return;
   if (!sel || sel.mode !== 'move' || !sel.from || !sel.grabbed) return;
   const p = toGame(ev);
@@ -2794,6 +2936,16 @@ function applyLayout() {
   fitStage();
 }
 
+// 画布被 CSS 缩小后，里面的文字/血条也跟着缩，小屏上会看不清。
+// uiScale 把这些「读数类」元素按比例放回来（机体本身不动，否则会挤在一起）。
+let uiScale = 1;
+function updateUiScale() {
+  const el = $('stage');
+  const cssW = el ? el.clientWidth : W;
+  const k = (cssW || W) / W;                 // 画布相对逻辑尺寸的缩放
+  uiScale = clamp(0.78 / k, 1, 2.2);
+}
+
 // 按可用空间给战场算出精确像素，保证永远是 940:526 且不被裁切
 let fitting = false;
 function fitStage() {
@@ -2808,6 +2960,7 @@ function fitStage() {
     stage.style.height = Math.max(1, Math.floor(H * k)) + 'px';
   }
   fitting = false;
+  updateUiScale();
 }
 if (window.ResizeObserver) {
   new ResizeObserver(() => fitStage()).observe($('stageWrap'));
@@ -2830,6 +2983,7 @@ window.addEventListener('keydown', ev => {
     return;
   }
   if (ev.key === 'Escape') {
+    if (deckOpen) { closeDeck(); return; }
     if (lvTarget) { closeLevelPanel(); return; }
     if (sel) { sel = null; renderTray(); return; }
     if (state === 'playing') pauseGame();
@@ -4493,7 +4647,7 @@ function drawGodAura(ctx, tier) {
 // 机体上方的阶位铭牌
 function drawGodPlate(ctx, tier) {
   const label = godTierName(tier);
-  ctx.font = 'bold 11px "PingFang SC", system-ui, sans-serif';
+  ctx.font = 'bold ' + Math.round(11 * Math.min(uiScale, 1.5)) + 'px "PingFang SC", system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const w = ctx.measureText(label).width + 14;
@@ -4654,6 +4808,11 @@ function drawEmblem(ctx, mod, px, py) {
 
 // 圆角血条
 function drawBar(ctx, cx, by, bw, bh, ratio, color) {
+  // 小屏上血条太细看不清，按 uiScale 加粗、略加宽
+  const kb = Math.min(uiScale, 1.75);
+  bh = bh * kb;
+  bw = bw * Math.min(uiScale, 1.25);
+  by -= (kb - 1) * 3;
   ctx.fillStyle = 'rgba(0,0,0,0.6)';
   rr(ctx, cx - bw / 2 - 1, by - 1, bw + 2, bh + 2, 3);
   ctx.fill();
@@ -8924,15 +9083,16 @@ function drawOrbs() {
 }
 
 function drawFloats() {
+  const fs = Math.round(17 * uiScale);
   for (const f of floats) {
     const alpha = clamp(f.t, 0, 1);
     g.globalAlpha = alpha;
     g.fillStyle = f.color;
-    g.font = '800 17px "PingFang SC","Microsoft YaHei",sans-serif';
+    g.font = '800 ' + fs + 'px "PingFang SC","Microsoft YaHei",sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.strokeStyle = 'rgba(0,0,0,0.6)';
-    g.lineWidth = 3;
+    g.strokeStyle = 'rgba(0,0,0,0.75)';
+    g.lineWidth = 3 * uiScale;
     g.strokeText(f.txt, f.x, f.y);
     g.fillText(f.txt, f.x, f.y);
     g.globalAlpha = 1;
@@ -9012,18 +9172,20 @@ function drawHoverGhost() {
       const out = godMode()
         ? godNameOfModules(merged, fusedGodTier(src, dst))
         : nameOfModules(merged);
-      g.font = 'bold 12px "PingFang SC", system-ui, sans-serif';
+      g.font = 'bold ' + Math.round(12 * uiScale) + 'px "PingFang SC", system-ui, sans-serif';
       g.textAlign = 'center';
       g.textBaseline = 'bottom';
       const tw = g.measureText(out).width;
+      const bh2 = 18 * uiScale;
+      const cxm = clamp(x + CELL_W / 2, tw / 2 + 12, W - tw / 2 - 12);
       const ty = y - 4;
-      g.fillStyle = 'rgba(10,14,20,0.85)';
-      rr(g, x + CELL_W / 2 - tw / 2 - 7, ty - 17, tw + 14, 18, 6); g.fill();
+      g.fillStyle = 'rgba(10,14,20,0.9)';
+      rr(g, cxm - tw / 2 - 7, ty - bh2, tw + 14, bh2, 6); g.fill();
       g.strokeStyle = 'rgba(199,123,255,0.85)';
       g.lineWidth = 1.2;
-      rr(g, x + CELL_W / 2 - tw / 2 - 7, ty - 17, tw + 14, 18, 6); g.stroke();
+      rr(g, cxm - tw / 2 - 7, ty - bh2, tw + 14, bh2, 6); g.stroke();
       g.fillStyle = '#e2ccff';
-      g.fillText(out, x + CELL_W / 2, ty - 3);
+      g.fillText(out, cxm, ty - bh2 / 2);
       // 连线
       g.strokeStyle = 'rgba(199,123,255,' + (0.5 + Math.sin(time * 8) * 0.25) + ')';
       g.lineWidth = 2.4;
@@ -9071,15 +9233,22 @@ function drawHoverGhost() {
 
 function drawBanner() {
   if (bannerT <= 0) return;
+  const kb = Math.min(uiScale, 1.7);
   const alpha = bannerT > 2 ? (2.4 - bannerT) / 0.4 : clamp(bannerT / 0.5, 0, 1);
   g.globalAlpha = clamp(alpha, 0, 1);
-  g.fillStyle = 'rgba(8,12,18,0.6)';
+  g.fillStyle = 'rgba(8,12,18,0.72)';
   const y = GRID_Y + ROWS * CELL_H * 0.32;
-  rr(g, W / 2 - 250, y - 34, 500, bannerSub ? 84 : 62, 14);
+  const bwid = Math.min(500 * kb, W - 24);
+  let bhei = (bannerSub ? 84 : 62) * kb;
+  if (bannerSub) {
+    g.font = '600 ' + Math.round(15 * kb) + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+    if (g.measureText(bannerSub).width > Math.min(500 * kb, W - 24) - 26) bhei += 22 * kb;
+  }
+  rr(g, W / 2 - bwid / 2, y - 34 * kb, bwid, bhei, 14);
   g.fill();
   g.strokeStyle = 'rgba(255,197,49,0.35)';
   g.lineWidth = 1.5;
-  rr(g, W / 2 - 250, y - 34, 500, bannerSub ? 84 : 62, 14);
+  rr(g, W / 2 - bwid / 2, y - 34 * kb, bwid, bhei, 14);
   g.stroke();
   const titleGrad = g.createLinearGradient(0, y - 18, 0, y + 14);
   titleGrad.addColorStop(0, '#ffe9a8');
@@ -9089,7 +9258,7 @@ function drawBanner() {
   g.shadowBlur = 6;
   g.shadowOffsetY = 2;
   g.fillStyle = titleGrad;
-  g.font = '900 30px "PingFang SC","Microsoft YaHei",sans-serif';
+  g.font = '900 ' + Math.round(30 * kb) + 'px "PingFang SC","Microsoft YaHei",sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.fillText(bannerText, W / 2, y);
@@ -9098,8 +9267,20 @@ function drawBanner() {
   g.textBaseline = 'middle';
   if (bannerSub) {
     g.fillStyle = '#dce6f2';
-    g.font = '600 15px "PingFang SC","Microsoft YaHei",sans-serif';
-    g.fillText(bannerSub, W / 2, y + 30);
+    const sf = Math.round(15 * kb);
+    g.font = '600 ' + sf + 'px "PingFang SC","Microsoft YaHei",sans-serif';
+    // 窄屏放大后一行放不下，按宽度折成两行
+    const maxW = bwid - 26;
+    if (g.measureText(bannerSub).width <= maxW) {
+      g.fillText(bannerSub, W / 2, y + 30 * kb);
+    } else {
+      let cut = Math.floor(bannerSub.length / 2);
+      for (let i = cut; i < bannerSub.length; i++) {
+        if ('，。；！、·'.includes(bannerSub[i])) { cut = i + 1; break; }
+      }
+      g.fillText(bannerSub.slice(0, cut), W / 2, y + 24 * kb);
+      g.fillText(bannerSub.slice(cut), W / 2, y + 24 * kb + sf * 1.25);
+    }
   }
   g.globalAlpha = 1;
 }
@@ -9223,6 +9404,8 @@ window.__game = {
   ladderType: (k, lv) => ladderType(k, lv),
   // 等级面板（创造模式双击）
   openLevelPanel: (r, c) => openLevelPanel(r, c),
+  openInfoPanel: (r, c) => openInfoPanel(r, c),
+  get panelReadonly() { return lvReadonly; },
   closeLevelPanel: () => closeLevelPanel(),
   get levelPanel() {
     const at = lvCell();
@@ -9233,17 +9416,38 @@ window.__game = {
       shown: el.classList.contains('show'),
       name: $('lvpName').textContent,
       total: $('lvpTotal').textContent,
-      rows: [...el.querySelectorAll('.lvpRow')].map(x => ({
-        nm: x.querySelector('.nm').textContent,
-        lv: +x.querySelector('b').textContent,
-        minusDisabled: x.querySelector('.lvpBtn').disabled,
-      })),
+      readonly: lvReadonly,
+      rows: [...el.querySelectorAll('.lvpRow')].map(x => {
+        const btn = x.querySelector('.lvpBtn');
+        return {
+          nm: x.querySelector('.nm').textContent,
+          lv: x.querySelector('b').textContent,
+          minusDisabled: btn ? btn.disabled : null,
+        };
+      }),
     };
   },
   canTune: (r, c) => canTuneLevel(grid[r][c]),
   bumpModule: (kind, d) => bumpModule(kind, d),
   bumpAll: d => bumpAll(d),
   get godBest() { return godBest; },
+  get uiScale() { return uiScale; },
+  get selection() { return sel ? { ...sel } : null; },
+  openDeck: () => openDeck(),
+  closeDeck: () => closeDeck(),
+  get deck() {
+    if (!deckOpen) return null;
+    const els = [...document.querySelectorAll('#deckGrid .dcard')];
+    const box = $('deck').getBoundingClientRect();
+    return {
+      open: true, cards: els.length,
+      visible: els.filter(e => {
+        const r = e.getBoundingClientRect();
+        return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+      }).length,
+      off: els.filter(e => e.classList.contains('off')).length,
+    };
+  },
   godAt: (r, c) => (grid[r][c] ? (grid[r][c].god || 0) : null),
   // 调试/演示用：直接把某格设成指定神阶
   setGod: (r, c, tier) => {

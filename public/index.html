@@ -200,6 +200,72 @@
     touch-action: none; user-select: none; -webkit-user-select: none;
   }
 
+  /* ===== 手机：一屏选机器面板 ===== */
+  #allBtn {
+    display: none; min-width: 56px; border-radius: 12px;
+    border: 2px solid var(--accent2); background: var(--panel2); color: var(--accent2);
+    font-size: 12px; font-weight: 800; line-height: 1.25; cursor: pointer; padding: 3px 4px;
+  }
+  #allBtn .big { font-size: 19px; display: block; }
+  #allBtn.sel { box-shadow: 0 0 12px rgba(76,194,255,.6); }
+  body.compact #allBtn { display: block; }
+  body.compact.boxmode #allBtn { display: none; }
+  body.side #allBtn { width: 100%; min-width: 0; flex: 0 0 auto; padding: 4px 0; }
+
+  #deck {
+    position: absolute; inset: 0; z-index: 35; display: none;
+    flex-direction: column; padding: 8px;
+    background: rgba(8, 12, 18, .93); backdrop-filter: blur(4px);
+  }
+  #deck.show { display: flex; }
+  #deckHead {
+    display: flex; align-items: center; gap: 8px; padding: 0 2px 7px;
+    border-bottom: 1px solid var(--line); margin-bottom: 7px; flex: 0 0 auto;
+  }
+  #deckTitle { font-size: 14px; font-weight: 800; color: var(--accent); }
+  #deckHint { flex: 1; font-size: 11px; color: var(--dim); }
+  #deckClose {
+    border: 1px solid var(--line); background: var(--panel2); color: var(--text);
+    border-radius: 9px; width: 32px; height: 32px; font-size: 15px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #deckGrid {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+    gap: 8px 7px; padding: 6px 4px 4px;
+    align-content: start;
+  }
+  .dcard {
+    position: relative; border-radius: 11px; border: 2px solid var(--line);
+    background: var(--panel2); cursor: pointer; user-select: none;
+    display: flex; flex-direction: column; align-items: center; padding: 5px 2px 4px;
+  }
+  .dcard canvas { width: 46px; height: 46px; }
+  .dcard .nm { font-size: 10px; font-weight: 700; line-height: 1.2; text-align: center; }
+  .dcard .cost {
+    position: absolute; top: -7px; right: -5px; font-size: 10px; font-weight: 800;
+    border-radius: 6px; padding: 1px 5px; color: #3a2500; background: var(--accent);
+  }
+  .dcard.r-common { border-color: var(--common); }
+  .dcard.r-rare { border-color: var(--rare); }
+  .dcard.r-epic { border-color: var(--epic); }
+  .dcard.off { filter: grayscale(.75) brightness(.55); }
+  .dcard.sel { box-shadow: 0 0 0 2px var(--accent), 0 0 14px rgba(255,197,49,.55); }
+  body.compact #deckGrid { grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 7px 6px; }
+  body.compact .dcard canvas { width: 40px; height: 40px; }
+
+  /* 手机上的工具按钮做大一点，好点 */
+  body.side #moveBtn, body.side #fuseBtn, body.side #shovelBtn { min-height: 38px; }
+  body.side #allBtn { min-height: 40px; }
+  /* 顶栏瘦身：手机上品牌名没用，全部让给战场 */
+  body.side header { padding: 0; gap: 4px; }
+  body.side #brand { display: none; }
+  body.side .pill { padding: 2px 8px; font-size: 11px; gap: 4px; }
+  body.side .pill .ico { font-size: 12px; }
+  body.side .iconBtn { padding: 2px 7px; font-size: 12px; }
+  body.side #stats { gap: 5px; }
+  body.side #btns { gap: 4px; }
+
   /* ===== 创造模式：双击机器调等级 ===== */
   #lvPanel {
     position: absolute; z-index: 30; display: none;
@@ -229,6 +295,14 @@
   }
   #lvpClose:hover { color: var(--danger); }
   #lvpRows { display: flex; flex-direction: column; gap: 4px; max-height: 168px; overflow-y: auto; }
+  #lvpInfo { display: none; font-size: 11px; color: var(--dim); line-height: 1.6; }
+  #lvpInfo b { color: var(--text); }
+  #lvPanel.readonly #lvpFoot { display: none; }
+  #lvPanel.readonly #lvpInfo { display: block; }
+  #lvPanel.readonly { border-color: var(--accent2); box-shadow: 0 10px 30px rgba(0,0,0,.55), 0 0 18px rgba(76,194,255,.25); }
+  #lvPanel.readonly::after { border-top-color: var(--accent2); }
+  #lvPanel.readonly.below::after { border-bottom-color: var(--accent2); }
+  #lvPanel.readonly #lvpName { color: var(--accent2); }
   .lvpRow { display: flex; align-items: center; gap: 5px; }
   .lvpRow i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto; }
   .lvpRow .nm { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -409,7 +483,7 @@
   body.side #stageWrap { grid-area: stage; }
   body.side #tray {
     grid-area: tray; flex-direction: column; flex-wrap: nowrap;
-    width: 72px; overflow: hidden; gap: 4px; padding: 4px;
+    width: 82px; overflow: hidden; gap: 4px; padding: 4px;
   }
   body.side #boxBtn { min-width: 0; width: 100%; flex: 0 0 auto; font-size: 11px; padding: 4px 2px; }
   body.side #trayInfo { min-width: 0; flex: 0 0 auto; align-items: center; }
@@ -428,7 +502,11 @@
   body.side #classicTray::-webkit-scrollbar { width: 3px; }
   body.side #classicTray::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
   body.side #classicTray .card,
-  body.side #classicTray.many .card { width: 100%; flex: 0 0 auto; }
+  body.side #classicTray.many .card { width: 100%; flex: 0 0 auto; padding: 4px 1px 3px; }
+  body.side #classicTray .card canvas,
+  body.side #classicTray.many .card canvas { width: 46px; height: 46px; }
+  body.side #classicTray .card .nm,
+  body.side #classicTray.many .card .nm { font-size: 10px; }
   body.side #moveBtn, body.side #fuseBtn, body.side #shovelBtn {
     min-width: 0; width: 100%; flex: 0 0 auto; padding: 3px 0; font-size: 0;
   }
@@ -444,7 +522,7 @@
     transform: rotate(90deg) translateY(-100%);
   }
   #rotHint {
-    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+    position: absolute; left: 50%; top: 6px; transform: translateX(-50%);
     background: rgba(22,29,39,.9); border: 1px solid var(--line); border-radius: 999px;
     padding: 5px 14px; font-size: 12px; color: var(--dim); z-index: 40;
     pointer-events: none; opacity: 0; transition: opacity .4s;
@@ -488,6 +566,7 @@
         <span class="lbl" id="histLbl">最近开出</span><span id="pulls"></span>
       </div>
     </div>
+    <button id="allBtn" title="一屏选机器"><span class="big">⊞</span>全部</button>
     <div id="classicTray" style="display:none;"></div>
     <button id="moveBtn" title="手套（没有冷却）：拿起一台机器 → 拖到空格就是搬运，拖到另一台机器身上就直接杂交，可以一直拖不用重新点"><span class="big">🧤</span>移动/杂交</button>
     <button id="fuseBtn" title="点选式杂交（杂交完保持激活，可以连着点）：任意两台机器都能杂交！同类杂交升级（炮台+炮台=双管炮台，双管+双管=加特林炮台），不同类杂交叠能力（碎纸机+路障=装甲碎纸机，再+发电机=充能装甲碎纸机……最多叠 5 个能力、每个 3 级）"><span class="big">🧪</span>杂交</button>
@@ -498,12 +577,22 @@
   <div id="stage">
     <canvas id="cv"></canvas>
 
+    <div id="deck">
+      <div id="deckHead">
+        <span id="deckTitle">选择机器</span>
+        <span id="deckHint">点一下即可选中</span>
+        <button id="deckClose" title="关闭">✕</button>
+      </div>
+      <div id="deckGrid"></div>
+    </div>
+
     <div id="lvPanel">
       <div id="lvpHead">
         <div id="lvpName"></div>
         <div id="lvpTotal"></div>
         <button id="lvpClose" title="关闭">✕</button>
       </div>
+      <div id="lvpInfo"></div>
       <div id="lvpRows"></div>
       <div id="lvpFoot">
         <button data-all="-1">全体 −1</button>
@@ -581,6 +670,7 @@
 
   <footer>
     电脑：鼠标操作 · <b>F</b> 键或 ⛶ 全屏 · Esc 取消选择/暂停<br>
+    长按机器可查看它的名字与全部能力<br>
     创造模式：双击 Lv3 以上的机器可直接调等级<br>
     手机：直接点触 · 竖屏会自动横过来 · 点 ⛶ 进入全屏<br>
     部署于 Cloudflare Workers · 开源于 <a href="https://github.com/qiayue/minigames" target="_blank" rel="noreferrer">GitHub</a>
