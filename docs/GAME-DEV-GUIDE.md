@@ -562,7 +562,7 @@ await page.waitForTimeout(5000);
 const { profile } = await cdp.send('Profiler.stop');   // 按 profile.samples 统计 self time
 ```
 
-本项目原以为神位模式卡是光环画得太重，profile 一跑发现**第一名是音效**：
+本项目原以为掉帧是光环画得太重，profile 一跑发现**第一名是音效**：
 `noiseBurst` 17.6% + WebAudio 建节点约 5%，合计两成 CPU。改完直接 15 → 25 FPS。
 `(program)` 占比高说明瓶颈在光栅化（不在 JS），这时候要减的是**绘制指令数**，不是算法。
 

@@ -14,14 +14,6 @@ const W = GRID_X + COLS * CELL_W + 12;   // 940
 const FIELD_X = GRID_X + COLS * CELL_W;  // 928
 const H = GRID_Y + ROWS * CELL_H + 12;   // 526
 const TOTAL_WAVES = 10;
-/* ===== 神位争夺模式 ===== */
-const GOD_LV = 99999;          // 神位模式下所有能力的等级
-const GOD_HP = 99999;          // 神位模式下僵尸与神机的血量
-const GOD_TIER_CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
-// 神阶名：一级神…九级神，十阶以上叫神王
-function godTierName(t) {
-  return t <= 9 ? GOD_TIER_CN[t - 1] + '级神' : '神王 ' + t + ' 阶';
-}
 const BOX_COST = 50;
 const BOX_HP = 150;
 const BOX_OPEN_TIME = 0.9;
@@ -82,16 +74,6 @@ const CLASSIC_COST = {
   tesla: 250, railgun: 250, prism: 275, sniper: 275, emp: 250,
   gravity: 250, drone: 275, repair: 200, rocket: 200,
 };
-// 神位模式：神机不是白来的。价格是普通模式的 8 倍——
-// 能量全靠玩家一颗一颗点电池攒出来，摆下哪一尊神是真实的取舍。
-// 5 倍：神位模式的收入全靠手点电池（电池还是普通的 25/40/60），
-// 大约 125⚡/秒，一门神炮 500⚡ ≈ 四秒手速——贵，但铺得开
-const GOD_COST_MUL = 5;
-function costOf(type) {
-  const base = CLASSIC_COST[type];
-  if (base === undefined) return undefined;
-  return godMode() ? base * GOD_COST_MUL : base;
-}
 const CLASSIC_CD = {
   generator: 5, turret: 5, barricade: 15, spikes: 8, puncher: 5, mine: 8, fan: 8,
   shredder: 12, flame: 10, poison: 10, mortar: 12, magnet: 12,
@@ -274,8 +256,7 @@ function machineReach(m) {
   let best = 0;
   for (const mod of m.modules) {
     if (RANGED_KINDS.indexOf(mod.kind) < 0) continue;
-    const r = m.god ? godStat(mod.kind, 'range', mod.lv, m.god)
-                    : modStat(mod.kind, 'range', mod.lv);
+    const r = modStat(mod.kind, 'range', mod.lv);
     if (r === undefined) return Infinity;
     best = Math.max(best, r);
   }
@@ -293,16 +274,6 @@ function hpOfModules(mods) {
   hp += 60 * (totalLv(mods) - 1);
   return Math.max(Math.round(hp), 120);
 }
-// 神位模式下的名字：神阶 · 本体名（不带 Lv 后缀）
-function godNameOfModules(mods, tier) {
-  const vis = Math.min(Math.max(tier, 1), 3);     // 名字跟着造型走
-  const body = ladderName(mods[0].kind, vis);
-  if (mods.length === 1) return godTierName(tier) + '·' + body;
-  const adjs = [];
-  for (let i = mods.length - 1; i >= 1; i--) adjs.push(KIND_ADJ[mods[i].kind]);
-  const adj = adjs.length <= 3 ? adjs.join('') : '全能' + adjs.slice(-2).join('');
-  return godTierName(tier) + '·' + adj + body;
-}
 // 大数字压缩显示：99999 → 9.9万，8999910 → 899.9万
 function fmtBig(n) {
   n = Math.round(n);
@@ -313,7 +284,6 @@ function fmtBig(n) {
 function machineName(m) {
   if (m.type === 'box') return '盲盒';
   if (!m.modules) return MACHINES[m.type] ? MACHINES[m.type].name : m.type;
-  if (m.god) return godNameOfModules(m.modules, m.god);
   return nameOfModules(m.modules);
 }
 function hasKind(m, kind) {
@@ -374,7 +344,6 @@ const AFFIXES = {
 const AFFIX_KEYS = Object.keys(AFFIXES);
 // 精英出现率随波次上升
 function eliteChance() {
-  if (godMode()) return 0.5;
   return clamp((wave - 3) * 0.045, 0, 0.26);
 }
 function rollAffix(type) {
@@ -447,13 +416,11 @@ function setRenderScale(k) {
 
 /* ========== 游戏状态 ========== */
 let state = 'menu';        // menu | playing | paused | over | win
-let mode = 'box';          // box（盲盒） | classic（普通） | creative（创造） | god（神位争夺）
+let mode = 'box';          // box（盲盒） | classic（普通） | creative（创造）
 let classicCd = {};        // 普通模式各卡剩余冷却
 let classicCardEls = {};   // 普通模式卡片 DOM 引用
 let wavesOn = true;        // 创造模式的敌潮开关
 const creative = () => mode === 'creative';
-const godMode = () => mode === 'god';
-let godBest = 1;           // 本局达成的最高神阶
 const moveCd = 0;          // 手套没有冷却
 let energy, score, kills, wave, endless, pity, history;
 let grid, enemies, bullets, orbs, parts, floats, zaps, beams, mines, shells, tracers, saws, ebullets, allies, shocks;
@@ -466,7 +433,7 @@ let submitted = false;
 let time = 0;
 
 function initGame() {
-  energy = godMode() ? 1200 : 150; score = 0; kills = 0; wave = 0; godBest = 1;
+  energy = 150; score = 0; kills = 0; wave = 0;
   endless = false; pity = 0; history = [];
   grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
   enemies = []; bullets = []; orbs = []; parts = []; floats = []; zaps = []; beams = [];
@@ -490,15 +457,12 @@ function applyModeUI() {
   $('classicTray').style.display = cardTray ? '' : 'none';
   $('wavesBtn').style.display = creative() ? '' : 'none';
   $('brandMode').textContent = creative() ? '创造模式'
-    : godMode() ? '神位争夺'
     : mode === 'classic' ? '普通模式' : '盲盒塔防';
-  document.body.classList.toggle('godmode', godMode());
   document.body.classList.toggle('boxmode', mode === 'box');
   if (mode === 'box') closeDeck();
-  $('godPill').style.display = godMode() ? '' : 'none';
 }
 
-// 卡槽：全部机器（普通/神位模式明码标价；创造模式免费无冷却）
+// 卡槽：全部机器（普通模式明码标价；创造模式免费无冷却）
 function renderClassicTray() {
   const holder = $('classicTray');
   holder.innerHTML = '';
@@ -510,9 +474,7 @@ function renderClassicTray() {
     el.className = 'card r-' + info.rarity;
     el.title = creative()
       ? info.name + '（创造模式：免费）：' + info.desc
-      : godMode()
-        ? '一级神·' + info.name + '（' + fmtBig(costOf(type)) + '⚡ · 无冷却 · 所有能力 99999 级）：' + info.desc
-        : info.name + '（' + CLASSIC_COST[type] + '⚡ / 冷却 ' + CLASSIC_CD[type] + ' 秒）：' + info.desc;
+      : info.name + '（' + CLASSIC_COST[type] + '⚡ / 冷却 ' + CLASSIC_CD[type] + ' 秒）：' + info.desc;
     const mini = document.createElement('canvas');
     mini.width = 104; mini.height = 104;
     drawMachine(mini.getContext('2d'), type, 52, 58, 1.0, {});
@@ -521,14 +483,14 @@ function renderClassicTray() {
     nm.textContent = info.name;
     const cost = document.createElement('div');
     cost.className = 'cost';
-    cost.textContent = creative() ? '免费' : fmtBig(costOf(type)) + '⚡';
+    cost.textContent = creative() ? '免费' : CLASSIC_COST[type] + '⚡';
     const cdOv = document.createElement('div');
     cdOv.className = 'cdOv';
     el.appendChild(mini); el.appendChild(nm); el.appendChild(cost); el.appendChild(cdOv);
     el.addEventListener('click', () => {
       if (state !== 'playing' || mode === 'box') return;
       if (sel && sel.mode === 'card' && sel.type === type) { sel = null; renderTray(); return; }
-      if (!creative() && !godMode() && (energy < CLASSIC_COST[type] || (classicCd[type] || 0) > 0)) { sfx('error'); return; }
+      if (!creative() && (energy < CLASSIC_COST[type] || (classicCd[type] || 0) > 0)) { sfx('error'); return; }
       sel = { mode: 'card', type };
       renderTray();
     });
@@ -543,8 +505,6 @@ let deckOpen = false;
 
 function canAfford(type) {
   if (creative()) return true;
-  // 神位模式只收能量、不吃冷却：节流阀是玩家的手速，不是计时器
-  if (godMode()) return energy >= costOf(type);
   return energy >= CLASSIC_COST[type] && (classicCd[type] || 0) <= 0;
 }
 
@@ -565,7 +525,7 @@ function renderDeck() {
     nm.textContent = info.name;
     const cost = document.createElement('div');
     cost.className = 'cost';
-    cost.textContent = creative() ? '免费' : fmtBig(costOf(type)) + '⚡';
+    cost.textContent = creative() ? '免费' : CLASSIC_COST[type] + '⚡';
     el.appendChild(mini); el.appendChild(nm); el.appendChild(cost);
     el.addEventListener('click', () => {
       if (state !== 'playing') return;
@@ -594,10 +554,8 @@ function openDeck() {
   renderDeck();
   deckOpen = true;
   $('deck').classList.add('show');
-  $('deckTitle').textContent = godMode() ? '选择神机' : '选择机器';
-  $('deckHint').textContent = creative() ? '全部免费无冷却'
-    : godMode() ? '神机很贵，且没有冷却——点电池攒能量就行'
-    : '灰掉的是能量不够或还在冷却';
+  $('deckTitle').textContent = '选择机器';
+  $('deckHint').textContent = creative() ? '全部免费无冷却' : '灰掉的是能量不够或还在冷却';
   renderTray();
 }
 
@@ -660,7 +618,7 @@ function noiseBurst(dur, vol, freq, delay) {
   src.connect(f).connect(gn).connect(ac.destination);
   src.start(t0);
 }
-// 几十台神机同时开火时，同一个音效一帧内会被触发上百次：
+// 十几台机器同时开火时，同一个音效一帧内会被触发上百次：
 // 听起来完全一样，代价却是上百个 WebAudio 节点。给高频音效设最小重触发间隔。
 const SFX_GAP = {
   shoot: 0.055, ice: 0.055, zap: 0.06, laser: 0.07, snipe: 0.07,
@@ -813,8 +771,7 @@ function showReveal(typeOrMachine) {
   const type = isMachine ? typeOrMachine.type : typeOrMachine;
   const mods = isMachine ? typeOrMachine.modules : modulesOfType(type);
   const info = MACHINES[type];
-  const rarity = isMachine && typeOrMachine.god ? 'fusion'
-    : isMachine && (typeOrMachine.modules.length > 1 || totalLv(typeOrMachine.modules) > 1)
+  const rarity = isMachine && (typeOrMachine.modules.length > 1 || totalLv(typeOrMachine.modules) > 1)
     ? 'fusion'
     : (info ? info.rarity : 'fusion');
   const ov = $('reveal');
@@ -825,30 +782,23 @@ function showReveal(typeOrMachine) {
   rg.setTransform(1, 0, 0, 1, 0, 0);
   rg.clearRect(0, 0, 192, 192);
   drawMachine(rg, type, 96, 104, 1.9, isMachine ? typeOrMachine : {});
-  const godTier = isMachine ? (typeOrMachine.god || 0) : 0;
-  $('revealName').textContent = godTier ? godNameOfModules(mods, godTier)
-    : mods ? nameOfModules(mods) : (info ? info.name : type);
+  $('revealName').textContent = mods ? nameOfModules(mods) : (info ? info.name : type);
   $('revealRarity').textContent = '【' + RARITY_NAME[rarity] + '】';
   $('revealRarity').style.color = RARITY_COLOR[rarity];
-  $('revealDesc').textContent = godTier
-    ? mods.map(x => KIND_DESC[x.kind]).join('，') + '（全部 99999 级）'
-    : mods ? descOfModules(mods) : (info ? info.desc : '');
+  $('revealDesc').textContent = mods ? descOfModules(mods) : (info ? info.desc : '');
   ov.classList.add('show');
   clearTimeout(revealTimer);
   revealTimer = setTimeout(() => ov.classList.remove('show'), 1000);
 }
 
 /* ========== 部署 ========== */
-function place(type, row, col, modules, godTier) {
+function place(type, row, col, modules) {
   if (row < 0 || row >= ROWS || col < 0 || col >= COLS || grid[row][col]) return false;
-  let mods = modules || modulesOfType(type);
+  const mods = modules || modulesOfType(type);
   if (!mods) return false;
-  // 神位模式：所有能力开局就是 99999 级，但外观仍是一级
-  const god = godMode() ? Math.max(1, godTier || 1) : 0;
-  if (god) mods = mods.map(x => ({ kind: x.kind, lv: GOD_LV }));
-  const hp = god ? GOD_HP * god : hpOfModules(mods);
+  const hp = hpOfModules(mods);
   grid[row][col] = {
-    type, row, col, god,
+    type, row, col,
     modules: sortModules(mods),
     hp, maxHp: hp,
     t: rand(0, 0.6), cd: 0, chew: 0, spin: rand(0, TAU),
@@ -861,36 +811,17 @@ function place(type, row, col, modules, godTier) {
   return true;
 }
 // 执行杂交：两台机器融合，产物出现在第二台的位置（任意组合皆可）
-// 神位合成：同阶 → 升一阶，异阶 → 取高阶
-function fusedGodTier(a, b) {
-  const g1 = a.god || 1, g2 = b.god || 1;
-  return g1 === g2 ? g1 + 1 : Math.max(g1, g2);
-}
-
 function doFuse(r1, c1, r2, c2) {
   const a = grid[r1][c1], b = grid[r2][c2];
   if (!a || !b) return null;
-  let mods = mergeModules(a.modules, b.modules);
-  const god = godMode() ? fusedGodTier(a, b) : 0;
-  // 神位模式下能力等级恒定 99999，成长体现在神阶上
-  if (god) mods = mods.map(x => ({ kind: x.kind, lv: GOD_LV }));
+  const mods = mergeModules(a.modules, b.modules);
   const type = typeOfModules(mods);
   const x1 = cellCx(c1), y1 = cellCy(r1);
   const x2 = cellCx(c2), y2 = cellCy(r2);
   grid[r1][c1] = null;
   grid[r2][c2] = null;
-  place(type, r2, c2, mods, god);
+  place(type, r2, c2, mods);
   const result = grid[r2][c2];
-  if (god) {
-    if (god > godBest) {
-      godBest = god;
-      score += god * god * 1000;
-      addFloat(x2, y2 - 84, '★ 登临 ' + godTierName(god) + '！+' + (god * god * 1000), '#ffd764');
-      shake(0.3, 6);
-      sfx('win');
-    }
-    spawnParts(x2, y2, '#ffd764', 24, 200, 0.9, 'spark');
-  }
   zaps.push({ pts: [{ x: x1, y: y1 }, { x: x2, y: y2 }], t: 0.35, max: 0.35, color: '#ff9d2e' });
   spawnParts(x1, y1, '#ff9d2e', 12, 140, 0.6, 'spark');
   spawnParts(x2, y2, '#ffc531', 16, 170, 0.7, 'spark');
@@ -908,7 +839,7 @@ function retuneMachine(row, col, mods) {
   const ratio = old.maxHp ? clamp(old.hp / old.maxHp, 0.05, 1) : 1;
   const keep = { sh: old.sh, maxSh: old.maxSh, spin: old.spin };
   grid[row][col] = null;
-  if (!place(typeOfModules(mods), row, col, mods, old.god)) { grid[row][col] = old; return null; }
+  if (!place(typeOfModules(mods), row, col, mods)) { grid[row][col] = old; return null; }
   const now = grid[row][col];
   now.hp = Math.max(1, Math.round(now.maxHp * ratio));
   now.sh = Math.min(keep.sh, keep.maxSh);
@@ -972,9 +903,8 @@ function spawnEnemy(type, row, affixKey) {
   // 重甲与 Boss 本体血量已经很高，波次成长对它们减半，
   // 否则后期会变成防线打不穿的移动城墙（压力应该来自数量与词缀，不是单体血条）
   const hm = (info.heavy || info.boss) ? 1 + (hpMult() - 1) * 0.4 : hpMult();
-  // 神位模式：所有僵尸血量统一 99999（Boss 另有护盾）
-  const hp = Math.round((godMode() ? GOD_HP : info.hp) * hm * am.hp);
-  const sh = info.shield ? Math.round((godMode() ? GOD_HP : info.shield) * hm * am.hp) : 0;
+  const hp = Math.round(info.hp * hm * am.hp);
+  const sh = info.shield ? Math.round(info.shield * hm * am.hp) : 0;
   enemies.push({
     type, row,
     x: W + 30 + rand(0, 20),
@@ -983,10 +913,7 @@ function spawnEnemy(type, row, affixKey) {
     maxShield: sh,
     affix: afk, aura: 0,
     speed: info.speed * am.speed * spdMult(),
-    // 神位模式：僵尸血量拉到 99999，啃咬伤害也得跟上。
-    // 否则一只溜到防线身后的杂兵能对着 99999 血的神机啃半小时——
-    // 炮弹只朝右飞，谁也够不着它，波次就永远清不掉。
-    dmg: Math.round((godMode() ? GOD_HP / 14 : info.dmg) * am.dmg * dmgMult()),
+    dmg: Math.round(info.dmg * am.dmg * dmgMult()),
     scoreVal: Math.round(info.score * am.score), w: info.w,
     fly: !!info.fly, boss: !!info.boss, heavy: !!info.heavy, suicide: !!info.suicide,
     coldResist: info.coldResist || 0,
@@ -1000,7 +927,7 @@ function spawnEnemy(type, row, affixKey) {
     burnT: 0, burnDps: 0, poisonT: 0, poisonDps: 0, stunT: 0,
     hitT: 0, slowT: 0, frozenT: 0, anim: rand(0, TAU), flash: 0, firing: 0, recoil: 0,
   });
-  if (af && !godMode()) {
+  if (af) {
     const e = enemies[enemies.length - 1];
     spawnParts(e.x, rowCy(e), af.color, 10, 110, 0.6, 'spark');
   }
@@ -1018,9 +945,7 @@ function pickRow() {
 
 function waveEnemies(n) {
   const list = [];
-  // 神位模式：神机太强，敌潮直接三倍量
-  const mul = godMode() ? 3 : 1;
-  const push = (t, c) => { for (let i = 0; i < c * mul; i++) list.push(t); };
+  const push = (t, c) => { for (let i = 0; i < c; i++) list.push(t); };
   if (n === 1) { push('scrap', 2); }
   else if (n === 2) { push('scrap', 4); }
   else if (n === 3) { push('scrap', 4); push('armored', 2); push('runner', 1); }
@@ -1133,8 +1058,7 @@ function updateWaves(dt) {
       // 成群来才会分散火力，前线才推得进来。总量和平均节奏不变（间隔按人数同比拉长）。
       const grp = Math.min(queue.length, 1 + Math.floor(rand(0, 1 + Math.min(3, wave * 0.4))));
       for (let i = 0; i < grp; i++) spawnEnemy(queue.shift(), pickRow());
-      spawnT = (godMode() ? 0.28 : 1) * grp
-             * (Math.max(0.7, 1.95 - wave * 0.09) + rand(0, 0.65));
+      spawnT = grp * (Math.max(0.7, 1.95 - wave * 0.09) + rand(0, 0.65));
       // 波次推进到一半时有概率来一次五路突袭
       if (!surgeDone && wave >= 5 && queue.length && queue.length <= surgeAt && Math.random() < 0.3) {
         surgeDone = true;
@@ -1309,27 +1233,6 @@ function modStat(kind, prop, lv) {
   return v;
 }
 
-// 神位模式的数值覆盖：攻速与产能直接拉到 99999 档
-function godStat(kind, prop, lv, tier) {
-  if (prop === 'interval' || prop === 'cd' || prop === 'shellCd') {
-    // 攻速拉满：神机就该像加特林一样泼子弹，靠「快」而不是靠「一发大的」。
-    // 产能另算——电池要留给玩家去点，出得太快只会糊屏。
-    const base = prop === 'shellCd' ? 0.6
-               : prop !== 'interval' ? 0.2
-               : kind === 'shot' || kind === 'aa' ? 0.07
-               : kind === 'energy' ? 0.2
-               : 0.11;
-    // 阶位加成到 3 阶封顶：再快也只是把弹丸叠在一起，帧率却要付全价
-    // 产能不吃阶位加速：神阶提升的是电池面值（25→40→60），多造几台才有意义
-    const floor = kind === 'energy' ? 0.2 : 0.035;
-    return Math.max(base / Math.min(Math.max(tier, 1), 3), floor);
-  }
-  if (prop === 'val') return GOD_LV;                 // 每次产能 99999
-  if (prop === 'dmg') return GOD_LV * Math.max(tier, 1);
-  if (prop === 'heal' || prop === 'amount' || prop === 'dot' || prop === 'burn') return GOD_LV;
-  return modStat(kind, prop, Math.min(lv, 40));      // 其余属性按 40 级取值，够夸张又不溢出
-}
-
 // 弹体规格分档：等级越高，子弹越大、越亮、越有排面
 // 1 小能量弹 / 2 加粗 / 3 等离子球 / 4 巨型带环 / 5 贯穿光矛
 function bulletTier(lv) { return clamp(Math.floor((lv - 1) / 2) + 1, 1, 5); }
@@ -1412,13 +1315,10 @@ function updateMachines(dt) {
       for (const mod of m.modules) {
         const kind = mod.kind;
         const lv = mod.lv;
-        const st = godMode()
-          ? (prop) => godStat(kind, prop, lv, m.god || 1)
-          : (prop) => modStat(kind, prop, lv);
+        const st = (prop) => modStat(kind, prop, lv);
         if (kind === 'shot') {
           m.mt.shot = (m.mt.shot || 0) + mdt;
-          // 神位模式：不齐射、不放大弹体——只把射速拉到飞起，机体和弹丸都还是一级的样子
-          const vN = godMode() ? 1 : volleyCount(lv);
+          const vN = volleyCount(lv);
           const vMul = volleyIvMul(vN);
           if (m.mt.shot >= st('interval') * vMul && enemyAhead(r, cx, modReach(st)) && bulletBudget()) {
             m.mt.shot = 0;
@@ -1426,8 +1326,7 @@ function updateMachines(dt) {
             m.altBarrel = !m.altBarrel;
             // 模块协同：带雷电→电弧弹跳，带冰霜→冰弹减速
             const bk = hasKind(m, 'zap') ? 'arc' : hasKind(m, 'frost') ? 'ice' : 'shot';
-            // 弹体规格：普通模式按等级分档；神位模式跟神阶走（一级神就是最朴素的小能量弹）
-            const bt = godMode() ? Math.min(m.god || 1, 3) : bulletTier(lv);
+            const bt = bulletTier(lv);
             const n = vN;
             const bdmg = st('dmg') * vMul;   // 出膛慢了，单发就更重，DPS 不变
             // 齐射：等级越高一次打出越多发，扇形铺开
@@ -1449,23 +1348,12 @@ function updateMachines(dt) {
           if (m.mt.energy >= st('interval')) {
             m.mt.energy = 0;
             m.pulse = 0.5;
-            // 电池本身不变，还是普通的那颗——神位模式改的是「出得多快」，不是面值
-            const val = Math.round(godMode()
-              ? modStat('energy', 'val', Math.min(m.god || 1, 3))
-              : st('val'));
-            // 神位模式也照样掉电池、照样让玩家自己点——只是产得快几万倍。
-            // 场上电池数封顶：满了就停产，玩家点掉一颗才补一颗，
-            // 收集速度自然成了产能的节流阀，既有手速爽感又不会糊屏。
+            const val = Math.round(st('val'));
+            // 电池数封顶：满了就停产，玩家点掉一颗才补一颗
             if (orbs.length < ORB_CAP) {
-              // 神位模式一台发电机每 0.2 秒就吐一颗，全落在同一格会糊成一团、点都点不着，
-              // 所以让它们朝右前方弹散开，摊在几格范围里
-              const ox = godMode()
-                ? clamp(cx + rand(-34, 210), GRID_X + 20, GRID_X + COLS * CELL_W - 20)
-                : cx + rand(-18, 22);
-              const oy = cellCy(r) + (godMode() ? rand(-34, 34) : rand(-8, 16));
               orbs.push({
-                x: ox, y: oy,
-                ty: 0, vy: 0, val, life: godMode() ? 5 : 10, falling: false,
+                x: cx + rand(-18, 22), y: cellCy(r) + rand(-8, 16),
+                ty: 0, vy: 0, val, life: 10, falling: false,
               });
               sfx('gen');
             } else {
@@ -2115,13 +2003,13 @@ function updateShells(dt) {
   }
 }
 
-// 弹幕总量上限：神位模式下几十台神机同时开火，必须封顶——
+// 弹幕总量上限：高等级炮台阵同时开火时必须封顶——
 // 超过这个数，多出来的弹丸只会互相遮挡，看不出差别。
 // 上限刻意不跟画质挂钩：掉帧时再砍火力，等于把性能问题转嫁成难度问题。
 const BULLET_CAP = 260;
 function bulletBudget() { return bullets.length < BULLET_CAP; }
 // 碎屑与冲击波同样封顶，避免高等级连击把粒子池撑爆
-// 场上电池上限：神位模式几十台神机狂产，得给玩家留出看得清、点得着的空间
+// 场上电池上限：留出看得清、点得着的空间
 const ORB_CAP = 42;
 const PART_CAP = 240;
 const PART_CAP_LOW = 130;
@@ -2598,14 +2486,6 @@ function updateHud() {
   if (deckOpen) refreshDeckState();
   $('energyVal').textContent = creative() ? '∞' : fmtBig(energy);
   $('scoreVal').textContent = score;
-  if (godMode()) {
-    let best = 1, count = 0;
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      const m = grid[r][c];
-      if (m && m.god) { count++; if (m.god > best) best = m.god; }
-    }
-    $('godVal').textContent = godTierName(Math.max(best, godBest)) + ' · ' + count + ' 尊';
-  }
   let wtxt;
   if (creativeNoWaves()) wtxt = '敌潮已暂停';
   else if (wave === 0) wtxt = '准备中';
@@ -2616,7 +2496,7 @@ function updateHud() {
   if (mode !== 'box') {
     for (const type in classicCardEls) {
       const { el, cdOv } = classicCardEls[type];
-      const free = creative() || godMode();
+      const free = creative();
       const cd = free ? 0 : (classicCd[type] || 0);
       el.classList.toggle('off', state !== 'playing' || (!free && (energy < CLASSIC_COST[type] || cd > 0)));
       el.classList.toggle('sel', !!(sel && sel.mode === 'card' && sel.type === type));
@@ -2629,7 +2509,7 @@ function updateHud() {
 function startGame(m) {
   closeLevelPanel();
   closeDeck();
-  if (m === 'box' || m === 'classic' || m === 'creative' || m === 'god') mode = m;
+  if (m === 'box' || m === 'classic' || m === 'creative') mode = m;
   wavesOn = true;
   $('wavesBtn').textContent = '🌊 敌潮：开';
   $('wavesBtn').classList.remove('off');
@@ -2638,8 +2518,6 @@ function startGame(m) {
   show('menu', false); show('end', false); show('pauseOv', false);
   if (creative()) {
     banner('🛠️ 创造模式', '能量无限、随便放、随便杂交 —— 敌潮可随时开关');
-  } else if (godMode()) {
-    banner('👑 神位争夺', '所有机器开局即 99999 级 · 两尊同阶神合成上一阶 · 僵尸血量 99999');
   } else if (mode === 'classic') {
     banner('准备布防！', '从卡槽选择机器，用能量按标价部署');
   } else {
@@ -2667,7 +2545,6 @@ function endGame(win) {
     ? '🎉 <span class="gold">防线守住了！</span>'
     : '💥 防线失守…';
   const modeTag = creative() ? '（🛠️ 创造模式）'
-    : godMode() ? '（👑 神位争夺 · 最高 ' + godTierName(godBest) + '）'
     : mode === 'classic' ? '（🃏 普通模式）' : '（🎁 盲盒模式）';
   $('endSub').textContent = (win
     ? '你抵挡住了全部 ' + TOTAL_WAVES + ' 波进攻，机械基地安然无恙！'
@@ -2705,7 +2582,7 @@ function show(id, on) {
 }
 
 /* ========== 排行榜（两个模式分开记录） ========== */
-const MODE_LABEL = { box: '🎁 盲盒模式', classic: '🃏 普通模式', god: '👑 神位争夺' };
+const MODE_LABEL = { box: '🎁 盲盒模式', classic: '🃏 普通模式' };
 function localKey(m) { return 'mg_localScores_' + m; }
 function localScores(m) {
   try {
@@ -2870,7 +2747,7 @@ function renderLevelPanel() {
 
   $('lvpName').textContent = machineName(m);
   const reachStr = machineReach(m) ? ' · 射程 ' + reachText(m) : '';
-  $('lvpTotal').textContent = (m.god ? godTierName(m.god) : 'Lv' + totalLv(m.modules)) + reachStr;
+  $('lvpTotal').textContent = 'Lv' + totalLv(m.modules) + reachStr;
   if (lvReadonly) {
     const hp = Math.round(m.hp), mx = Math.round(m.maxHp);
     $('lvpInfo').innerHTML =
@@ -2894,7 +2771,7 @@ function renderLevelPanel() {
       nm0.className = 'nm';
       nm0.textContent = KIND_ADJ[mod.kind] || mod.kind;
       const v0 = document.createElement('b');
-      v0.textContent = m.god ? '神' : 'Lv' + mod.lv;
+      v0.textContent = 'Lv' + mod.lv;
       row0.appendChild(dot0); row0.appendChild(nm0); row0.appendChild(v0);
       rows.appendChild(row0);
       continue;
@@ -3134,19 +3011,6 @@ cv.addEventListener('pointerdown', ev => {
       if (place(type, cell.r, cell.c)) renderTray();  // 保持选中，可连续放
       return;
     }
-    if (godMode()) {
-      const price = costOf(type);
-      if (energy < price) {
-        addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '能量不足 ' + fmtBig(price) + '⚡', '#ff5d5d');
-        sfx('error');
-        return;
-      }
-      if (place(type, cell.r, cell.c)) {
-        energy -= price;
-        renderTray();   // 保持选中，攒够了可以接着放
-      }
-      return;
-    }
     if (energy < CLASSIC_COST[type] || (classicCd[type] || 0) > 0) {
       sel = null;
       renderTray();
@@ -3379,7 +3243,6 @@ document.addEventListener('visibilitychange', () => {
 $('startBtn').addEventListener('click', () => { ensureAc(); startGame('box'); });
 $('startClassicBtn').addEventListener('click', () => { ensureAc(); startGame('classic'); });
 $('startCreativeBtn').addEventListener('click', () => { ensureAc(); startGame('creative'); });
-$('startGodBtn').addEventListener('click', () => { ensureAc(); startGame('god'); });
 $('wavesBtn').addEventListener('click', () => {
   if (!creative()) return;
   wavesOn = !wavesOn;
@@ -3442,7 +3305,7 @@ $('menuBoardBtn').addEventListener('click', () => {
     // 两个模式的榜单分开展示
     el.innerHTML = '<div class="menuBoards"></div>';
     const holder = el.firstChild;
-    for (const m of ['box', 'classic', 'god']) {
+    for (const m of ['box', 'classic']) {
       const b = document.createElement('div');
       b.className = 'board';
       b.style.display = 'block';
@@ -4224,10 +4087,7 @@ function drawMachine(ctx, type, x, y, s, m) {
     return;
   }
   const pri = mods[0];
-  if (pri) {
-    if (m && m.god) drawGodAura(ctx, m.god);
-    else drawLevelDecor(ctx, totalLv(mods));
-  }
+  if (pri) drawLevelDecor(ctx, totalLv(mods));
   // 副能力决定机体配色；经典组合保留自己的专属造型，不再额外染色
   const classicPair = type === 'arcturret' || type === 'magshredder' || type === 'frostwall' || type === 'frostcannon';
   curTheme = (!classicPair && mods[1]) ? mods[1].kind : null;
@@ -4284,14 +4144,6 @@ function drawMachine(ctx, type, x, y, s, m) {
     });
     ctx.restore();
   }
-  // 神位铭牌
-  if (m && m.god) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(s, s);
-    drawGodPlate(ctx, m.god);
-    ctx.restore();
-  }
   // 能量护盾
   if (m && m.sh > 0) {
     const a = 0.42 + (m.shHit > 0 ? 0.45 : 0) + Math.sin(time * 4) * 0.08;
@@ -4331,8 +4183,7 @@ function drawChassis(ctx, type, pri, m) {
     case 'frostcannon': return drawFrostcannon(ctx, m);
   }
   if (!pri) return;
-  // 神位模式：99999 级也画成对应神阶的造型（一级神就是一级机器的样子）
-  const lv = (m && m.god) ? Math.min(m.god, 3) : Math.min(pri.lv, 3);
+  const lv = Math.min(pri.lv, 3);
   switch (pri.kind) {
     case 'shot': return lv >= 3 ? drawGatling(ctx, m) : lv === 2 ? drawTwinturret(ctx, m) : drawTurret(ctx, m);
     case 'energy': return lv >= 3 ? drawFusionCore(ctx, m) : lv === 2 ? drawPowerplant(ctx, m) : drawGenerator(ctx, m);
@@ -5009,84 +4860,6 @@ function drawEmpTower(ctx, m, lv) {
 }
 
 // 等级光环：合成度越高越华丽
-// 神位光环：阶位越高越夸张（金环 → 神纹 → 光柱 → 双环星冕）
-function drawGodAura(ctx, tier) {
-  const t = time;
-  const p = Math.sin(t * 3) * 0.06;
-  // 地面金环（廉价双描边辉光，几十台神机同屏也不掉帧）
-  ctx.fillStyle = 'rgba(255,215,100,' + (0.07 + p * 0.5) + ')';
-  ctx.beginPath(); ctx.ellipse(0, 34, 38, 10.5, 0, 0, TAU); ctx.fill();
-  haloStroke(ctx, '#ffe8a0', 7, 2.6, 0.7 + p, () => {
-    ctx.beginPath(); ctx.ellipse(0, 34, 38, 10.5, 0, 0, TAU); ctx.stroke();
-  });
-  // 旋转神纹环（2 阶起）
-  if (tier >= 2 && fxQuality > 0.5) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,225,140,0.55)';
-    ctx.lineWidth = 1.6;
-    const n = Math.min(tier + 3, 12);
-    for (let i = 0; i < n; i++) {
-      const a = t * 0.9 + i * TAU / n;
-      const rx = Math.cos(a) * 34, ry = 32 + Math.sin(a) * 9;
-      ctx.beginPath();
-      ctx.moveTo(rx - 3, ry); ctx.lineTo(rx, ry - 5); ctx.lineTo(rx + 3, ry);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-  // 上升光柱（3 阶起）
-  if (tier >= 3 && fxQuality > 0.5) {
-    const grd = cachedLG(ctx, 0, -70, 0, 34,
-      [0, 'rgba(255,215,100,0)', 0.7, 'rgba(255,215,100,0.10)', 1, 'rgba(255,215,100,0.24)']);
-    ctx.fillStyle = grd;
-    ctx.beginPath();
-    ctx.moveTo(-14, -70); ctx.lineTo(14, -70); ctx.lineTo(30, 34); ctx.lineTo(-30, 34);
-    ctx.closePath(); ctx.fill();
-  }
-  // 头顶星冕（4 阶起）
-  if (tier >= 4) {
-    haloStroke(ctx, '#fff0be', 6.5, 2.2, 0.85, () => {
-      ctx.beginPath(); ctx.ellipse(0, -74, 20, 6, Math.sin(t) * 0.25, 0, TAU); ctx.stroke();
-    });
-    const spikes = Math.min(tier, fxQuality > 0.5 ? 8 : 4);
-    ctx.fillStyle = 'rgba(255,240,190,0.9)';
-    for (let i = 0; i < spikes; i++) {
-      const a = t * 1.4 + i * TAU / spikes;
-      const px = Math.cos(a) * 20, py = -74 + Math.sin(a) * 6;
-      ctx.beginPath(); ctx.arc(px, py, 2.2, 0, TAU); ctx.fill();
-    }
-  }
-  // 上浮神光粒子（5 阶起）
-  if (tier >= 5 && fxQuality > 0.5) {
-    ctx.fillStyle = 'rgba(255,235,170,0.75)';
-    for (let i = 0; i < 5; i++) {
-      const ph = (t * 0.6 + i * 0.21) % 1;
-      ctx.globalAlpha = 0.75 * (1 - ph);
-      ctx.beginPath();
-      ctx.arc(Math.sin(i * 2.3 + t) * 22, 32 - ph * 78, 2.2, 0, TAU);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  }
-}
-
-// 机体上方的阶位铭牌
-function drawGodPlate(ctx, tier) {
-  const label = godTierName(tier);
-  ctx.font = 'bold ' + Math.round(11 * Math.min(uiScale, 1.5)) + 'px "PingFang SC", system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const w = ctx.measureText(label).width + 14;
-  const y = -52;
-  ctx.fillStyle = 'rgba(28,20,6,0.88)';
-  rr(ctx, -w / 2, y - 8, w, 16, 8); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,215,100,0.9)';
-  ctx.lineWidth = 1.3;
-  rr(ctx, -w / 2, y - 8, w, 16, 8); ctx.stroke();
-  ctx.fillStyle = '#ffe89a';
-  ctx.fillText(label, 0, y);
-}
-
 function drawLevelDecor(ctx, tl) {
   if (tl <= 1) return;
   const pulse = Math.sin(time * 4) * 0.05;
@@ -9835,9 +9608,8 @@ function drawHoverGhost() {
   const occupied = !!grid[cell.r][cell.c];
   // 摆卡预览：先把这台机器在这一格能覆盖到哪画出来，摆位才有依据
   if (sel.mode === 'card' && sel.type && !occupied) {
-    let pmods = modulesOfType(sel.type);
-    if (pmods && godMode()) pmods = pmods.map(x => ({ kind: x.kind, lv: GOD_LV }));
-    const reach = pmods ? machineReach({ modules: pmods, god: godMode() ? 1 : 0 }) : 0;
+    const pmods = modulesOfType(sel.type);
+    const reach = pmods ? machineReach({ modules: pmods }) : 0;
     if (reach) {
       const pcx = cellCx(cell.c);
       const far = Math.min(pcx + (reach === Infinity ? 1e6 : reach * CELL_W), FIELD_X);
@@ -9884,9 +9656,7 @@ function drawHoverGhost() {
     if (willFuse) {
       // 预告杂交结果
       const merged = mergeModules(src.modules, dst.modules);
-      const out = godMode()
-        ? godNameOfModules(merged, fusedGodTier(src, dst))
-        : nameOfModules(merged);
+      const out = nameOfModules(merged);
       g.font = 'bold ' + Math.round(12 * uiScale) + 'px "PingFang SC", system-ui, sans-serif';
       g.textAlign = 'center';
       g.textBaseline = 'bottom';
@@ -10008,12 +9778,6 @@ window.__game = {
     if (state !== 'playing' || mode === 'box') return false;
     if (CLASSIC_COST[t] === undefined) return false;
     if (creative()) return place(t, r, c);          // 创造模式免费无冷却
-    if (godMode()) {                                 // 神位模式收费、不吃冷却
-      const price = costOf(t);
-      if (energy < price || !place(t, r, c)) return false;
-      energy -= price;
-      return true;
-    }
     if (energy < CLASSIC_COST[t] || (classicCd[t] || 0) > 0) return false;
     if (!place(t, r, c)) return false;
     energy -= CLASSIC_COST[t];
@@ -10188,7 +9952,6 @@ window.__game = {
   volleyCount: lv => volleyCount(lv),
   get bulletCount() { return bullets.length; },
   damageRanged: (row, d) => { const e = enemies.find(x => x.row === row && !x.dead); if (e) damageEnemy(e, d, 'ranged'); },
-  get godBest() { return godBest; },
   get uiScale() { return uiScale; },
   get selection() { return sel ? { ...sel } : null; },
   openDeck: () => openDeck(),
@@ -10205,16 +9968,6 @@ window.__game = {
       }).length,
       off: els.filter(e => e.classList.contains('off')).length,
     };
-  },
-  godAt: (r, c) => (grid[r][c] ? (grid[r][c].god || 0) : null),
-  // 调试/演示用：直接把某格设成指定神阶
-  setGod: (r, c, tier) => {
-    const m = grid[r][c];
-    if (!m || !godMode()) return false;
-    grid[r][c] = null;
-    place(m.type, r, c, m.modules, tier);
-    if (tier > godBest) godBest = tier;
-    return true;
   },
   get rotated() { return rotated; },
   get side() { return document.body.classList.contains('side'); },

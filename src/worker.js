@@ -75,7 +75,7 @@ function sanitizeEntry(body) {
   return { name, score, wave, at: Date.now() };
 }
 
-const MODES = ['box', 'classic', 'god'];
+const MODES = ['box', 'classic'];
 function sanitizeMode(m) {
   return MODES.includes(m) ? m : 'box';
 }
