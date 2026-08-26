@@ -82,6 +82,16 @@ const CLASSIC_COST = {
   tesla: 250, railgun: 250, prism: 275, sniper: 275, emp: 250,
   gravity: 250, drone: 275, repair: 200, rocket: 200,
 };
+// 神位模式：神机不是白来的。价格是普通模式的 8 倍——
+// 能量全靠玩家一颗一颗点电池攒出来，摆下哪一尊神是真实的取舍。
+// 5 倍：神位模式的收入全靠手点电池（电池还是普通的 25/40/60），
+// 大约 125⚡/秒，一门神炮 500⚡ ≈ 四秒手速——贵，但铺得开
+const GOD_COST_MUL = 5;
+function costOf(type) {
+  const base = CLASSIC_COST[type];
+  if (base === undefined) return undefined;
+  return godMode() ? base * GOD_COST_MUL : base;
+}
 const CLASSIC_CD = {
   generator: 5, turret: 5, barricade: 15, spikes: 8, puncher: 5, mine: 8, fan: 8,
   shredder: 12, flame: 10, poison: 10, mortar: 12, magnet: 12,
@@ -456,7 +466,7 @@ let submitted = false;
 let time = 0;
 
 function initGame() {
-  energy = godMode() ? 500 : 150; score = 0; kills = 0; wave = 0; godBest = 1;
+  energy = godMode() ? 1200 : 150; score = 0; kills = 0; wave = 0; godBest = 1;
   endless = false; pity = 0; history = [];
   grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
   enemies = []; bullets = []; orbs = []; parts = []; floats = []; zaps = []; beams = [];
@@ -488,7 +498,7 @@ function applyModeUI() {
   $('godPill').style.display = godMode() ? '' : 'none';
 }
 
-// 卡槽：全部机器（普通模式明码标价；创造模式免费无冷却）
+// 卡槽：全部机器（普通/神位模式明码标价；创造模式免费无冷却）
 function renderClassicTray() {
   const holder = $('classicTray');
   holder.innerHTML = '';
@@ -501,7 +511,7 @@ function renderClassicTray() {
     el.title = creative()
       ? info.name + '（创造模式：免费）：' + info.desc
       : godMode()
-        ? '一级神·' + info.name + '（神位模式：免费，所有能力 99999 级）：' + info.desc
+        ? '一级神·' + info.name + '（' + fmtBig(costOf(type)) + '⚡ · 无冷却 · 所有能力 99999 级）：' + info.desc
         : info.name + '（' + CLASSIC_COST[type] + '⚡ / 冷却 ' + CLASSIC_CD[type] + ' 秒）：' + info.desc;
     const mini = document.createElement('canvas');
     mini.width = 104; mini.height = 104;
@@ -511,7 +521,7 @@ function renderClassicTray() {
     nm.textContent = info.name;
     const cost = document.createElement('div');
     cost.className = 'cost';
-    cost.textContent = (creative() || godMode()) ? '免费' : CLASSIC_COST[type] + '⚡';
+    cost.textContent = creative() ? '免费' : fmtBig(costOf(type)) + '⚡';
     const cdOv = document.createElement('div');
     cdOv.className = 'cdOv';
     el.appendChild(mini); el.appendChild(nm); el.appendChild(cost); el.appendChild(cdOv);
@@ -532,7 +542,9 @@ let deckEls = {};
 let deckOpen = false;
 
 function canAfford(type) {
-  if (creative() || godMode()) return true;
+  if (creative()) return true;
+  // 神位模式只收能量、不吃冷却：节流阀是玩家的手速，不是计时器
+  if (godMode()) return energy >= costOf(type);
   return energy >= CLASSIC_COST[type] && (classicCd[type] || 0) <= 0;
 }
 
@@ -553,7 +565,7 @@ function renderDeck() {
     nm.textContent = info.name;
     const cost = document.createElement('div');
     cost.className = 'cost';
-    cost.textContent = (creative() || godMode()) ? '免费' : CLASSIC_COST[type] + '⚡';
+    cost.textContent = creative() ? '免费' : fmtBig(costOf(type)) + '⚡';
     el.appendChild(mini); el.appendChild(nm); el.appendChild(cost);
     el.addEventListener('click', () => {
       if (state !== 'playing') return;
@@ -583,7 +595,9 @@ function openDeck() {
   deckOpen = true;
   $('deck').classList.add('show');
   $('deckTitle').textContent = godMode() ? '选择神机' : '选择机器';
-  $('deckHint').textContent = (creative() || godMode()) ? '全部免费无冷却' : '灰掉的是能量不够或还在冷却';
+  $('deckHint').textContent = creative() ? '全部免费无冷却'
+    : godMode() ? '神机很贵，且没有冷却——点电池攒能量就行'
+    : '灰掉的是能量不够或还在冷却';
   renderTray();
 }
 
@@ -969,7 +983,10 @@ function spawnEnemy(type, row, affixKey) {
     maxShield: sh,
     affix: afk, aura: 0,
     speed: info.speed * am.speed * spdMult(),
-    dmg: Math.round(info.dmg * am.dmg * dmgMult()),
+    // 神位模式：僵尸血量拉到 99999，啃咬伤害也得跟上。
+    // 否则一只溜到防线身后的杂兵能对着 99999 血的神机啃半小时——
+    // 炮弹只朝右飞，谁也够不着它，波次就永远清不掉。
+    dmg: Math.round((godMode() ? GOD_HP / 14 : info.dmg) * am.dmg * dmgMult()),
     scoreVal: Math.round(info.score * am.score), w: info.w,
     fly: !!info.fly, boss: !!info.boss, heavy: !!info.heavy, suicide: !!info.suicide,
     coldResist: info.coldResist || 0,
@@ -1295,10 +1312,17 @@ function modStat(kind, prop, lv) {
 // 神位模式的数值覆盖：攻速与产能直接拉到 99999 档
 function godStat(kind, prop, lv, tier) {
   if (prop === 'interval' || prop === 'cd' || prop === 'shellCd') {
-    // 攻速/产速拉满（留一点余量，别让弹幕把帧率打穿）
-    const base = prop === 'interval' ? 0.11 : prop === 'shellCd' ? 0.6 : 0.2;
+    // 攻速拉满：神机就该像加特林一样泼子弹，靠「快」而不是靠「一发大的」。
+    // 产能另算——电池要留给玩家去点，出得太快只会糊屏。
+    const base = prop === 'shellCd' ? 0.6
+               : prop !== 'interval' ? 0.2
+               : kind === 'shot' || kind === 'aa' ? 0.07
+               : kind === 'energy' ? 0.2
+               : 0.11;
     // 阶位加成到 3 阶封顶：再快也只是把弹丸叠在一起，帧率却要付全价
-    return Math.max(base / Math.min(Math.max(tier, 1), 3), 0.055);
+    // 产能不吃阶位加速：神阶提升的是电池面值（25→40→60），多造几台才有意义
+    const floor = kind === 'energy' ? 0.2 : 0.035;
+    return Math.max(base / Math.min(Math.max(tier, 1), 3), floor);
   }
   if (prop === 'val') return GOD_LV;                 // 每次产能 99999
   if (prop === 'dmg') return GOD_LV * Math.max(tier, 1);
@@ -1393,7 +1417,8 @@ function updateMachines(dt) {
           : (prop) => modStat(kind, prop, lv);
         if (kind === 'shot') {
           m.mt.shot = (m.mt.shot || 0) + mdt;
-          const vN = volleyCount(lv);
+          // 神位模式：不齐射、不放大弹体——只把射速拉到飞起，机体和弹丸都还是一级的样子
+          const vN = godMode() ? 1 : volleyCount(lv);
           const vMul = volleyIvMul(vN);
           if (m.mt.shot >= st('interval') * vMul && enemyAhead(r, cx, modReach(st)) && bulletBudget()) {
             m.mt.shot = 0;
@@ -1401,7 +1426,8 @@ function updateMachines(dt) {
             m.altBarrel = !m.altBarrel;
             // 模块协同：带雷电→电弧弹跳，带冰霜→冰弹减速
             const bk = hasKind(m, 'zap') ? 'arc' : hasKind(m, 'frost') ? 'ice' : 'shot';
-            const bt = bulletTier(lv);
+            // 弹体规格：普通模式按等级分档；神位模式跟神阶走（一级神就是最朴素的小能量弹）
+            const bt = godMode() ? Math.min(m.god || 1, 3) : bulletTier(lv);
             const n = vN;
             const bdmg = st('dmg') * vMul;   // 出膛慢了，单发就更重，DPS 不变
             // 齐射：等级越高一次打出越多发，扇形铺开
@@ -1423,17 +1449,27 @@ function updateMachines(dt) {
           if (m.mt.energy >= st('interval')) {
             m.mt.energy = 0;
             m.pulse = 0.5;
-            const val = Math.round(st('val'));
-            if (godMode()) {
-              // 神机每 0.2 秒产 99999，掉一地电池会糊屏，直接入账
-              energy += val;
-              if (Math.random() < 0.25) addFloat(cx, cellCy(r) - 34, '+' + fmtBig(val), '#ffd764');
-            } else {
+            // 电池本身不变，还是普通的那颗——神位模式改的是「出得多快」，不是面值
+            const val = Math.round(godMode()
+              ? modStat('energy', 'val', Math.min(m.god || 1, 3))
+              : st('val'));
+            // 神位模式也照样掉电池、照样让玩家自己点——只是产得快几万倍。
+            // 场上电池数封顶：满了就停产，玩家点掉一颗才补一颗，
+            // 收集速度自然成了产能的节流阀，既有手速爽感又不会糊屏。
+            if (orbs.length < ORB_CAP) {
+              // 神位模式一台发电机每 0.2 秒就吐一颗，全落在同一格会糊成一团、点都点不着，
+              // 所以让它们朝右前方弹散开，摊在几格范围里
+              const ox = godMode()
+                ? clamp(cx + rand(-34, 210), GRID_X + 20, GRID_X + COLS * CELL_W - 20)
+                : cx + rand(-18, 22);
+              const oy = cellCy(r) + (godMode() ? rand(-34, 34) : rand(-8, 16));
               orbs.push({
-                x: cx + rand(-18, 22), y: cellCy(r) + rand(-8, 16),
-                ty: 0, vy: 0, val, life: 10, falling: false,
+                x: ox, y: oy,
+                ty: 0, vy: 0, val, life: godMode() ? 5 : 10, falling: false,
               });
               sfx('gen');
+            } else {
+              m.mt.energy = st('interval');   // 场上堆满了就等着，下一帧再试
             }
           }
         } else if (kind === 'melee') {
@@ -2085,6 +2121,8 @@ function updateShells(dt) {
 const BULLET_CAP = 260;
 function bulletBudget() { return bullets.length < BULLET_CAP; }
 // 碎屑与冲击波同样封顶，避免高等级连击把粒子池撑爆
+// 场上电池上限：神位模式几十台神机狂产，得给玩家留出看得清、点得着的空间
+const ORB_CAP = 42;
 const PART_CAP = 240;
 const PART_CAP_LOW = 130;
 const SHOCK_CAP = 16;
@@ -2428,7 +2466,7 @@ function tryCollectOrb(x, y) {
     const dx = x - o.x, dy = y - o.y;
     if (dx * dx + dy * dy < 30 * 30) {
       energy += o.val;
-      addFloat(o.x, o.y - 16, '+' + o.val, '#ffc531');
+      addFloat(o.x, o.y - 16, '+' + fmtBig(o.val), '#ffc531');
       orbs.splice(i, 1);
       sfx('coin');
       return true;
@@ -3092,8 +3130,21 @@ cv.addEventListener('pointerdown', ev => {
       sfx('error');
       return;
     }
-    if (creative() || godMode()) {
+    if (creative()) {
       if (place(type, cell.r, cell.c)) renderTray();  // 保持选中，可连续放
+      return;
+    }
+    if (godMode()) {
+      const price = costOf(type);
+      if (energy < price) {
+        addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '能量不足 ' + fmtBig(price) + '⚡', '#ff5d5d');
+        sfx('error');
+        return;
+      }
+      if (place(type, cell.r, cell.c)) {
+        energy -= price;
+        renderTray();   // 保持选中，攒够了可以接着放
+      }
       return;
     }
     if (energy < CLASSIC_COST[type] || (classicCd[type] || 0) > 0) {
@@ -9956,8 +10007,13 @@ window.__game = {
   playCard: (t, r, c) => {
     if (state !== 'playing' || mode === 'box') return false;
     if (CLASSIC_COST[t] === undefined) return false;
-    // 创造 / 神位模式免费无冷却
-    if (creative() || godMode()) return place(t, r, c);
+    if (creative()) return place(t, r, c);          // 创造模式免费无冷却
+    if (godMode()) {                                 // 神位模式收费、不吃冷却
+      const price = costOf(t);
+      if (energy < price || !place(t, r, c)) return false;
+      energy -= price;
+      return true;
+    }
     if (energy < CLASSIC_COST[t] || (classicCd[t] || 0) > 0) return false;
     if (!place(t, r, c)) return false;
     energy -= CLASSIC_COST[t];
@@ -10078,6 +10134,15 @@ window.__game = {
     };
   },
   modulesAt: (r, c) => (grid[r][c] && grid[r][c].modules ? grid[r][c].modules.map(x => x.kind + x.lv) : null),
+  // 按人的手速收集：一次最多捡 n 颗（机器人用，别让它变成无限手速）
+  collectSome: (n) => {
+    let got = 0;
+    for (let i = orbs.length - 1; i >= 0 && got < n; i--) {
+      if (!orbs[i].falling) { energy += orbs[i].val; orbs.splice(i, 1); got++; }
+    }
+    return got;
+  },
+  get orbCount() { return orbs.length; },
   collectAll: () => {
     let got = 0;
     for (let i = orbs.length - 1; i >= 0; i--) {
