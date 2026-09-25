@@ -617,6 +617,7 @@ function initGame() {
   bannerText = ''; bannerSub = ''; bannerT = 0; shakeT = 0; shakeAmp = 0; alarmT = 0;
   sel = null; submitted = false; time = 0;
   classicCd = {};
+  clearUndo();
   renderTray();
   renderClassicTray();
   applyModeUI();
@@ -933,8 +934,8 @@ function renderTray() {
   $('shovelBtn').classList.toggle('sel', !!(sel && sel.mode === 'shovel'));
   $('boxBtn').classList.toggle('sel', !!(sel && sel.mode === 'box'));
   $('allBtn').classList.toggle('sel', deckOpen);
-  $('fuseBtn').classList.toggle('sel', !!(sel && sel.mode === 'fuse'));
   $('moveBtn').classList.toggle('sel', !!(sel && sel.mode === 'move'));
+  refreshUndoBtn();
 }
 
 let revealTimer = null;
@@ -1019,6 +1020,75 @@ function retuneMachine(row, col, mods) {
   now.maxSh = keep.maxSh;
   now.spin = keep.spin;
   return now;
+}
+
+/* ===== 撤销：整盘快照，不写逐个操作的逆运算 =====
+   动手之前拍一张「场上有哪些机器 + 能量 + 冷却」的照片，撤销就是把照片贴回去。
+   45 格的棋盘拍一张只有几百字节，比给每种操作写一遍逆运算可靠得多。 */
+const UNDO_MAX = 24;
+let undoStack = [];
+function snapshotBoard() {
+  const cells = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const m = grid[r][c];
+      if (!m) continue;
+      cells.push({
+        r, c, type: m.type,
+        mods: m.modules ? m.modules.map(x => ({ kind: x.kind, lv: x.lv })) : null,
+        hp: m.hp, maxHp: m.maxHp, sh: m.sh || 0, maxSh: m.maxSh || 0,
+        openT: m.openT,
+      });
+    }
+  }
+  return cells;
+}
+// keepEnergy：撤销时不退能量（盲盒用——退了就能无限重摇）
+function pushUndo(label, keepEnergy) {
+  undoStack.push({ label, cells: snapshotBoard(), energy, cd: { ...classicCd }, keepEnergy: !!keepEnergy });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  refreshUndoBtn();
+}
+function clearUndo() { undoStack = []; refreshUndoBtn(); }
+function refreshUndoBtn() {
+  const b = $('undoBtn');
+  if (!b) return;
+  b.disabled = state !== 'playing' || !undoStack.length;
+  const n = undoStack.length;
+  b.title = n ? ('撤销上一步：' + undoStack[n - 1].label + '（还能撤销 ' + n + ' 步）')
+              : '没有可撤销的操作';
+}
+function undoLast() {
+  if (state !== 'playing') return false;
+  const u = undoStack.pop();
+  if (!u) { addFloat(W / 2, GRID_Y + 40, '没有可撤销的操作', '#ff5d5d'); sfx('error'); return false; }
+  closeLevelPanel();
+  sel = null;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) grid[r][c] = null;
+  for (const e of u.cells) {
+    grid[e.r][e.c] = e.type === 'box' ? {
+      type: 'box', row: e.r, col: e.c,
+      hp: e.hp, maxHp: e.maxHp, openT: e.openT,
+      t: 0, cd: 0, chew: 0, spin: 0,
+      flash: 0, recoil: 0, pulse: 0, armed: true,
+    } : {
+      type: e.type, row: e.r, col: e.c,
+      modules: sortModules(e.mods.map(x => ({ kind: x.kind, lv: x.lv }))),
+      hp: e.hp, maxHp: e.maxHp,
+      t: rand(0, 0.6), cd: 0, chew: 0, spin: rand(0, TAU),
+      flash: 0, recoil: 0, pulse: 0, armed: true,
+      mt: {}, mcd: {}, charge: 0, reload: 0,
+      sh: e.sh, maxSh: e.maxSh, haste: 0, shHit: 0, stunT: 0,
+    };
+    spawnParts(cellCx(e.c), cellCy(e.r), '#4cc2ff', 5, 70, 0.35, 'spark');
+  }
+  if (!u.keepEnergy) energy = u.energy;
+  classicCd = { ...u.cd };
+  addFloat(W / 2, GRID_Y + 40, '↩ 已撤销：' + u.label, '#4cc2ff');
+  sfx('grab');
+  renderTray();
+  refreshUndoBtn();
+  return true;
 }
 
 function removeMachine(row, col, silent) {
@@ -3226,7 +3296,10 @@ function copyMachine(r, c) {
     return false;
   }
   const mods = m.modules.map(x => ({ kind: x.kind, lv: x.lv }));
-  if (!place(typeOfModules(mods), best.r, best.c, mods)) { sfx('error'); return false; }
+  pushUndo('复制 ' + machineName(m));
+  if (!place(typeOfModules(mods), best.r, best.c, mods)) {
+    undoStack.pop(); refreshUndoBtn(); sfx('error'); return false;
+  }
   const x1 = cellCx(c), y1 = cellCy(r);
   const x2 = cellCx(best.c), y2 = cellCy(best.r);
   zaps.push({ pts: [{ x: x1, y: y1 }, { x: x2, y: y2 }], t: 0.3, max: 0.3, color: '#4cc2ff' });
@@ -3414,6 +3487,7 @@ function applyTune(mods, delta) {
   const at = lvCell();
   if (!at) { closeLevelPanel(); return; }
   const { r, c } = at;
+  pushUndo('调等级 ' + machineName(lvTarget));
   const before = totalLv(lvTarget.modules);
   const now = retuneMachine(r, c, mods);
   if (!now) { sfx('error'); return; }
@@ -3504,8 +3578,9 @@ cv.addEventListener('pointerdown', ev => {
   if (!cell) return;
   if (sel && sel.mode === 'shovel') {
     if (grid[cell.r][cell.c]) {
+      pushUndo('拆除 ' + machineName(grid[cell.r][cell.c]));
       removeMachine(cell.r, cell.c);
-      sel = null;
+      // 保持激活：可以一路点着连拆，点「拆除」按钮或 Esc 退出
       renderTray();
     }
     return;
@@ -3529,28 +3604,6 @@ cv.addEventListener('pointerdown', ev => {
     dropCarried(cell.r, cell.c);
     return;
   }
-  if (sel && sel.mode === 'fuse') {
-    const m = grid[cell.r][cell.c];
-    if (!m) { sel.first = null; return; }
-    if (m.type === 'box') {
-      addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '盲盒还没开封', '#ff5d5d');
-      sfx('error');
-      return;
-    }
-    if (!sel.first) {
-      sel.first = { r: cell.r, c: cell.c };
-      sfx('place');
-      return;
-    }
-    if (sel.first.r === cell.r && sel.first.c === cell.c) { sel.first = null; return; }
-    const a = grid[sel.first.r][sel.first.c];
-    if (!a) { sel.first = { r: cell.r, c: cell.c }; return; }
-    doFuse(sel.first.r, sel.first.c, cell.r, cell.c);
-    // 杂交模式保持激活，可以接着选下一对，不用再点按钮
-    sel.first = null;
-    renderTray();
-    return;
-  }
   if (sel && sel.mode === 'card') {
     // 普通模式：花能量放置选中的机器（创造模式免费且无冷却）
     const type = sel.type;
@@ -3560,7 +3613,9 @@ cv.addEventListener('pointerdown', ev => {
       return;
     }
     if (creative()) {
+      pushUndo('放置 ' + MACHINES[type].name);
       if (place(type, cell.r, cell.c)) renderTray();  // 保持选中，可连续放
+      else undoStack.pop(), refreshUndoBtn();
       return;
     }
     if (energy < CLASSIC_COST[type] || (classicCd[type] || 0) > 0) {
@@ -3569,12 +3624,13 @@ cv.addEventListener('pointerdown', ev => {
       sfx('error');
       return;
     }
+    pushUndo('放置 ' + MACHINES[type].name);
     if (place(type, cell.r, cell.c)) {
       energy -= CLASSIC_COST[type];
       classicCd[type] = CLASSIC_CD[type];
       sel = null;
       renderTray();
-    }
+    } else { undoStack.pop(); refreshUndoBtn(); }
     return;
   }
   if (sel && sel.mode === 'box') {
@@ -3589,6 +3645,8 @@ cv.addEventListener('pointerdown', ev => {
       sfx('error');
       return;
     }
+    // 盲盒撤销时不退能量——退了就能反复重摇同一个格子
+    pushUndo('放下盲盒', true);
     if (placeBox(cell.r, cell.c)) {
       if (!creative()) energy -= BOX_COST;
       // 能量足够时保持放置模式，可以连续放
@@ -3596,7 +3654,7 @@ cv.addEventListener('pointerdown', ev => {
         sel = null;
         renderTray();
       }
-    }
+    } else { undoStack.pop(); refreshUndoBtn(); }
   }
 });
 // 手套放下：空格→搬运，别的机器→杂交，原地→放回
@@ -3614,6 +3672,7 @@ function dropCarried(r, c) {
       sfx('error');
       return false;
     }
+    pushUndo('杂交 ' + machineName(src) + ' × ' + machineName(dst));
     doFuse(sel.from.r, sel.from.c, r, c);
     sel.from = null;
     sel.grabbed = false;
@@ -3621,6 +3680,7 @@ function dropCarried(r, c) {
     return true;
   }
   // 空格 → 搬运
+  pushUndo('搬运 ' + machineName(src));
   grid[sel.from.r][sel.from.c] = null;
   grid[r][c] = src;
   spawnParts(cellCx(sel.from.c), cellCy(sel.from.r) + 20, '#8fa1b8', 8, 70, 0.4, 'smoke');
@@ -3821,11 +3881,7 @@ $('shovelBtn').addEventListener('click', () => {
   sel = (sel && sel.mode === 'shovel') ? null : { mode: 'shovel' };
   renderTray();
 });
-$('fuseBtn').addEventListener('click', () => {
-  if (state !== 'playing') return;
-  sel = (sel && sel.mode === 'fuse') ? null : { mode: 'fuse', first: null };
-  renderTray();
-});
+$('undoBtn').addEventListener('click', () => { undoLast(); });
 $('moveBtn').addEventListener('click', () => {
   if (state !== 'playing') return;
   sel = (sel && sel.mode === 'move') ? null : { mode: 'move', from: null };
@@ -11118,24 +11174,6 @@ function drawFuseHints() {
     g.strokeRect(GRID_X + sel.from.c * CELL_W + 2, GRID_Y + sel.from.r * CELL_H + 2, CELL_W - 4, CELL_H - 4);
     return;
   }
-  if (sel.mode !== 'fuse' || !sel.first) return;
-  const a = grid[sel.first.r][sel.first.c];
-  if (!a) { sel.first = null; return; }
-  const pulse = 0.55 + Math.sin(time * 6) * 0.25;
-  const fx = GRID_X + sel.first.c * CELL_W, fy = GRID_Y + sel.first.r * CELL_H;
-  g.strokeStyle = 'rgba(255,197,49,' + pulse + ')';
-  g.lineWidth = 3;
-  g.strokeRect(fx + 2, fy + 2, CELL_W - 4, CELL_H - 4);
-  // 任意机器都可杂交：其余机器全部亮绿框
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      const m = grid[r][c];
-      if (!m || m.type === 'box') continue;
-      if (r === sel.first.r && c === sel.first.c) continue;
-      g.strokeStyle = 'rgba(88,214,139,' + pulse + ')';
-      g.strokeRect(GRID_X + c * CELL_W + 2, GRID_Y + r * CELL_H + 2, CELL_W - 4, CELL_H - 4);
-    }
-  }
 }
 
 // 射程可视化：看着面板的机器时，把它够得到的范围画出来。
@@ -11198,11 +11236,6 @@ function drawHoverGhost() {
   }
   if (sel.mode === 'shovel') {
     g.fillStyle = occupied ? 'rgba(255,93,93,0.25)' : 'rgba(255,255,255,0.06)';
-    g.fillRect(x, y, CELL_W, CELL_H);
-    return;
-  }
-  if (sel.mode === 'fuse') {
-    g.fillStyle = occupied ? 'rgba(199,123,255,0.18)' : 'rgba(255,255,255,0.05)';
     g.fillRect(x, y, CELL_W, CELL_H);
     return;
   }
@@ -11463,6 +11496,21 @@ window.__game = {
       ctx.textAlign = 'center';
       ctx.fillText(label, cx2, Math.floor(i / cols) * ch + ch - 12);
     });
+  },
+  undo: () => undoLast(),
+  undoPush: (label) => pushUndo(label),
+  clearUndoForTest: () => clearUndo(),
+  get undoDepth() { return undoStack.length; },
+  // 走真实的「花能量放卡」路径（含冷却与撤销记录）
+  playCardUser: (t, r, c) => {
+    if (CLASSIC_COST[t] === undefined) return false;
+    pushUndo('放置 ' + MACHINES[t].name);
+    if (energy < CLASSIC_COST[t] || (classicCd[t] || 0) > 0 || !place(t, r, c)) {
+      undoStack.pop(); refreshUndoBtn(); return false;
+    }
+    energy -= CLASSIC_COST[t];
+    classicCd[t] = CLASSIC_CD[t];
+    return true;
   },
   get machineCount() { let n = 0; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c]) n++; return n; },
   startKillLog: () => { killLog = []; },

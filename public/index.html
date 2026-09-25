@@ -167,14 +167,14 @@
   .tag.common { background: var(--common); }
   .tag.rare { background: var(--rare); }
   .tag.epic { background: var(--epic); }
-  #shovelBtn, #fuseBtn, #moveBtn {
+  #shovelBtn, #undoBtn, #moveBtn {
     min-width: 60px; border-radius: 12px; border: 2px solid var(--line);
     background: var(--panel2); color: var(--text); font-size: 13px; font-weight: 700;
     cursor: pointer; line-height: 1.3;
   }
-  #shovelBtn .big, #fuseBtn .big, #moveBtn .big { font-size: 20px; display: block; }
+  #shovelBtn .big, #undoBtn .big, #moveBtn .big { font-size: 20px; display: block; }
   #shovelBtn.sel { border-color: var(--danger); box-shadow: 0 0 12px rgba(255, 93, 93, .45); }
-  #fuseBtn.sel { border-color: var(--epic); box-shadow: 0 0 12px rgba(199, 123, 255, .5); }
+  #undoBtn:disabled { opacity: .4; cursor: default; filter: grayscale(.8); }
   #moveBtn.sel { border-color: var(--accent2); box-shadow: 0 0 12px rgba(76, 194, 255, .5); }
   #moveBtn.cooling { filter: grayscale(.7) brightness(.65); }
   #board .bh, .board .bh { font-weight: 800; font-size: 13px; color: var(--accent); padding: 6px 0 2px; }
@@ -246,7 +246,7 @@
   body.compact .dcard canvas { width: 40px; height: 40px; }
 
   /* 手机上的工具按钮做大一点，好点 */
-  body.side #moveBtn, body.side #fuseBtn, body.side #shovelBtn { min-height: 38px; }
+  body.side #moveBtn, body.side #undoBtn, body.side #shovelBtn { min-height: 38px; }
   body.side #allBtn { min-height: 40px; }
   /* 顶栏瘦身：手机上品牌名没用，全部让给战场 */
   body.side header { padding: 0; gap: 4px; }
@@ -427,10 +427,10 @@
   body.compact #trayRow2 { gap: 5px; }
   body.compact #boxBtn { min-width: 76px; font-size: 12px; padding: 5px 7px; }
   body.compact #boxBtn .big { font-size: 17px; }
-  body.compact #moveBtn, body.compact #fuseBtn, body.compact #shovelBtn {
+  body.compact #moveBtn, body.compact #undoBtn, body.compact #shovelBtn {
     min-width: 46px; font-size: 11px;
   }
-  body.compact #moveBtn .big, body.compact #fuseBtn .big, body.compact #shovelBtn .big { font-size: 16px; }
+  body.compact #moveBtn .big, body.compact #undoBtn .big, body.compact #shovelBtn .big { font-size: 16px; }
   body.compact #pulls .hist { width: 24px; height: 24px; }
   /* 卡槽在紧凑模式下变成一条可横向滑动的卡带，不再换行撑高 */
   body.compact #classicTray {
@@ -498,10 +498,10 @@
   body.side #classicTray.many .card canvas { width: 46px; height: 46px; }
   body.side #classicTray .card .nm,
   body.side #classicTray.many .card .nm { font-size: 10px; }
-  body.side #moveBtn, body.side #fuseBtn, body.side #shovelBtn {
+  body.side #moveBtn, body.side #undoBtn, body.side #shovelBtn {
     min-width: 0; width: 100%; flex: 0 0 auto; padding: 3px 0; font-size: 0;
   }
-  body.side #moveBtn .big, body.side #fuseBtn .big, body.side #shovelBtn .big { font-size: 17px; }
+  body.side #moveBtn .big, body.side #undoBtn .big, body.side #shovelBtn .big { font-size: 17px; }
 
   /* ========== 竖屏手机：整个界面旋转 90°，把长边给战场 ========== */
   body.rot { overflow: hidden; }
@@ -559,8 +559,8 @@
     <button id="allBtn" title="一屏选机器"><span class="big">⊞</span>全部</button>
     <div id="classicTray" style="display:none;"></div>
     <button id="moveBtn" title="手套（没有冷却）：拿起一台机器 → 拖到空格就是搬运，拖到另一台机器身上就直接杂交，可以一直拖不用重新点"><span class="big">🧤</span>移动/杂交</button>
-    <button id="fuseBtn" title="点选式杂交（杂交完保持激活，可以连着点）：任意两台机器都能杂交！同类杂交升级（炮台+炮台=双管炮台，双管+双管=加特林炮台），不同类杂交叠能力（碎纸机+路障=装甲碎纸机，再+发电机=充能装甲碎纸机……最多叠 5 个能力、每个 3 级）"><span class="big">🧪</span>杂交</button>
-    <button id="shovelBtn" title="选中后点击场上的机器将其拆除"><span class="big">🔧</span>拆除</button>
+    <button id="shovelBtn" title="选中后点着场上的机器连续拆除；再点一次本按钮或按 Esc 退出"><span class="big">🔧</span>拆除</button>
+    <button id="undoBtn" title="撤销上一步（放置 / 拆除 / 搬运 / 杂交 / 复制 / 调等级），可以连着撤销好几步"><span class="big">↩</span>撤销</button>
   </div>
 
   <div id="stageWrap">
@@ -598,7 +598,7 @@
         <div>🎁 <b>开盲盒</b>：花 50⚡ 把盲盒放到战场空格上——<b>落地即开</b>，开出什么就地服役！</div>
         <div>🎲 <b>拼手气</b>：10 种机器分普通/稀有/史诗，连开 4 次普通后必出稀有以上</div>
         <div>⚡ <b>能量</b>：点击掉落的电池收集能量，发电机也会产电</div>
-        <div>🧤 <b>手套</b>：拿起机器<b>拖到空格</b>就是搬运，<b>拖到另一台机器身上就直接杂交</b>，没有冷却也不用反复点按钮</div>
+        <div>🧤 <b>手套</b>：拿起机器<b>拖到空格</b>就是搬运，<b>拖到另一台机器身上就直接杂交</b>，没有冷却也不用反复点按钮；<b>🔧 拆除可以连着点</b>，弄错了就按 <b>↩ 撤销</b></div>
         <div>🛠️ <b>创造模式</b>：能量无限、机器免费无冷却、敌潮可随时开关，尽情实验杂交组合</div>
         <div>🔬 <b>调等级</b>（创造模式）：机器<b>总等级到 Lv3</b> 后，<b>双击</b>它就能逐条能力加减等级</div>
         <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎；🥊 弹簧拳机近战无视护盾</div>
@@ -657,7 +657,7 @@
   <div id="rotHint">📱 已自动横屏 · 转动手机可切回</div>
 
   <footer>
-    电脑：鼠标操作 · <b>F</b> 键或 ⛶ 全屏 · Esc 取消选择/暂停<br>
+    电脑：鼠标操作 · <b>F</b> 键或 ⛶ 全屏 · Esc 取消选择/暂停 · <b>↩ 撤销</b>上一步<br>
     长按机器可查看它的名字与全部能力<br>
     创造模式：双击 Lv3 以上的机器＝复制一台，长按＝调等级<br>
     手机：直接点触 · 竖屏会自动横过来 · 点 ⛶ 进入全屏<br>
