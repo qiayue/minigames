@@ -91,12 +91,19 @@ const CLASSIC_CD = {
  * 能力数量与等级都没有上限——理论上可以无限叠加。
  */
 const KIND_ORDER = [
-  'obsidian', 'plasma', 'stormfrost', 'corrosion',
   'shot', 'laser', 'prism', 'sniper', 'zap', 'rocket', 'mortar', 'sonic', 'aa',
   'hunter', 'saw', 'shred', 'mine', 'net', 'flame', 'poison', 'emp', 'gravity', 'magnet',
   'melee', 'frost', 'drone', 'spikes', 'armor', 'deflect',
   'shield', 'booster', 'repair', 'energy',
+  // 元素排在最后：它们是「附魔」，机体永远让给别的模块
+  'voidglass', 'rimeglass', 'acidglass', 'ionstorm', 'venomplasma', 'cryotoxin',
+  'obsidian', 'plasma', 'stormfrost', 'corrosion',
 ];
+// 元素等级：0 普通模块 / 1 一级元素 / 2 二级元素（奇点）
+const ELEM_TIER = {
+  obsidian: 1, plasma: 1, stormfrost: 1, corrosion: 1,
+  voidglass: 2, rimeglass: 2, acidglass: 2, ionstorm: 2, venomplasma: 2, cryotoxin: 2,
+};
 // 单模块机器的进阶命名（1/2/3 级，3 级以上沿用 3 级名 + Lv 后缀）
 const LADDER_NAME = {
   shot:   ['自动炮台', '双管炮台', '加特林炮台'],
@@ -133,6 +140,13 @@ const LADDER_NAME = {
   plasma:     ['等离子喷枪', '等离子炬', '恒星喷流炉'],
   stormfrost: ['霜雷线圈', '暴雪雷塔', '极地雷暴核'],
   corrosion:  ['腐蚀喷洒器', '酸火喷洒塔', '溶解风暴塔'],
+  // ---- 二级元素「奇点」：两种一级元素再撞一次 ----
+  voidglass:   ['等离子黑曜', '曜心等离子炮', '湮曜奇点炮'],
+  rimeglass:   ['绝对零曜',   '寒曜霜晶炮',   '冰封奇点炮'],
+  acidglass:   ['蚀曜喷射炮', '溶曜酸蚀炮',   '腐曜奇点炮'],
+  ionstorm:    ['雷暴等离子', '极地离子风暴', '风暴奇点炮'],
+  venomplasma: ['腐蚀等离子', '瘟疫离子炬',   '疫离奇点炮'],
+  cryotoxin:   ['极寒剧毒塔', '冻疫散布器',   '寒疫奇点炮'],
 };
 // 单模块机器的类型 id（1/2/3 级）
 const LADDER_TYPE = {
@@ -169,6 +183,12 @@ const LADDER_TYPE = {
   plasma:     ['plasma', 'plasma2', 'plasma3'],
   stormfrost: ['stormfrost', 'stormfrost2', 'stormfrost3'],
   corrosion:  ['corrosion', 'corrosion2', 'corrosion3'],
+  voidglass:   ['voidglass', 'voidglass2', 'voidglass3'],
+  rimeglass:   ['rimeglass', 'rimeglass2', 'rimeglass3'],
+  acidglass:   ['acidglass', 'acidglass2', 'acidglass3'],
+  ionstorm:    ['ionstorm', 'ionstorm2', 'ionstorm3'],
+  venomplasma: ['venomplasma', 'venomplasma2', 'venomplasma3'],
+  cryotoxin:   ['cryotoxin', 'cryotoxin2', 'cryotoxin3'],
 };
 // 作为副模块时的修饰词（用于自动命名混合机）
 const KIND_ADJ = {
@@ -178,7 +198,9 @@ const KIND_ADJ = {
   spikes: '钉刺', shield: '护盾', booster: '超频', saw: '锯轮', emp: '脉冲',
   aa: '防空', deflect: '折射', sonic: '音爆', drone: '蜂群', gravity: '引力', prism: '棱光',
   net: '捕网', hunter: '猎空',
-  obsidian: '黑曜', plasma: '等离子', stormfrost: '霜雷', corrosion: '腐蚀',
+  obsidian: '黑曜石', plasma: '等离子', stormfrost: '霜雷', corrosion: '腐蚀',
+  voidglass: '曜离', rimeglass: '零曜', acidglass: '蚀曜',
+  ionstorm: '离暴', venomplasma: '疫离', cryotoxin: '寒疫',
 };
 const KIND_DESC = {
   shot: '发射能量弹', energy: '产出能量', armor: '高耐久装甲', melee: '近战铁拳（无视护盾）',
@@ -196,6 +218,12 @@ const KIND_DESC = {
   plasma: '等离子喷流灼烧走廊内所有敌人，并不断麻痹它们',
   stormfrost: '闪电链同时冻结；对已被冻结或减速的目标伤害翻倍',
   corrosion: '酸火持续融蚀：护盾与装甲一起掉，还会叠「碎裂」',
+  voidglass: '奇点束贯穿整行：重创 + 叠碎裂 + 点燃',
+  rimeglass: '奇点束贯穿整行：重创 + 叠碎裂 + 冻结',
+  acidglass: '奇点束贯穿整行：重创 + 重叠碎裂 + 融盾',
+  ionstorm: '奇点束贯穿整行：重创 + 麻痹 + 冻结',
+  venomplasma: '奇点束贯穿整行：重创 + 点燃 + 剧毒 + 融盾',
+  cryotoxin: '奇点束贯穿整行：重创 + 冻结 + 剧毒 + 融盾',
 };
 // 各模块对血量的加成
 const KIND_HP = {
@@ -206,6 +234,7 @@ const KIND_HP = {
   aa: 0, deflect: 280, sonic: 40, drone: 60, gravity: 80, prism: -20,
   net: 120, hunter: -40,
   obsidian: 260, plasma: 60, stormfrost: 90, corrosion: 40,
+  voidglass: 200, rimeglass: 220, acidglass: 180, ionstorm: 120, venomplasma: 100, cryotoxin: 140,
 };
 
 /* ===== 元素融合：两种元素杂交会塌缩成一种全新的元素，而不是简单并列 =====
@@ -216,6 +245,26 @@ const ELEMENT_FUSION = [
   [['zap', 'frost'],    'stormfrost'],  // 冰导电   → 霜雷
   [['poison', 'flame'], 'corrosion'],   // 毒液燃烧 → 腐蚀酸火
 ];
+/* 二级融合：两种一级元素再撞一次，塌缩成「奇点元素」。
+   六种奇点共用一套打法——每隔几秒朝本行轰出一道贯穿整行的奇点束，
+   带着父级双方的状态（碎裂 / 灼烧 / 冻结 / 麻痹 / 剧毒 / 融盾）。 */
+const ELEMENT_FUSION2 = [
+  [['obsidian', 'plasma'],     'voidglass'],    // 等离子黑曜
+  [['obsidian', 'stormfrost'], 'rimeglass'],    // 绝对零曜
+  [['obsidian', 'corrosion'],  'acidglass'],    // 蚀曜
+  [['plasma', 'stormfrost'],   'ionstorm'],     // 雷暴等离子
+  [['plasma', 'corrosion'],    'venomplasma'],  // 腐蚀等离子
+  [['stormfrost', 'corrosion'],'cryotoxin'],    // 极寒剧毒
+];
+// 奇点束打中之后挂什么状态
+const SINGULARITY = {
+  voidglass:   { color: '#c98aff', shatter: 2, burn: 1 },
+  rimeglass:   { color: '#a8d4ff', shatter: 2, freeze: 1 },
+  acidglass:   { color: '#c8e04a', shatter: 3, melt: 1 },
+  ionstorm:    { color: '#7ad8ff', jolt: 1, freeze: 1 },
+  venomplasma: { color: '#ff7ac0', burn: 1, poison: 1, melt: 1 },
+  cryotoxin:   { color: '#8ce8c0', freeze: 1, poison: 1, melt: 1 },
+};
 // 经典组合的专属类型（保持原有名字和造型）
 const PAIR_TYPE = [
   [['shot', 'zap'], 'arcturret', '电弧机炮'],
@@ -238,7 +287,10 @@ function modulesOfType(type) {
   return null;
 }
 function sortModules(mods) {
+  // 元素一律排在普通模块之后（哪怕等级更高）——
+  // 「碎纸机 + 黑曜」应该是黑曜石碎纸机，而不是绞碎黑曜石炮。
   return mods.slice().sort((a, b) =>
+    (ELEM_TIER[a.kind] || 0) - (ELEM_TIER[b.kind] || 0) ||
     b.lv - a.lv || KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
 }
 // 杂交：合并两台机器的模块。能力数量与等级均无上限
@@ -248,19 +300,24 @@ function mergeModules(a, b) {
     map[mod.kind] = (map[mod.kind] || 0) + mod.lv;
   }
   // 元素塌缩：两种元素同时出现就合成新元素，等级取两者之和。
-  // 只做一轮——融合产物不再参与二次融合，规则才好预期。
-  for (const [[k1, k2], out] of ELEMENT_FUSION) {
-    if (map[k1] && map[k2]) {
-      map[out] = (map[out] || 0) + map[k1] + map[k2];
-      delete map[k1]; delete map[k2];
+  // 先塌缩一级（冰+火→黑曜），再塌缩二级（黑曜+等离子→曜离奇点）；
+  // 反复跑到稳定为止，两台已经带元素的机器合起来也能一路升到奇点。
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = false;
+    for (const [[k1, k2], out] of ELEMENT_FUSION.concat(ELEMENT_FUSION2)) {
+      if (map[k1] && map[k2]) {
+        map[out] = (map[out] || 0) + map[k1] + map[k2];
+        delete map[k1]; delete map[k2];
+        changed = true;
+      }
     }
+    if (!changed) break;
   }
   return sortModules(Object.keys(map).map(k => ({ kind: k, lv: map[k] })));
 }
 // 这台机器身上的融合元素（用于提示「这是杂交出来的新元素」）
 function fusedElementOf(mods) {
-  const set = ELEMENT_FUSION.map(f => f[1]);
-  const hit = mods.find(mod => set.indexOf(mod.kind) >= 0);
+  const hit = mods.find(mod => ELEM_TIER[mod.kind]);
   return hit ? hit.kind : null;
 }
 function typeOfModules(mods) {
@@ -1283,6 +1340,15 @@ const MOD_STAT = {
                 range: [3.8, 4.4, 5.0], freeze: [1.0, 1.4, 1.9] },
   corrosion:  { interval: [1.25, 0.95, 0.7], dmg: [22, 30, 40], range: [3.4, 4.0, 4.6],
                 dot: [28, 42, 60], dur: [4, 5, 6], melt: [16, 26, 38] },
+  // ---- 奇点：贯穿整行的一束，参数形状统一，差别在挂的状态上 ----
+  voidglass:   { cd: [2.6, 2.0, 1.5], dmg: [150, 200, 265], burn: [30, 44, 62] },
+  rimeglass:   { cd: [2.8, 2.1, 1.6], dmg: [140, 188, 250], freeze: [1.3, 1.8, 2.4] },
+  acidglass:   { cd: [2.5, 1.9, 1.4], dmg: [130, 175, 235], melt: [40, 60, 88] },
+  ionstorm:    { cd: [2.2, 1.7, 1.25], dmg: [120, 162, 218], jolt: [0.5, 0.7, 0.95], freeze: [0.9, 1.3, 1.8] },
+  venomplasma: { cd: [2.4, 1.8, 1.35], dmg: [125, 168, 226], burn: [34, 50, 70],
+                 dot: [36, 54, 76], dur: [5, 6, 7], melt: [30, 46, 66] },
+  cryotoxin:   { cd: [2.7, 2.05, 1.55], dmg: [132, 178, 238], freeze: [1.2, 1.7, 2.3],
+                 dot: [40, 58, 82], dur: [5, 6, 7], melt: [28, 42, 60] },
   armor:  {},
 };
 // 3 级以上的成长规则：等级无上限
@@ -1862,6 +1928,33 @@ function updateMachines(dt) {
               });
               spawnParts(cx + 10, cellCy(r) - 26, '#ffb98a', 6, 90, 0.35, 'smoke');
               sfx('shoot');
+            }
+          }
+        } else if (SINGULARITY[kind]) {
+          // 奇点束：六种二级元素共用——贯穿整行的一道宽束，
+          // 差别只在打完之后挂什么状态（表里写着）。
+          const S = SINGULARITY[kind];
+          m.mcd[kind] = m.mcd[kind] || 0;
+          if (m.mcd[kind] <= 0) {
+            const targets = enemiesInRow(r).filter(e => !e.dead && e.x > cx && e.x <= FIELD_X);
+            if (targets.length) {
+              m.mcd[kind] = st('cd');
+              m.flash = 0.34;
+              m.recoil = 0.3;
+              const dmg = st('dmg');
+              for (const e of targets) {
+                if (S.melt && e.shield > 0) e.shield = Math.max(0, e.shield - st('melt'));
+                if (S.shatter) addShatter(e, S.shatter);
+                damageEnemy(e, dmg, 'ranged');
+                if (S.burn) { e.burnT = Math.max(e.burnT, 3.5); e.burnDps = Math.max(e.burnDps, st('burn')); }
+                if (S.poison) { e.poisonT = Math.max(e.poisonT, st('dur')); e.poisonDps = Math.max(e.poisonDps, st('dot')); }
+                if (S.freeze && !e.boss) e.frozenT = Math.max(e.frozenT, st('freeze'));
+                if (S.jolt && !e.boss) e.stunT = Math.max(e.stunT, st('jolt'));
+                spawnParts(e.x, rowCy(e), S.color, 6, 110, 0.45, 'spark');
+              }
+              beams.push({ row: r, x0: cx + 26, t: 0.42, max: 0.42, bt: 5, kind: 'singular', color: S.color });
+              shake(0.18, 3.4);
+              sfx('laser');
             }
           }
         } else if (kind === 'obsidian') {
@@ -3039,6 +3132,36 @@ function lvCell() {
   return grid[r] && grid[r][c] === lvTarget ? { r, c } : null;
 }
 
+// 创造模式：把一台 Lv3 以上的机器原样复制到最近的空格。
+// 堆了半天才凑出来的奇点炮，不该逼玩家再从头杂交一遍。
+function copyMachine(r, c) {
+  const m = grid[r][c];
+  if (!canTuneLevel(m)) return false;
+  // 按曼哈顿距离由近到远找空格，同距离优先同一行
+  let best = null, bestD = 1e9;
+  for (let rr2 = 0; rr2 < ROWS; rr2++) {
+    for (let cc = 0; cc < COLS; cc++) {
+      if (grid[rr2][cc]) continue;
+      const d = Math.abs(rr2 - r) * 3 + Math.abs(cc - c);
+      if (d < bestD) { bestD = d; best = { r: rr2, c: cc }; }
+    }
+  }
+  if (!best) {
+    addFloat(cellCx(c), cellCy(r) - 34, '没有空格了', '#ff5d5d');
+    sfx('error');
+    return false;
+  }
+  const mods = m.modules.map(x => ({ kind: x.kind, lv: x.lv }));
+  if (!place(typeOfModules(mods), best.r, best.c, mods)) { sfx('error'); return false; }
+  const x1 = cellCx(c), y1 = cellCy(r);
+  const x2 = cellCx(best.c), y2 = cellCy(best.r);
+  zaps.push({ pts: [{ x: x1, y: y1 }, { x: x2, y: y2 }], t: 0.3, max: 0.3, color: '#4cc2ff' });
+  spawnParts(x2, y2, '#4cc2ff', 14, 140, 0.55, 'spark');
+  addFloat(x2, y2 - 52, '复制：' + machineName(grid[best.r][best.c]), '#4cc2ff');
+  sfx('fuse');
+  return true;
+}
+
 function canTuneLevel(m) {
   return !!(creative() && m && m.type !== 'box' && m.modules && totalLv(m.modules) >= LEVEL_PANEL_MIN);
 }
@@ -3235,9 +3358,13 @@ $('allBtn').addEventListener('click', () => { ensureAc(); toggleDeck(); });
 $('deckClose').addEventListener('click', closeDeck);
 $('deck').addEventListener('click', ev => { if (ev.target === $('deck')) closeDeck(); });
 $('lvpClose').addEventListener('click', closeLevelPanel);
-for (const b of document.querySelectorAll('#lvpFoot button')) {
+for (const b of document.querySelectorAll('#lvpFoot button[data-all]')) {
   b.addEventListener('click', () => bumpAll(+b.dataset.all));
 }
+$('lvpCopy').addEventListener('click', () => {
+  const at = lvCell();
+  if (at) copyMachine(at.r, at.c);
+});
 
 /* ========== 输入 ========== */
 function toGame(ev) {
@@ -3287,8 +3414,10 @@ cv.addEventListener('pointerdown', ev => {
     }, 420);
   }
   if (isDouble && creative() && !sel && grid[cell0.r][cell0.c]) {
-    lastTap.t = -1e9;                    // 吃掉这一次，避免三连击反复开关
-    openLevelPanel(cell0.r, cell0.c);
+    lastTap.t = -1e9;                    // 吃掉这一次，避免三连击反复触发
+    // 双击 = 复制（Lv3 以上）；调等级改走长按
+    if (canTuneLevel(grid[cell0.r][cell0.c])) copyMachine(cell0.r, cell0.c);
+    else openInfoPanel(cell0.r, cell0.c);
     return;
   }
   // 点别处就收起面板
@@ -3901,6 +4030,8 @@ const EMBLEM_COLOR = {
   aa: '#a8e8ff', net: '#9fe0b0', hunter: '#ff9f6b', deflect: '#8ff0e0', sonic: '#ffe9b0', drone: '#ffd79a',
   gravity: '#b9a8ff', prism: '#ffa8e0',
   obsidian: '#b388ff', plasma: '#ff5ce0', stormfrost: '#5ce8ff', corrosion: '#d8f542',
+  voidglass: '#c98aff', rimeglass: '#a8d4ff', acidglass: '#c8e04a',
+  ionstorm: '#7ad8ff', venomplasma: '#ff7ac0', cryotoxin: '#8ce8c0',
 };
 // 徽章位置：先右侧一列，再左侧，最后上下（超出则汇总为 +N）
 const EMBLEM_POS = [
@@ -4089,6 +4220,12 @@ const KIND_THEME = {
   plasma:     { tint: '#a02a7a', amt: 0.5,  accent: '#ff8ae8' },
   stormfrost: { tint: '#2f7aa8', amt: 0.5,  accent: '#9df0ff' },
   corrosion:  { tint: '#76881e', amt: 0.5,  accent: '#e8ff7a' },
+  voidglass:   { tint: '#3a2158', amt: 0.66, accent: '#e0b8ff' },
+  rimeglass:   { tint: '#2c3f6b', amt: 0.62, accent: '#cfe4ff' },
+  acidglass:   { tint: '#4a5320', amt: 0.62, accent: '#e2f58a' },
+  ionstorm:    { tint: '#1f5f80', amt: 0.56, accent: '#b6ecff' },
+  venomplasma: { tint: '#7a2a58', amt: 0.56, accent: '#ffb6dc' },
+  cryotoxin:   { tint: '#276054', amt: 0.56, accent: '#bdf5e0' },
   deflect:{ tint: '#2f8f86', amt: 0.44, accent: '#8ff0e0' },
   sonic:  { tint: '#94804a', amt: 0.36, accent: '#ffe9b0' },
   drone:  { tint: '#a8792e', amt: 0.38, accent: '#ffd79a' },
@@ -4577,6 +4714,9 @@ function drawChassis(ctx, type, pri, m) {
     case 'plasma': return drawPlasma(ctx, m, lv);
     case 'stormfrost': return drawStormfrost(ctx, m, lv);
     case 'corrosion': return drawCorrosion(ctx, m, lv);
+    case 'voidglass': case 'rimeglass': case 'acidglass':
+    case 'ionstorm': case 'venomplasma': case 'cryotoxin':
+      return drawSingularity(ctx, m, lv, pri.kind);
   }
 }
 
@@ -4687,6 +4827,106 @@ function drawHunter(ctx, m, lv) {
 }
 
 /* ===== 元素融合机体：四种造型都带着「两种元素被压进同一个炉子」的痕迹 ===== */
+
+/* 奇点机体：六种二级元素共用一套轮廓——一座环形约束架，
+   中间悬着一颗正在塌缩的核。差别在核的形状、配色与环上挂的东西，
+   一眼能认出是「奇点级」，又能分清是哪一种。 */
+const SING_STYLE = {
+  voidglass:   { core: 'shard', ring: 'blade' },
+  rimeglass:   { core: 'crystal', ring: 'spike' },
+  acidglass:   { core: 'shard', ring: 'drip' },
+  ionstorm:    { core: 'orb', ring: 'arc' },
+  venomplasma: { core: 'orb', ring: 'drip' },
+  cryotoxin:   { core: 'crystal', ring: 'drip' },
+};
+function drawSingularity(ctx, m, lv, kind) {
+  const P = themed(pal(lv));
+  const S = SINGULARITY[kind] || { color: '#c98aff' };
+  const A = S.color;
+  const sty = SING_STYLE[kind] || { core: 'orb', ring: 'arc' };
+  const t = time;
+  const cd = m && m.mcd ? (m.mcd[kind] || 0) : 0;
+  const charge = clamp(1 - cd / 2.6, 0, 1);       // 越接近开火，核越亮越大
+  pedestal(ctx, P, 50, lv);
+  // 底座与支臂
+  panel(ctx, -20, 2, 40, 18, 6, P);
+  bolt(ctx, -15, 15, P); bolt(ctx, 15, 15, P);
+  panel(ctx, -7, -34, 14, 38, 5, P);
+  // 约束环（等级越高环越多）
+  const rings = lv >= 3 ? 3 : lv >= 2 ? 2 : 1;
+  for (let i = 0; i < rings; i++) {
+    const rr2 = 20 + i * 6;
+    ctx.strokeStyle = hexA(A, 0.35 + i * 0.12);
+    ctx.lineWidth = 2.2;
+    ctx.save();
+    ctx.translate(0, -20);
+    ctx.rotate(t * (0.5 + i * 0.35) * (i % 2 ? -1 : 1));
+    ctx.beginPath(); ctx.ellipse(0, 0, rr2, rr2 * 0.42, 0, 0, TAU); ctx.stroke();
+    // 环上挂的东西
+    const n = 4 + i;
+    for (let k = 0; k < n; k++) {
+      const a = k * TAU / n;
+      const px = Math.cos(a) * rr2, py = Math.sin(a) * rr2 * 0.42;
+      ctx.fillStyle = A;
+      if (sty.ring === 'blade') {
+        ctx.beginPath(); ctx.moveTo(px, py - 4); ctx.lineTo(px + 3, py); ctx.lineTo(px, py + 4);
+        ctx.closePath(); ctx.fill();
+      } else if (sty.ring === 'spike') {
+        ctx.beginPath(); ctx.moveTo(px - 2, py); ctx.lineTo(px, py - 6); ctx.lineTo(px + 2, py);
+        ctx.closePath(); ctx.fill();
+      } else if (sty.ring === 'drip') {
+        ctx.beginPath(); ctx.arc(px, py, 2.4, 0, TAU); ctx.fill();
+      } else {
+        ctx.strokeStyle = hexA(A, 0.8);
+        ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px * 0.7, py * 0.7); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+  // 中心的塌缩核
+  const R = (8 + lv * 1.6) * (0.9 + charge * 0.22);
+  emissive(ctx, A, 12 + charge * 10, () => {
+    ctx.save();
+    ctx.translate(0, -20);
+    ctx.fillStyle = cachedRG(ctx, -R * 0.3, -R * 0.3, 1, 0, 0, R,
+      [0, '#ffffff', 0.4, A, 1, 'rgba(10,8,16,0.9)']);
+    if (sty.core === 'shard') {
+      ctx.rotate(Math.sin(t * 1.6) * 0.3);
+      ctx.beginPath();
+      ctx.moveTo(0, -R); ctx.lineTo(R * 0.72, 0); ctx.lineTo(0, R); ctx.lineTo(-R * 0.72, 0);
+      ctx.closePath(); ctx.fill();
+    } else if (sty.core === 'crystal') {
+      ctx.rotate(t * 0.5);
+      ctx.beginPath();
+      for (let k = 0; k < 6; k++) {
+        const a = k * TAU / 6;
+        ctx.lineTo(Math.cos(a) * R, Math.sin(a) * R);
+      }
+      ctx.closePath(); ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  });
+  // 被核吸进去的碎屑
+  ctx.fillStyle = hexA(A, 0.75);
+  for (let i = 0; i < 4; i++) {
+    const ph = (t * 0.9 + i * 0.25) % 1;
+    const a = i * 1.7 + t * 2;
+    const d = (1 - ph) * 26 + 4;
+    ctx.globalAlpha = 0.75 * ph;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * d, -20 + Math.sin(a) * d * 0.45, 1.8, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // 蓄满时炮口先亮起来
+  if (charge > 0.82) {
+    emissive(ctx, A, 14, () => {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(24, -20, 3.4, 0, TAU); ctx.fill();
+    });
+  }
+}
 
 // 黑曜石炮：熔岩灌进冷凝模，炮身是一整块带棱的黑玻璃
 function drawObsidian(ctx, m, lv) {
@@ -10114,7 +10354,32 @@ function drawBeams() {
   for (const b of beams) {
     const alpha = b.t / b.max;
     const y = cellCy(b.row) - 8;
-    if (b.kind === 'emp') {
+    if (b.kind === 'singular') {
+      // 奇点束：一条带元素配色的宽束，中间一道白热芯，边缘翻着能量涡
+      const col = b.color || '#c98aff';
+      g.fillStyle = hexA(col, 0.20 * alpha);
+      g.fillRect(b.x0, cellCy(b.row) - CELL_H / 2 + 2, W - b.x0, CELL_H - 4);
+      g.fillStyle = hexA(col, 0.5 * alpha);
+      g.fillRect(b.x0, y - 13, W - b.x0, 26);
+      g.fillStyle = 'rgba(255,255,255,' + (0.92 * alpha) + ')';
+      g.fillRect(b.x0, y - 3.4, W - b.x0, 6.8);
+      // 沿束翻滚的能量涡
+      g.strokeStyle = hexA(col, 0.85 * alpha);
+      g.lineWidth = 2;
+      for (let k = 0; k < 2; k++) {
+        g.beginPath();
+        for (let px = b.x0; px < W; px += 12) {
+          const ph = px * 0.045 + time * 14 + k * Math.PI;
+          g.lineTo(px, y + Math.sin(ph) * (9 - k * 3));
+        }
+        g.stroke();
+      }
+      // 炮口的白热球
+      emissive(g, col, 16, () => {
+        g.fillStyle = '#ffffff';
+        g.beginPath(); g.arc(b.x0, y, 9 * alpha + 4, 0, TAU); g.fill();
+      });
+    } else if (b.kind === 'emp') {
       g.fillStyle = 'rgba(159,196,255,' + (0.26 * alpha) + ')';
       g.fillRect(b.x0, cellCy(b.row) - CELL_H / 2 + 4, W - b.x0, CELL_H - 8);
       g.strokeStyle = 'rgba(200,225,255,' + (0.8 * alpha) + ')';
@@ -10870,6 +11135,9 @@ window.__game = {
   get allCardTypes() { return CLASSIC_ORDER.slice(); },
   get allEnemyTypes() { return Object.keys(ENEMIES); },
   get enemyList() { return enemies.filter(e => !e.dead).map(e => ({ row: e.row, x: e.x, fly: !!e.fly })); },
+  copyAt: (r, c) => copyMachine(r, c),
+  totalLvAt: (r, c) => (grid[r][c] && grid[r][c].modules ? totalLv(grid[r][c].modules) : 0),
+  get machineCount() { let n = 0; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c]) n++; return n; },
   startKillLog: () => { killLog = []; },
   get killLog() { return killLog ? killLog.slice() : null; },
   // 测伤害用的血包：定住不动、血量拉高，直接读掉血量
