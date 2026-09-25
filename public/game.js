@@ -99,6 +99,39 @@ const KIND_ORDER = [
   'voidglass', 'rimeglass', 'acidglass', 'ionstorm', 'venomplasma', 'cryotoxin',
   'obsidian', 'plasma', 'stormfrost', 'corrosion',
 ];
+/* 纯防御机体：身上除了元素以外，全是「不主动打人」的模块。
+   给这种机器附元素，玩家要的是一堵更硬的墙，不是一堵会开炮的墙——
+   所以元素在这里不开火，改成「护体」：耐久大涨，谁咬它谁倒霉。 */
+const PASSIVE_KINDS = ['armor', 'shield', 'deflect', 'repair', 'booster', 'energy', 'spikes'];
+function isWardHost(mods) {
+  let real = 0;
+  for (const mod of mods) {
+    if (ELEM_TIER[mod.kind]) continue;
+    real++;
+    if (PASSIVE_KINDS.indexOf(mod.kind) < 0) return false;
+  }
+  return real > 0;
+}
+// 护体形态：耐久倍率 + 咬它的敌人要吃的状态
+const ELEM_WARD = {
+  obsidian:    { hp: 1.7,  shatter: 2 },
+  plasma:      { hp: 1.3,  jolt: 0.6, burn: 26 },
+  stormfrost:  { hp: 1.4,  freeze: 1.2 },
+  corrosion:   { hp: 1.25, poison: 34, melt: 30 },
+  voidglass:   { hp: 2.1,  shatter: 3, burn: 42 },
+  rimeglass:   { hp: 2.2,  shatter: 3, freeze: 1.8 },
+  acidglass:   { hp: 2.0,  shatter: 4, melt: 62 },
+  ionstorm:    { hp: 1.8,  jolt: 0.9, freeze: 1.4 },
+  venomplasma: { hp: 1.7,  burn: 52, poison: 62, melt: 46 },
+  cryotoxin:   { hp: 1.85, freeze: 1.7, poison: 66, melt: 44 },
+};
+// 这台机器身上的护体元素（不是纯防御机体就返回 null）
+function wardOf(m) {
+  if (!m || !m.modules || !isWardHost(m.modules)) return null;
+  const e = m.modules.find(x => ELEM_TIER[x.kind]);
+  return e ? { kind: e.kind, lv: e.lv, W: ELEM_WARD[e.kind] } : null;
+}
+
 // 元素等级：0 普通模块 / 1 一级元素 / 2 二级元素（奇点）
 const ELEM_TIER = {
   obsidian: 1, plasma: 1, stormfrost: 1, corrosion: 1,
@@ -350,8 +383,24 @@ function nameOfModules(mods) {
   // 能力多或等级高时标出总等级，避免不同配置重名
   return (t > mods.length || mods.length > 4) ? name + ' Lv' + t : name;
 }
+const WARD_DESC = {
+  obsidian: '黑曜护体：耐久大涨，咬它的敌人外壳直接崩裂',
+  plasma: '等离子护体：咬它的敌人被电麻痹并点燃',
+  stormfrost: '霜雷护体：咬它的敌人当场冻住',
+  corrosion: '腐蚀护体：咬它的敌人中毒，护盾一起融',
+  voidglass: '曜离护体：耐久翻倍，咬它的敌人崩裂并燃烧',
+  rimeglass: '零曜护体：耐久翻倍，咬它的敌人崩裂并冻结',
+  acidglass: '蚀曜护体：耐久翻倍，咬它的敌人重度崩裂、护盾尽融',
+  ionstorm: '离暴护体：咬它的敌人被麻痹并冻结',
+  venomplasma: '疫离护体：咬它的敌人燃烧、中毒、融盾',
+  cryotoxin: '寒疫护体：咬它的敌人冻结、中毒、融盾',
+};
 function descOfModules(mods) {
-  return mods.map(mod => KIND_DESC[mod.kind] + (mod.lv > 1 ? '×' + mod.lv : '')).join('，');
+  const ward = isWardHost(mods);
+  return mods.map(mod => {
+    const d = (ward && ELEM_TIER[mod.kind] && WARD_DESC[mod.kind]) ? WARD_DESC[mod.kind] : KIND_DESC[mod.kind];
+    return d + (mod.lv > 1 ? '×' + mod.lv : '');
+  }).join('，');
 }
 // 会索敌的模块（用来算这台机器的射程）。狙击/激光/火箭没有 range 属性＝覆盖整行。
 const RANGED_KINDS = ['shot', 'frost', 'poison', 'zap', 'aa', 'prism', 'mortar',
@@ -378,6 +427,11 @@ function hpOfModules(mods) {
   let hp = 300;
   for (const mod of mods) hp += KIND_HP[mod.kind] * mod.lv;
   hp += 60 * (totalLv(mods) - 1);
+  // 护体形态：元素不去开炮，全部化进这堵墙的耐久里
+  if (isWardHost(mods)) {
+    const e = mods.find(x => ELEM_TIER[x.kind]);
+    if (e && ELEM_WARD[e.kind]) hp *= ELEM_WARD[e.kind].hp;
+  }
   return Math.max(Math.round(hp), 120);
 }
 // 大数字压缩显示：99999 → 9.9万，8999910 → 899.9万
@@ -975,6 +1029,23 @@ function removeMachine(row, col, silent) {
   spawnParts(cellCx(col), cellCy(row), '#8fa1b8', 14, 120, 0.55, 'gear');
   if (!silent) sfx('break');
 }
+// 护体反击：敌人咬了一口附着元素的纯防御机体，元素就反过来招呼它
+function wardBite(m, e) {
+  const w = wardOf(m);
+  if (!w || e.dead) return;
+  const W = w.W, lv = w.lv;
+  const S = SINGULARITY[w.kind];
+  const col = S ? S.color : (EMBLEM_COLOR[w.kind] || '#c4a4ff');
+  if (W.shatter) addShatter(e, W.shatter);
+  if (W.freeze && !e.boss) e.frozenT = Math.max(e.frozenT, W.freeze * (1 + lv * 0.08));
+  if (W.jolt && !e.boss) e.stunT = Math.max(e.stunT, W.jolt);
+  if (W.burn) { e.burnT = Math.max(e.burnT, 3); e.burnDps = Math.max(e.burnDps, W.burn * (1 + lv * 0.12)); }
+  if (W.poison) { e.poisonT = Math.max(e.poisonT, 4); e.poisonDps = Math.max(e.poisonDps, W.poison * (1 + lv * 0.12)); }
+  if (W.melt && e.shield > 0) e.shield = Math.max(0, e.shield - W.melt * (1 + lv * 0.12));
+  spawnParts(e.x - e.w * 0.3, rowCy(e), col, 5, 90, 0.4, 'spark');
+  shocks.push({ x: e.x - e.w * 0.3, y: rowCy(e), t: 0.22, max: 0.22, reach: 24, color: col });
+}
+
 function damageMachine(m, d) {
   // 能量护盾优先承伤
   if (m.sh > 0) {
@@ -1930,6 +2001,8 @@ function updateMachines(dt) {
               sfx('shoot');
             }
           }
+        } else if (ELEM_TIER[kind] && isWardHost(m.modules)) {
+          // 护体形态：安静地当一堵墙，反击在被咬的时候结算（见 damageMachine 前的判定）
         } else if (SINGULARITY[kind]) {
           // 奇点束：六种二级元素共用——贯穿整行的一道宽束，
           // 差别只在打完之后挂什么状态（表里写着）。
@@ -2750,6 +2823,7 @@ function updateEnemies(dt) {
           m.stunT = Math.max(m.stunT || 0, e.chill);
           spawnParts(front - 8, cellCy(e.row), '#bfe9ff', 5, 70, 0.4, 'spark');
         }
+        wardBite(m, e);   // 附了元素的防御体：咬它的人要付出代价
         spawnParts(front + 6, rowCy(e), '#9fb4c8', 4, 70, 0.3, 'spark');
         sfx('chomp');
       }
@@ -4033,11 +4107,6 @@ const EMBLEM_COLOR = {
   voidglass: '#c98aff', rimeglass: '#a8d4ff', acidglass: '#c8e04a',
   ionstorm: '#7ad8ff', venomplasma: '#ff7ac0', cryotoxin: '#8ce8c0',
 };
-// 徽章位置：先右侧一列，再左侧，最后上下（超出则汇总为 +N）
-const EMBLEM_POS = [
-  [29, -36], [29, -11], [29, 14], [-29, -36],
-  [-29, -11], [-29, 14], [0, -50], [16, 40],
-];
 
 /* ===== 渐变缓存：同一套坐标+配色只创建一次（渐变在绘制时才按 CTM 求值，可安全复用） ===== */
 function cachedLG(ctx, x0, y0, x1, y1, stops) {
@@ -4397,8 +4466,9 @@ function drawThemeDeco(ctx, kind, m, slot) {
   const T = KIND_THEME[kind];
   if (!T) return;
   const A = T.accent;
-  const side = slot === 0 ? -1 : 1;   // 第一个挂左边，第二个挂右边
+  const side = slot === 1 ? 1 : -1;   // 第一件挂左、第二件挂右、第三件挂左上
   ctx.save();
+  if (slot === 2) { ctx.translate(0, -26); ctx.scale(0.82, 0.82); }
   switch (kind) {
     case 'frost': {
       // 机体上凝结的冰晶 + 冷雾
@@ -4673,6 +4743,241 @@ function drawThemeDeco(ctx, kind, m, slot) {
       });
       break;
     }
+    case 'spikes': {
+      // 底边一排尖钉
+      ctx.fillStyle = '#c3cdd8';
+      for (let i = 0; i < 5; i++) {
+        const px = -22 + i * 11;
+        ctx.beginPath();
+        ctx.moveTo(px, 30); ctx.lineTo(px + 4, 16); ctx.lineTo(px + 8, 30);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+      ctx.lineWidth = 0.9;
+      for (let i = 0; i < 5; i++) {
+        const px = -22 + i * 11;
+        ctx.beginPath(); ctx.moveTo(px + 1, 29); ctx.lineTo(px + 4, 17); ctx.stroke();
+      }
+      break;
+    }
+    case 'shield': {
+      // 侧挂发生器 + 一片半透明力场
+      const cx0 = side * 24;
+      ctx.fillStyle = '#3d5568';
+      rr(ctx, cx0 - 5, -6, 10, 16, 3); ctx.fill();
+      emissive(ctx, A, 9, () => {
+        ctx.fillStyle = hexA(A, 0.22);
+        ctx.beginPath();
+        ctx.ellipse(cx0 + side * 9, 1, 8, 17, side * 0.22, 0, TAU); ctx.fill();
+        ctx.strokeStyle = hexA(A, 0.8);
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.ellipse(cx0 + side * 9, 1, 8, 17, side * 0.22, 0, TAU); ctx.stroke();
+      });
+      break;
+    }
+    case 'booster': {
+      // 侧挂散热鳍 + 跳动的能量条
+      const cx0 = side * 23;
+      ctx.fillStyle = '#54627a';
+      for (let i = 0; i < 3; i++) { rr(ctx, cx0 - 6, -10 + i * 9, 12, 5, 2); ctx.fill(); }
+      emissive(ctx, A, 8, () => {
+        ctx.fillStyle = A;
+        const k = 0.5 + Math.sin(time * 9) * 0.5;
+        rr(ctx, cx0 - 4, 10, 8, 2 + k * 5, 1.4); ctx.fill();
+      });
+      break;
+    }
+    case 'saw': {
+      // 侧挂一片转着的锯轮
+      const cx0 = side * 26;
+      ctx.save();
+      ctx.translate(cx0, 4);
+      ctx.rotate(time * 7 * side);
+      ctx.fillStyle = '#c2ccd8';
+      ctx.beginPath(); ctx.arc(0, 0, 10, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#8c97a4';
+      for (let i = 0; i < 8; i++) {
+        const a = i * TAU / 8;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 9, Math.sin(a) * 9);
+        ctx.lineTo(Math.cos(a + 0.26) * 14, Math.sin(a + 0.26) * 14);
+        ctx.lineTo(Math.cos(a + 0.5) * 9, Math.sin(a + 0.5) * 9);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = '#39485a';
+      ctx.beginPath(); ctx.arc(0, 0, 3.4, 0, TAU); ctx.fill();
+      ctx.restore();
+      break;
+    }
+    case 'emp': {
+      // 顶上一根天线，一圈圈往外推的脉冲
+      ctx.strokeStyle = '#7f8ca0';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(side * 14, -18); ctx.lineTo(side * 14, -34); ctx.stroke();
+      ctx.fillStyle = A;
+      ctx.beginPath(); ctx.arc(side * 14, -36, 3, 0, TAU); ctx.fill();
+      ctx.strokeStyle = hexA(A, 0.75);
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 2; i++) {
+        const ph = (time * 1.1 + i * 0.5) % 1;
+        ctx.globalAlpha = 0.75 * (1 - ph);
+        ctx.beginPath(); ctx.arc(side * 14, -36, 4 + ph * 16, -Math.PI * 0.9, -Math.PI * 0.1); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'aa': {
+      // 侧挂一根朝天的小高炮
+      const cx0 = side * 21;
+      ctx.save();
+      ctx.translate(cx0, 2);
+      ctx.rotate(side * -0.5);
+      ctx.fillStyle = '#4c5d70';
+      rr(ctx, -5, -4, 10, 12, 3); ctx.fill();
+      ctx.fillStyle = '#7f92a6';
+      rr(ctx, -3, -22, 6, 20, 2.5); ctx.fill();
+      ctx.fillStyle = '#151b21';
+      rr(ctx, -2, -25, 4, 5, 1.6); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = A;
+      ctx.beginPath(); ctx.arc(cx0, 10, 2.2, 0, TAU); ctx.fill();
+      break;
+    }
+    case 'deflect': {
+      // 机体前方立一块六边形力场
+      emissive(ctx, A, 9, () => {
+        ctx.strokeStyle = hexA(A, 0.85);
+        ctx.lineWidth = 1.8;
+        ctx.fillStyle = hexA(A, 0.16);
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = i * TAU / 6 - Math.PI / 2;
+          const px = 30 + Math.cos(a) * 9, py = 2 + Math.sin(a) * 15;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      });
+      break;
+    }
+    case 'sonic': {
+      // 侧面喇叭口 + 扩散的声波
+      const cx0 = side * 22;
+      ctx.fillStyle = '#6b7b8d';
+      ctx.beginPath();
+      ctx.moveTo(cx0, -6); ctx.lineTo(cx0 + side * 13, -13);
+      ctx.lineTo(cx0 + side * 13, 15); ctx.lineTo(cx0, 8);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = hexA(A, 0.8);
+      ctx.lineWidth = 1.6;
+      for (let i = 0; i < 3; i++) {
+        const ph = (time * 1.4 + i * 0.34) % 1;
+        ctx.globalAlpha = 0.8 * (1 - ph);
+        ctx.beginPath();
+        ctx.arc(cx0 + side * 13, 1, 4 + ph * 14, side > 0 ? -1 : Math.PI - 1, side > 0 ? 1 : Math.PI + 1);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'drone': {
+      // 头顶盘旋的小无人机
+      const a = time * 1.6 + (side > 0 ? Math.PI : 0);
+      const dx = Math.cos(a) * 22, dy = -34 + Math.sin(a) * 5;
+      ctx.strokeStyle = '#39434f'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(dx - 7, dy); ctx.lineTo(dx + 7, dy); ctx.stroke();
+      ctx.fillStyle = 'rgba(220,235,250,0.34)';
+      ctx.beginPath(); ctx.ellipse(dx - 7, dy - 2, 6, 1.6, 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(dx + 7, dy - 2, 6, 1.6, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#7d8ea0';
+      rr(ctx, dx - 5, dy, 10, 6, 2.5); ctx.fill();
+      ctx.fillStyle = A;
+      ctx.beginPath(); ctx.arc(dx, dy + 3, 1.6, 0, TAU); ctx.fill();
+      break;
+    }
+    case 'gravity': {
+      // 脚下一个旋涡，几块被吸起来的碎石
+      ctx.save();
+      ctx.translate(0, 30);
+      ctx.strokeStyle = hexA(A, 0.7);
+      ctx.lineWidth = 1.6;
+      for (let i = 0; i < 2; i++) {
+        ctx.beginPath();
+        for (let k = 0; k <= 18; k++) {
+          const u = k / 18, ang = time * 2 + i * Math.PI + u * 5;
+          const rad = 4 + u * 22;
+          const px = Math.cos(ang) * rad, py = Math.sin(ang) * rad * 0.34;
+          if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.fillStyle = '#8a93a4';
+      for (let i = 0; i < 3; i++) {
+        const ph = (time * 0.9 + i * 0.33) % 1;
+        ctx.globalAlpha = 1 - ph;
+        ctx.beginPath();
+        ctx.arc(Math.cos(i * 2.3 + time) * 20, 30 - ph * 20, 2, 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      break;
+    }
+    case 'prism': {
+      // 侧挂三棱镜，透出一束分光
+      const cx0 = side * 24;
+      ctx.fillStyle = 'rgba(255,220,245,0.45)';
+      ctx.beginPath();
+      ctx.moveTo(cx0, -14); ctx.lineTo(cx0 + side * 11, 6); ctx.lineTo(cx0 - side * 11, 6);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 1.2; ctx.stroke();
+      const cols = ['#ff8ab0', '#ffd764', '#8ff0e0'];
+      for (let i = 0; i < 3; i++) {
+        ctx.strokeStyle = hexA(cols[i], 0.75);
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(cx0, 4); ctx.lineTo(cx0 + side * 20, 14 + i * 5);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'net': {
+      // 侧挂一卷捕网 + 配重球
+      const cx0 = side * 23;
+      ctx.strokeStyle = hexA(A, 0.85);
+      ctx.lineWidth = 1.3;
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath(); ctx.moveTo(cx0 - 9, i * 6 + 2); ctx.lineTo(cx0 + 9, i * 6 + 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx0 + i * 6, -6); ctx.lineTo(cx0 + i * 6, 10); ctx.stroke();
+      }
+      ctx.fillStyle = '#d8f0dc';
+      for (const [ox, oy] of [[-9, -6], [9, -6], [-9, 10], [9, 10]]) {
+        ctx.beginPath(); ctx.arc(cx0 + ox, oy, 2.2, 0, TAU); ctx.fill();
+      }
+      break;
+    }
+    case 'hunter': {
+      // 侧挂一发小导弹 + 转着的雷达碟
+      const cx0 = side * 23;
+      ctx.save();
+      ctx.translate(cx0, 4);
+      ctx.rotate(side * -0.6);
+      ctx.fillStyle = '#d5dde6';
+      rr(ctx, -9, -3, 18, 6, 3); ctx.fill();
+      ctx.fillStyle = '#ff7a4a';
+      ctx.beginPath(); ctx.moveTo(9, -3); ctx.lineTo(15, 0); ctx.lineTo(9, 3); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#9fb4c8';
+      ctx.beginPath(); ctx.moveTo(-8, -3); ctx.lineTo(-12, -7); ctx.lineTo(-5, -3); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.translate(cx0, -18);
+      ctx.scale(Math.cos(time * 2), 1);
+      ctx.fillStyle = hexA(A, 0.85);
+      ctx.beginPath(); ctx.ellipse(0, 0, 6, 4.4, 0, 0, TAU); ctx.fill();
+      ctx.restore();
+      break;
+    }
     case 'shot': {
       // 侧挂副炮管（朝机体外侧伸出）
       const cx0 = side * 20;
@@ -4720,31 +5025,10 @@ function drawMachine(ctx, type, x, y, s, m) {
   curTheme = null;
   // 元素表层：直接长在机体上，不额外挂东西、也不占徽章位
   if (elemMod && pri && !ELEM_TIER[pri.kind]) drawElementSkin(ctx, elemMod.kind, m);
-  // 副能力的外挂结构（最多两件，最强的两个普通副模块）
+  // 杂交进来的能力，一律长在机体上：最强的三件挂出实体结构，
+  // 不再在旁边浮徽章圆圈——玩家要的是「我的机器变成了什么」，不是「旁边多了几个圈」。
   if (!classicPair) {
-    for (let i = 0; i < subMods.length && i < 2; i++) drawThemeDeco(ctx, subMods[i].kind, m, i);
-  }
-  // 副能力徽章：环绕机体排布，数量不限（超过 8 个显示 +N）。元素不挂徽章。
-  const extra = subMods.length;
-  const shown = Math.min(extra, EMBLEM_POS.length);
-  for (let i = 0; i < shown; i++) {
-    const pos = EMBLEM_POS[i];
-    drawEmblem(ctx, subMods[i], pos[0], pos[1]);
-  }
-  if (extra > shown) {
-    ctx.save();
-    ctx.translate(0, 46);
-    ctx.fillStyle = 'rgba(14,20,28,0.94)';
-    rr(ctx, -16, -9, 32, 18, 8); ctx.fill();
-    ctx.strokeStyle = '#ffc531';
-    ctx.lineWidth = 1.6;
-    rr(ctx, -16, -9, 32, 18, 8); ctx.stroke();
-    ctx.fillStyle = '#ffc531';
-    ctx.font = '800 12px "PingFang SC","Microsoft YaHei",sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('+' + (extra - shown), 0, 0);
-    ctx.restore();
+    for (let i = 0; i < subMods.length && i < 3; i++) drawThemeDeco(ctx, subMods[i].kind, m, i);
   }
   ctx.restore();
   // 被电弧瘫痪：头顶转电弧
@@ -5916,116 +6200,6 @@ function drawLevelDecor(ctx, tl) {
 }
 
 // 副模块徽章
-function drawEmblem(ctx, mod, px, py) {
-  const col = EMBLEM_COLOR[mod.kind] || '#8fa1b8';
-  ctx.save();
-  ctx.translate(px === undefined ? 29 : px, py === undefined ? -36 : py);
-  ctx.fillStyle = 'rgba(14,20,28,0.94)';
-  ctx.beginPath(); ctx.arc(0, 0, 11, 0, TAU); ctx.fill();
-  ctx.strokeStyle = col;
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(0, 0, 11, 0, TAU); ctx.stroke();
-  ctx.strokeStyle = col;
-  ctx.fillStyle = col;
-  ctx.lineWidth = 1.8;
-  switch (mod.kind) {
-    case 'shot':
-      ctx.beginPath(); ctx.arc(-2, 0, 3.4, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(1, 0); ctx.lineTo(7, 0); ctx.stroke();
-      break;
-    case 'energy':
-    case 'zap':
-      ctx.beginPath();
-      ctx.moveTo(2, -6); ctx.lineTo(-3, 1); ctx.lineTo(0, 1); ctx.lineTo(-2, 6); ctx.lineTo(3, -1); ctx.lineTo(0, -1);
-      ctx.closePath(); ctx.fill();
-      break;
-    case 'armor':
-      ctx.beginPath();
-      ctx.moveTo(0, -6); ctx.lineTo(5, -3); ctx.lineTo(5, 2); ctx.quadraticCurveTo(5, 6, 0, 7);
-      ctx.quadraticCurveTo(-5, 6, -5, 2); ctx.lineTo(-5, -3); ctx.closePath(); ctx.stroke();
-      break;
-    case 'melee':
-      ctx.beginPath(); ctx.arc(1, 0, 4.2, 0, TAU); ctx.fill();
-      ctx.fillRect(-7, -2, 5, 4);
-      break;
-    case 'frost':
-      for (let i = 0; i < 3; i++) {
-        const a = i * Math.PI / 3;
-        ctx.beginPath();
-        ctx.moveTo(-Math.cos(a) * 6, -Math.sin(a) * 6);
-        ctx.lineTo(Math.cos(a) * 6, Math.sin(a) * 6);
-        ctx.stroke();
-      }
-      break;
-    case 'shred':
-      ctx.beginPath();
-      ctx.moveTo(-6, -2);
-      for (let i = 0; i < 4; i++) {
-        ctx.lineTo(-4.5 + i * 3, 3);
-        ctx.lineTo(-3 + i * 3, -2);
-      }
-      ctx.stroke();
-      break;
-    case 'magnet':
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(0, 1, 4.5, Math.PI, 0); ctx.stroke();
-      ctx.fillRect(-6, 1, 3, 4); ctx.fillRect(3, 1, 3, 4);
-      break;
-    case 'laser':
-      ctx.beginPath(); ctx.moveTo(-6, -2); ctx.lineTo(6, -2); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(-6, 2); ctx.lineTo(6, 2); ctx.stroke();
-      ctx.beginPath(); ctx.arc(6, 0, 2, 0, TAU); ctx.fill();
-      break;
-    case 'rocket':
-      ctx.beginPath();
-      ctx.moveTo(0, -7); ctx.lineTo(4, 3); ctx.lineTo(0, 1); ctx.lineTo(-4, 3);
-      ctx.closePath(); ctx.fill();
-      break;
-    case 'mine':
-      ctx.beginPath(); ctx.ellipse(0, 2, 6, 3.4, 0, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(0, -1); ctx.lineTo(0, -6); ctx.stroke();
-      break;
-    case 'flame':
-      ctx.beginPath();
-      ctx.moveTo(0, -7);
-      ctx.quadraticCurveTo(5, -1, 3, 3);
-      ctx.quadraticCurveTo(0, 7, -3, 3);
-      ctx.quadraticCurveTo(-5, -1, 0, -7);
-      ctx.closePath(); ctx.fill();
-      break;
-    case 'poison':
-      ctx.beginPath(); ctx.arc(0, -1, 4.4, 0, TAU); ctx.stroke();
-      ctx.beginPath(); ctx.arc(0, -1, 1.6, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(-4, 5); ctx.lineTo(4, 5); ctx.stroke();
-      break;
-    case 'mortar':
-      ctx.save();
-      ctx.rotate(-0.6);
-      ctx.fillRect(-2.5, -7, 5, 12);
-      ctx.restore();
-      ctx.beginPath(); ctx.arc(0, 6, 2.2, 0, TAU); ctx.fill();
-      break;
-    case 'sniper':
-      ctx.beginPath(); ctx.arc(0, 0, 5.2, 0, TAU); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(-7, 0); ctx.lineTo(7, 0);
-      ctx.moveTo(0, -7); ctx.lineTo(0, 7);
-      ctx.stroke();
-      break;
-    case 'repair':
-      ctx.fillRect(-1.8, -6, 3.6, 12);
-      ctx.fillRect(-6, -1.8, 12, 3.6);
-      break;
-  }
-  if (mod.lv > 1) {
-    ctx.fillStyle = '#ffc531';
-    const dots = Math.min(mod.lv, 5);
-    for (let i = 0; i < dots; i++) {
-      ctx.beginPath(); ctx.arc(-((dots - 1) * 3) + i * 6, 14, 2, 0, TAU); ctx.fill();
-    }
-  }
-  ctx.restore();
-}
 
 // 圆角血条
 function drawBar(ctx, cx, by, bw, bh, ratio, color) {
@@ -11260,6 +11434,7 @@ window.__game = {
   setEnemyX: (i, x) => { if (enemies[i]) enemies[i].x = x; },
   enemyState: i => (enemies[i] ? { hp: enemies[i].hp, maxHp: enemies[i].maxHp, x: enemies[i].x } : null),
   enemyFly: i => (enemies[i] ? !!enemies[i].fly : null),
+  enemyFrozen: i => (enemies[i] ? +(enemies[i].frozenT || 0).toFixed(2) : null),
   enemyUnder: i => (enemies[i] ? !!enemies[i].under : null),
   enemyShatter: i => (enemies[i] ? (enemies[i].shatter || 0) : null),
   get poolCount() { return pools.length; },
