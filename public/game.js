@@ -4216,7 +4216,7 @@ const KIND_THEME = {
   aa:     { tint: '#2f8ba8', amt: 0.4,  accent: '#a8e8ff' },
   net:    { tint: '#3f8a60', amt: 0.4,  accent: '#9fe0b0' },
   hunter: { tint: '#b35a26', amt: 0.42, accent: '#ffb98a' },
-  obsidian:   { tint: '#2b2340', amt: 0.66, accent: '#c4a4ff' },
+  obsidian:   { tint: '#191124', amt: 0.8,  accent: '#c4a4ff' },
   plasma:     { tint: '#a02a7a', amt: 0.5,  accent: '#ff8ae8' },
   stormfrost: { tint: '#2f7aa8', amt: 0.5,  accent: '#9df0ff' },
   corrosion:  { tint: '#76881e', amt: 0.5,  accent: '#e8ff7a' },
@@ -4268,6 +4268,131 @@ function themed(P) {
 }
 
 // 副能力的外挂结构：直接改变机体轮廓
+/* 元素表层：把整台机器「变成」这种材质。
+   刻意不画任何外挂零件、也不占徽章位——附了元素的机器应该是
+   「黑曜石做的路障」，而不是「挂着黑曜石模块的路障」。 */
+function drawElementSkin(ctx, kind, m) {
+  const t = time;
+  const T = KIND_THEME[kind];
+  if (!T) return;
+  const A = T.accent;
+  ctx.save();
+  if (kind === 'obsidian') {
+    // 黑曜石：机体本身已经被染成黑玻璃色，这里只补「长出来的晶体」。
+    // 刻意用少数几笔硬边——多画几道线只会像划痕，不像石头。
+    const shards = [[-21, 14, -26, -6, -14, 12], [19, 15, 25, -4, 13, 13],
+                    [-8, -26, -3, -40, 3, -25], [9, -24, 15, -35, 18, -22]];
+    for (const [x1, y1, x2, y2, x3, y3] of shards) {
+      ctx.fillStyle = '#140e20';
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(196,164,255,0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+    // 玻璃反光：沿左上轮廓一道细高光
+    ctx.strokeStyle = 'rgba(214,192,255,0.5)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-17, -18); ctx.lineTo(-11, -25); ctx.lineTo(2, -27);
+    ctx.stroke();
+    // 还没冷透的一点熔芯
+    emissive(ctx, 'rgba(255,140,80,0.9)', 9, () => {
+      ctx.fillStyle = 'rgba(255,150,90,' + (0.6 + Math.sin(t * 2.4) * 0.25) + ')';
+      ctx.beginPath(); ctx.ellipse(0, 2, 5, 2.2, 0, 0, TAU); ctx.fill();
+    });
+  } else if (kind === 'plasma') {
+    // 等离子：两枚电极之间夹着一道稳定的弧，外面一层很淡的粉紫辉光
+    emissive(ctx, A, 11, () => {
+      ctx.strokeStyle = hexA(A, 0.32);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(0, -6, 24, 26, 0, 0, TAU); ctx.stroke();
+    });
+    const ex = [-14, 16], ey = [-20, -4];
+    ctx.fillStyle = '#ffd7f6';
+    for (let i = 0; i < 2; i++) {
+      ctx.beginPath(); ctx.arc(ex[i], ey[i], 2.6, 0, TAU); ctx.fill();
+    }
+    emissive(ctx, A, 10, () => {
+      ctx.strokeStyle = '#ffd7f6';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(ex[0], ey[0]);
+      for (let k = 1; k <= 3; k++) {
+        const u = k / 4;
+        ctx.lineTo(ex[0] + (ex[1] - ex[0]) * u,
+                   ey[0] + (ey[1] - ey[0]) * u + Math.sin(t * 16 + k * 2) * 5);
+      }
+      ctx.lineTo(ex[1], ey[1]);
+      ctx.stroke();
+    });
+    ctx.fillStyle = 'rgba(157,240,255,0.8)';
+    for (let i = 0; i < 2; i++) {
+      const ph = (t * 1.2 + i * 0.5) % 1;
+      ctx.globalAlpha = 0.8 * (1 - ph);
+      ctx.beginPath(); ctx.arc(Math.sin(i * 3 + t * 2) * 13, 10 - ph * 30, 1.8, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  } else if (kind === 'stormfrost') {
+    // 顶面结霜 + 挂冰棱 + 偶尔迸一下电
+    ctx.fillStyle = 'rgba(224,244,255,0.55)';
+    ctx.beginPath();
+    ctx.moveTo(-22, -24); ctx.lineTo(-14, -30); ctx.lineTo(0, -27);
+    ctx.lineTo(13, -31); ctx.lineTo(22, -24); ctx.lineTo(22, -19); ctx.lineTo(-22, -19);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(224,244,255,0.85)';
+    for (const [ix, ih] of [[-18, 10], [-9, 6], [8, 9], [17, 6]]) {
+      ctx.beginPath();
+      ctx.moveTo(ix, -19); ctx.lineTo(ix + 3, -19); ctx.lineTo(ix + 1.5, -19 + ih);
+      ctx.closePath(); ctx.fill();
+    }
+    if (Math.sin(t * 4) > 0.8) {
+      ctx.strokeStyle = 'rgba(157,240,255,0.9)';
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(-10, -22); ctx.lineTo(-2, -12); ctx.lineTo(4, -18); ctx.lineTo(12, -8);
+      ctx.stroke();
+    }
+  } else if (kind === 'corrosion') {
+    // 酸液顺着外壳往下淌
+    ctx.fillStyle = 'rgba(200,240,60,0.26)';
+    ctx.beginPath();
+    ctx.moveTo(-22, -22); ctx.lineTo(22, -26); ctx.lineTo(20, 12); ctx.lineTo(-20, 14);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(216,245,66,0.85)';
+    for (let i = 0; i < 4; i++) {
+      const ph = (t * 0.7 + i * 0.27) % 1;
+      const dx = -16 + i * 11;
+      ctx.beginPath();
+      ctx.ellipse(dx, -18 + ph * 34, 1.8, 2.8 + ph * 2, 0, 0, TAU);
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(232,255,122,0.55)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(-20, -6); ctx.lineTo(20, -10); ctx.stroke();
+  } else {
+    // 六种奇点共用：机体外裹一层同色的塌缩场 + 两条环绕的碎屑轨
+    emissive(ctx, A, 10, () => {
+      ctx.strokeStyle = hexA(A, 0.6);
+      ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.ellipse(0, -8, 27, 30, 0, 0, TAU); ctx.stroke();
+    });
+    for (let k = 0; k < 2; k++) {
+      ctx.save();
+      ctx.translate(0, -8);
+      ctx.rotate(t * (0.8 + k * 0.5) * (k ? -1 : 1));
+      ctx.strokeStyle = hexA(A, 0.45);
+      ctx.lineWidth = 1.3;
+      ctx.beginPath(); ctx.ellipse(0, 0, 26, 9, 0, 0, TAU); ctx.stroke();
+      ctx.fillStyle = A;
+      ctx.beginPath(); ctx.arc(26, 0, 2.2, 0, TAU); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
 function drawThemeDeco(ctx, kind, m, slot) {
   const T = KIND_THEME[kind];
   if (!T) return;
@@ -4586,19 +4711,25 @@ function drawMachine(ctx, type, x, y, s, m) {
   if (pri) drawLevelDecor(ctx, totalLv(mods));
   // 副能力决定机体配色；经典组合保留自己的专属造型，不再额外染色
   const classicPair = type === 'arcturret' || type === 'magshredder' || type === 'frostwall' || type === 'frostcannon';
-  curTheme = (!classicPair && mods[1]) ? mods[1].kind : null;
+  // 元素是「材质」不是「挂件」：它决定整台机器的质感，而且优先于普通副能力。
+  // 黑曜石装甲路障应该是一堵黑玻璃的墙，不是一堵挂着黑曜石零件的墙。
+  const elemMod = mods.find(x => ELEM_TIER[x.kind]);
+  const subMods = mods.filter((x, i) => i > 0 && !ELEM_TIER[x.kind]);
+  curTheme = classicPair ? null : (elemMod ? elemMod.kind : (mods[1] ? mods[1].kind : null));
   drawChassis(ctx, type, pri, m);
   curTheme = null;
-  // 副能力的外挂结构（最多两件，最强的两个副模块）
+  // 元素表层：直接长在机体上，不额外挂东西、也不占徽章位
+  if (elemMod && pri && !ELEM_TIER[pri.kind]) drawElementSkin(ctx, elemMod.kind, m);
+  // 副能力的外挂结构（最多两件，最强的两个普通副模块）
   if (!classicPair) {
-    for (let i = 1; i < mods.length && i <= 2; i++) drawThemeDeco(ctx, mods[i].kind, m, i - 1);
+    for (let i = 0; i < subMods.length && i < 2; i++) drawThemeDeco(ctx, subMods[i].kind, m, i);
   }
-  // 副能力徽章：环绕机体排布，数量不限（超过 8 个显示 +N）
-  const extra = mods.length - 1;
+  // 副能力徽章：环绕机体排布，数量不限（超过 8 个显示 +N）。元素不挂徽章。
+  const extra = subMods.length;
   const shown = Math.min(extra, EMBLEM_POS.length);
-  for (let i = 1; i <= shown; i++) {
-    const pos = EMBLEM_POS[i - 1];
-    drawEmblem(ctx, mods[i], pos[0], pos[1]);
+  for (let i = 0; i < shown; i++) {
+    const pos = EMBLEM_POS[i];
+    drawEmblem(ctx, subMods[i], pos[0], pos[1]);
   }
   if (extra > shown) {
     ctx.save();
@@ -11137,6 +11268,27 @@ window.__game = {
   get enemyList() { return enemies.filter(e => !e.dead).map(e => ({ row: e.row, x: e.x, fly: !!e.fly })); },
   copyAt: (r, c) => copyMachine(r, c),
   totalLvAt: (r, c) => (grid[r][c] && grid[r][c].modules ? totalLv(grid[r][c].modules) : 0),
+  // 调试用：把一组「模块配方」放大画到指定画布上，方便逐个看造型
+  renderGallery: (ctx, specs, w, h) => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#0e141b';
+    ctx.fillRect(0, 0, w, h);
+    const cols = 4, cw = w / cols, ch = h / Math.ceil(specs.length / cols);
+    specs.forEach(([label, mods], i) => {
+      const cx2 = (i % cols) * cw + cw / 2;
+      const cy2 = Math.floor(i / cols) * ch + ch * 0.52;
+      const sorted = sortModules(mods.map(x => ({ kind: x.kind, lv: x.lv })));
+      const fake = { modules: sorted, hp: 100, maxHp: 100, t: 0, cd: 0, chew: 0, spin: 0,
+                     flash: 0, recoil: 0, pulse: 0, armed: true, mt: {}, mcd: {}, charge: 0,
+                     sh: 0, maxSh: 0, haste: 0, shHit: 0, stunT: 0 };
+      drawMachine(ctx, typeOfModules(sorted), cx2, cy2, 2.1, fake);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = '#cfe0f0';
+      ctx.font = 'bold 15px "PingFang SC", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, cx2, Math.floor(i / cols) * ch + ch - 12);
+    });
+  },
   get machineCount() { let n = 0; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (grid[r][c]) n++; return n; },
   startKillLog: () => { killLog = []; },
   get killLog() { return killLog ? killLog.slice() : null; },
