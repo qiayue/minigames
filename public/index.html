@@ -376,6 +376,20 @@
   .stageBtn.done { border-color: var(--ok); color: var(--ok); }
   .stageBtn.done.boss b { color: var(--ok); }
   .stageBtn:disabled { opacity: .3; cursor: default; }
+  .styleRow { display: flex; gap: 8px; margin: 0 0 10px; }
+  .styleBtn {
+    flex: 1 1 0; padding: 8px 6px; border-radius: 10px; cursor: pointer;
+    background: var(--panel2); color: var(--dim); border: 2px solid var(--line);
+    font-size: 11px; font-weight: 600; line-height: 1.35;
+  }
+  .styleBtn b { display: block; font-size: 14px; font-weight: 800; color: var(--text); margin-bottom: 1px; }
+  .styleBtn:hover { border-color: var(--accent2); }
+  .styleBtn.on { border-color: var(--ok); background: rgba(88, 214, 139, .12); }
+  .styleBtn.on b { color: var(--ok); }
+  .styleWarn { font-size: 11px; color: var(--accent); margin: -4px 0 8px; text-align: left; }
+  body.compact .styleBtn { padding: 5px 4px; font-size: 9px; }
+  body.compact .styleBtn b { font-size: 11px; }
+  body.compact .styleWarn { font-size: 9px; }
   #resumeCampaign {
     margin: 0 auto 10px; display: block; border: 0; border-radius: 10px; cursor: pointer;
     padding: 8px 20px; font-size: 14px; font-weight: 800; color: #04301e;
@@ -656,7 +670,7 @@
         <button class="bigBtn creative" id="startCreativeBtn">🛠️ 创造模式</button>
         <button class="bigBtn alt" id="menuBoardBtn">🏆 排行榜</button>
       </div>
-      <div class="modeNote">战役：四张地图逐关推进，每张图最后一关打专属 Boss · 盲盒：拼手气 · 普通：经典种卡 · 创造：沙盒</div>
+      <div class="modeNote">战役：先挑玩法，再挑地图与关卡 —— 每张图 10 关，第 10 关是专属 Boss · 单局模式：盲盒拼手气 / 普通种卡 / 创造沙盒</div>
       <div id="stageSel" style="display:none; margin-top:12px;"></div>
       <div id="menuBoard" style="margin-top:14px; display:none;"></div>
     </div>
