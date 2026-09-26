@@ -353,26 +353,34 @@
     box-shadow: 0 4px 0 #1d6a46, 0 8px 20px rgba(80, 220, 150, .3); color: #04301e;
   }
   /* 战役关卡选择 */
-  #stageSel { max-width: 640px; margin-left: auto; margin-right: auto; max-height: 62vh; overflow-y: auto; }
+  #stageSel { max-width: 720px; margin-left: auto; margin-right: auto; max-height: 58vh; overflow-y: auto; }
   .ov.picking .howto { display: none; }
   .ov.picking .modeNote { margin-top: 6px; }
-  .mapRow { margin-bottom: 10px; text-align: left; }
+  .mapRow { margin-bottom: 9px; text-align: left; }
   .mapRow h4 {
-    margin: 0 0 5px; font-size: 13px; color: var(--text); font-weight: 800;
+    margin: 0 0 4px; font-size: 13px; color: var(--text); font-weight: 800;
     display: flex; align-items: baseline; gap: 7px;
   }
   .mapRow h4 small { font-size: 11px; color: var(--dim); font-weight: 600; }
-  .stageBtns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stageBtns { display: flex; gap: 4px; align-items: stretch; }
   .stageBtn {
-    flex: 1 1 0; min-width: 62px; padding: 7px 4px; border-radius: 9px;
+    flex: 1 1 0; min-width: 0; padding: 6px 2px; border-radius: 8px;
     background: var(--panel2); color: var(--text); border: 1px solid var(--line);
-    font-size: 12px; font-weight: 700; cursor: pointer; line-height: 1.35;
+    font-size: 13px; font-weight: 800; cursor: pointer; line-height: 1.2;
   }
-  .stageBtn b { display: block; font-size: 14px; }
   .stageBtn:hover:not(:disabled) { border-color: var(--ok); background: var(--panel); }
-  .stageBtn.boss { border-color: rgba(255,93,93,.55); }
+  .stageBtn.boss {
+    flex: 2.6 1 0; border-color: rgba(255,93,93,.55); font-size: 11px; font-weight: 700;
+  }
+  .stageBtn.boss b { display: block; font-size: 12px; color: var(--danger); }
   .stageBtn.done { border-color: var(--ok); color: var(--ok); }
-  .stageBtn:disabled { opacity: .35; cursor: default; }
+  .stageBtn.done.boss b { color: var(--ok); }
+  .stageBtn:disabled { opacity: .3; cursor: default; }
+  #resumeCampaign {
+    margin: 0 auto 10px; display: block; border: 0; border-radius: 10px; cursor: pointer;
+    padding: 8px 20px; font-size: 14px; font-weight: 800; color: #04301e;
+    background: linear-gradient(160deg, #8fe3b0, #2f9a68);
+  }
   .bigBtn.creative {
     background: linear-gradient(160deg, #d7b3ff, #9a5fe0);
     box-shadow: 0 4px 0 #6d3aa8, 0 8px 18px rgba(160, 110, 230, .25); color: #1d0f30;
@@ -485,8 +493,10 @@
   body.compact .mapRow h4 { font-size: 11px; margin-bottom: 3px; gap: 5px; }
   body.compact .mapRow h4 small { font-size: 9px; }
   body.compact .stageBtns { gap: 4px; }
-  body.compact .stageBtn { padding: 4px 3px; font-size: 9px; min-width: 50px; line-height: 1.25; }
-  body.compact .stageBtn b { font-size: 11px; }
+  body.compact .stageBtn { padding: 3px 1px; font-size: 10px; line-height: 1.2; }
+  body.compact .stageBtn.boss { font-size: 9px; }
+  body.compact .stageBtn.boss b { font-size: 10px; }
+  body.compact #resumeCampaign { padding: 5px 14px; font-size: 12px; margin-bottom: 6px; }
   body.compact #endStats .st { padding: 5px 12px; font-size: 11px; }
   body.compact #endStats .st b { font-size: 17px; }
   body.compact #board, body.compact .board { max-height: 130px; min-width: 220px; font-size: 12px; }
@@ -665,6 +675,15 @@
       <div class="btnRow">
         <button class="bigBtn" id="resumeBtn">继续游戏</button>
         <button class="bigBtn alt" id="pauseRestartBtn">重新开始</button>
+      </div>
+    </div>
+
+    <div class="ov" id="clear">
+      <h1 id="clearTitle"></h1>
+      <div class="sub" id="clearSub"></div>
+      <div class="btnRow">
+        <button class="bigBtn" id="nextStageBtn">▶ 下一关</button>
+        <button class="bigBtn alt" id="stopCampaignBtn">■ 回菜单</button>
       </div>
     </div>
 
