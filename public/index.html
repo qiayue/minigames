@@ -348,6 +348,31 @@
     background: linear-gradient(160deg, #8fd0ff, #3f8fbf);
     box-shadow: 0 4px 0 #2a6a92, 0 8px 18px rgba(80, 170, 220, .25); color: #082334;
   }
+  .bigBtn.campaign {
+    background: linear-gradient(160deg, #8fe3b0, #2f9a68);
+    box-shadow: 0 4px 0 #1d6a46, 0 8px 20px rgba(80, 220, 150, .3); color: #04301e;
+  }
+  /* 战役关卡选择 */
+  #stageSel { max-width: 640px; margin-left: auto; margin-right: auto; max-height: 62vh; overflow-y: auto; }
+  .ov.picking .howto { display: none; }
+  .ov.picking .modeNote { margin-top: 6px; }
+  .mapRow { margin-bottom: 10px; text-align: left; }
+  .mapRow h4 {
+    margin: 0 0 5px; font-size: 13px; color: var(--text); font-weight: 800;
+    display: flex; align-items: baseline; gap: 7px;
+  }
+  .mapRow h4 small { font-size: 11px; color: var(--dim); font-weight: 600; }
+  .stageBtns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .stageBtn {
+    flex: 1 1 0; min-width: 62px; padding: 7px 4px; border-radius: 9px;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    font-size: 12px; font-weight: 700; cursor: pointer; line-height: 1.35;
+  }
+  .stageBtn b { display: block; font-size: 14px; }
+  .stageBtn:hover:not(:disabled) { border-color: var(--ok); background: var(--panel); }
+  .stageBtn.boss { border-color: rgba(255,93,93,.55); }
+  .stageBtn.done { border-color: var(--ok); color: var(--ok); }
+  .stageBtn:disabled { opacity: .35; cursor: default; }
   .bigBtn.creative {
     background: linear-gradient(160deg, #d7b3ff, #9a5fe0);
     box-shadow: 0 4px 0 #6d3aa8, 0 8px 18px rgba(160, 110, 230, .25); color: #1d0f30;
@@ -454,6 +479,14 @@
     max-height: 34vh; overflow-y: auto;
   }
   body.compact .bigBtn { font-size: 14px; padding: 9px 18px; }
+  /* 横屏手机：关卡表要一屏放下四张地图 */
+  body.compact #stageSel { max-height: 54vh; }
+  body.compact .mapRow { margin-bottom: 5px; }
+  body.compact .mapRow h4 { font-size: 11px; margin-bottom: 3px; gap: 5px; }
+  body.compact .mapRow h4 small { font-size: 9px; }
+  body.compact .stageBtns { gap: 4px; }
+  body.compact .stageBtn { padding: 4px 3px; font-size: 9px; min-width: 50px; line-height: 1.25; }
+  body.compact .stageBtn b { font-size: 11px; }
   body.compact #endStats .st { padding: 5px 12px; font-size: 11px; }
   body.compact #endStats .st b { font-size: 17px; }
   body.compact #board, body.compact .board { max-height: 130px; min-width: 220px; font-size: 12px; }
@@ -604,15 +637,17 @@
         <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎；🥊 弹簧拳机近战无视护盾</div>
         <div>🧪 <b>杂交</b>：<b>任意两台机器都能合成</b>！同类升级（炮台→双管→<b>加特林</b>）；异类叠能力，一台机器最多同时拥有 <b>5 种能力</b></div>
         <div>⚠️ <b>新威胁</b>：自爆无人蜂撞机自爆、盾卫机器人的护盾能挡住子弹！</div>
-        <div>🛡️ <b>目标</b>：守住 10 波进攻，别让机器人冲进左侧基地</div>
+        <div>🛡️ <b>目标</b>：守住 10 波进攻，别让机器人冲进左侧基地；<b>战役</b>每关 5 波，四张地图各有专属关底 Boss</div>
       </div>
       <div class="btnRow">
         <button class="bigBtn" id="startBtn">🎁 盲盒模式</button>
         <button class="bigBtn classic" id="startClassicBtn">🃏 普通模式</button>
+        <button class="bigBtn campaign" id="startCampaignBtn">🗺️ 战役</button>
         <button class="bigBtn creative" id="startCreativeBtn">🛠️ 创造模式</button>
         <button class="bigBtn alt" id="menuBoardBtn">🏆 排行榜</button>
       </div>
-      <div class="modeNote">盲盒模式：开盲盒拼手气 · 普通模式：经典种卡玩法 · 创造模式：无限能量、无冷却、敌潮可关</div>
+      <div class="modeNote">战役：四张地图逐关推进，每张图最后一关打专属 Boss · 盲盒：拼手气 · 普通：经典种卡 · 创造：沙盒</div>
+      <div id="stageSel" style="display:none; margin-top:12px;"></div>
       <div id="menuBoard" style="margin-top:14px; display:none;"></div>
     </div>
 
