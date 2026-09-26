@@ -5,14 +5,14 @@
 'use strict';
 
 /* ========== 基础配置 ========== */
-const COLS = 9, ROWS = 5;
-const CELL_W = 96, CELL_H = 100;
+const COLS = 11, ROWS = 6;
+const CELL_W = 92, CELL_H = 94;
 const GRID_X = 64, GRID_Y = 14;
-const W = GRID_X + COLS * CELL_W + 12;   // 940
+const W = GRID_X + COLS * CELL_W + 12;   // 1088
 // 战场右边界：敌人越过这条线才算「上场」。
 // 在这之前双方都不能互相攻击——否则火力会在出生点就把敌人打光，前线永远推不起来。
-const FIELD_X = GRID_X + COLS * CELL_W;  // 928
-const H = GRID_Y + ROWS * CELL_H + 12;   // 526
+const FIELD_X = GRID_X + COLS * CELL_W;  // 1076
+const H = GRID_Y + ROWS * CELL_H + 12;   // 590
 const TOTAL_WAVES = 10;
 
 /* ===== 地图 =====
@@ -20,23 +20,23 @@ const TOTAL_WAVES = 10;
    地形决定谁能走这一行、什么机器放得下，以及背景怎么画。 */
 const MAPS = {
   scrapyard: {
-    name: '废铁厂', icon: '🏭', lanes: 'GGGGG',
+    name: '废铁厂', icon: '🏭', lanes: 'GGGGGG',
     sky: ['#161f2c', '#111823', '#0c1118'],
     cell: [['#1d2735', '#18202c'], ['#18212d', '#141c27']],
     wall: ['#26374f', '#16202e'], rivet: 'rgba(90,115,145,0.35)',
     boss: 'titanking',
-    tip: '五条地面通道，堆废铁的老地方',
+    tip: '六条地面通道，堆废铁的老地方',
   },
   pool: {
-    name: '水池', icon: '🌊', lanes: 'GWWWG',
+    name: '水池', icon: '🌊', lanes: 'GWWWWG',
     sky: ['#12263a', '#0e1e2f', '#0a1622'],
     cell: [['#1b2c3d', '#162433'], ['#182635', '#13202d']],
     wall: ['#214055', '#122430'], rivet: 'rgba(120,180,210,0.35)',
     boss: 'sharklord',
-    tip: '中间三行是水：只有会游、会飞的过得来；地雷与钉刺沉底放不了',
+    tip: '中间四行是水：只有会游、会飞的过得来；地雷与钉刺沉底放不了',
   },
   beach: {
-    name: '落日海滩', icon: '🏖️', lanes: 'GGGWW',
+    name: '落日海滩', icon: '🏖️', lanes: 'GGGGGG', waterCols: [COLS - 4, COLS - 3],
     sky: ['#7b3f2e', '#a85a33', '#d1823f'],
     cell: [['#6e5636', '#5a452a'], ['#664f31', '#523e26']],
     wall: ['#7a5a38', '#3c2c1a'], rivet: 'rgba(255,225,170,0.4)',
@@ -44,10 +44,10 @@ const MAPS = {
     foam: 'rgba(255,205,150,0.5)', caustic: 'rgba(255,215,175,0.16)',
     sand: true,
     boss: 'crabking',
-    tip: '下面两行是浅滩，鲨群从浪里来',
+    tip: '右边有一条竖着的水道：种东西要先铺平台，走进水里的敌人会被拖慢',
   },
   tomb: {
-    name: '黄沙陵墓', icon: '🏜️', lanes: 'GGGGG',
+    name: '黄沙陵墓', icon: '🏜️', lanes: 'GGGGGG',
     sky: ['#6b4a22', '#4a3117', '#2b1c0d'],
     cell: [['#7a5c30', '#654a25'], ['#725429', '#5d4220']],
     wall: ['#8a6a34', '#3f2d14'], rivet: 'rgba(255,225,150,0.45)',
@@ -56,7 +56,7 @@ const MAPS = {
     tip: '五条全是沙道，但法老会抽走你的电量给自己变护卫',
   },
   forge: {
-    name: '熔岩工厂', icon: '🌋', lanes: 'GGLGG',
+    name: '熔岩工厂', icon: '🌋', lanes: 'GGLLGG',
     sky: ['#3a1410', '#25100e', '#160a09'],
     cell: [['#3b2420', '#2e1b18'], ['#341f1c', '#281714']],
     wall: ['#5a2c1e', '#2a1410'], rivet: 'rgba(255,170,110,0.4)',
@@ -64,10 +64,10 @@ const MAPS = {
     foam: 'rgba(255,214,130,0.75)', caustic: 'rgba(255,190,90,0.3)',
     ember: true,
     boss: 'forgegolem',
-    tip: '中间一条是岩浆河：踩得住的只有会飞的；地雷与钉刺放不进去',
+    tip: '中间两条是岩浆河：踩得住的只有会飞的；地雷与钉刺放不进去',
   },
   tundra: {
-    name: '极地冰原', icon: '❄️', lanes: 'GGWGG',
+    name: '极地冰原', icon: '❄️', lanes: 'GGWWGG',
     sky: ['#1c3350', '#16283f', '#0f1b2b'],
     cell: [['#2e4a66', '#25405a'], ['#2a4460', '#213a53'], ],
     wall: ['#35597c', '#182b3f'], rivet: 'rgba(220,240,255,0.5)',
@@ -75,10 +75,10 @@ const MAPS = {
     foam: 'rgba(240,252,255,0.7)', caustic: 'rgba(225,248,255,0.24)',
     snow: true,
     boss: 'frostbehemoth',
-    tip: '中间一条是裂开的冰河；风雪里所有敌人都抗冻',
+    tip: '中间两条是裂开的冰河；风雪里所有敌人都抗冻',
   },
   abyss: {
-    name: '终焉深渊', icon: '🌑', lanes: 'SGWGS',
+    name: '终焉深渊', icon: '🌑', lanes: 'SSGWGS',
     sky: ['#1b1030', '#140b24', '#0b0716'],
     cell: [['#2a1c47', '#22163a'], ['#251940', '#1d1333']],
     wall: ['#3a2560', '#1a1030'], rivet: 'rgba(201,138,255,0.45)',
@@ -86,10 +86,10 @@ const MAPS = {
     foam: 'rgba(216,170,255,0.6)', caustic: 'rgba(201,138,255,0.22)',
     ember: true,
     boss: 'voidsovereign',
-    tip: '最上最下悬空、中间一条虚空之海 —— 五条通道三种地形，什么都来',
+    tip: '上面悬空、中间一条虚空之海 —— 六条通道三种地形，什么都来',
   },
   skyport: {
-    name: '天空之城', icon: '☁️', lanes: 'SSSSS',
+    name: '天空之城', icon: '☁️', lanes: 'SSSSSS',
     sky: ['#2c4272', '#4b72ab', '#82abd6'],
     cell: [['#4a6f9f', '#3e5f8b'], ['#446892', '#385781']],
     wall: ['#44618f', '#233553'], rivet: 'rgba(220,238,255,0.45)',
@@ -140,7 +140,7 @@ function isBossStage() { return campaign() && curStage >= STAGES_PER_MAP; }
 /* 关底 Boss 坐镇后三列：推进到这条线就停下，靠召唤和大招施压。
    这样 Boss 战是一场攻城战 —— 你得凿穿它的护卫打到它，
    而不是站在原地和一台会走过来的血包对拼 DPS。 */
-const KING_HOLD_COL = 6;                      // 九列里的第 7 列（从 0 数）
+const KING_HOLD_COL = COLS - 3;               // 最后三列
 function kingHoldX() { return GRID_X + KING_HOLD_COL * CELL_W + CELL_W * 0.5; }
 // 下一关是谁：同一张图往后数，数完了跳下一张图的第 1 关；全通了返回 null
 function nextStage(map, st) {
@@ -164,8 +164,10 @@ function furthestStage() {
 let advanceT = 0;          // >0 时正在做过关演出，读秒结束自动进下一关
 let advanceTo = null;
 function clearStage() {
+  const wasLocked = !allCardsUnlocked();
   // 创造玩法是沙盒：想在哪张已解锁的图上折腾都行，但不算进度
   if (campStyle !== 'creative') saveCleared(curMap, curStage);
+  const justUnlocked = wasLocked && allCardsUnlocked();
   const nx = nextStage(curMap, curStage);
   if (!nx) { endGame(true); return; }   // 全部通关：正常结算
   state = 'win';
@@ -178,7 +180,13 @@ function clearStage() {
   $('clearTitle').innerHTML = isBossStage()
     ? '☠ <span class="gold">' + ENEMIES[mapDef().boss].name + ' 已被击碎！</span>'
     : '🎉 <span class="gold">第 ' + curStage + ' 关 通过！</span>';
-  $('clearSub').textContent = sameMap
+  if (justUnlocked) {
+    $('clearTitle').innerHTML = '🔓 <span class="gold">全部机器解锁！</span>';
+  }
+  $('clearSub').textContent = justUnlocked
+    ? '打通了 ' + MAPS[STARTER_MAP].name + '，卡槽里的机器全开了 —— 下一站：'
+      + MAPS[nx.map].icon + ' ' + MAPS[nx.map].name
+    : sameMap
     ? '下一关：' + mapDef().name + ' 第 ' + nx.st + ' 关'
     : '新地图解锁：' + MAPS[nx.map].icon + ' ' + MAPS[nx.map].name + ' —— ' + MAPS[nx.map].tip;
   show('clear', true);
@@ -201,34 +209,62 @@ function stopCampaign() {
   show('end', false); show('pauseOv', false); show('menu', true);
 }
 function mapDef() { return MAPS[curMap] || MAPS.scrapyard; }
-// 'L'（岩浆）在规则上等同于水：只有会游、会飞的过得去，地雷钉刺放不进去。
-// 分成两个字符只是为了让背景画得不一样。
-function laneOf(r) { const L = mapDef().lanes[r] || 'G'; return L === 'L' ? 'W' : L; }
+/* ===== 地形是按「格」算的 =====
+   整行一种地形用 lanes 写（每行一个字符）；
+   竖着的一条水道用 waterCols 写（列号）—— 落日海滩右边那条就是这么来的。
+   'L'（岩浆）在规则上等同于水，分成两个字符只是为了让背景画得不一样。 */
 function laneRaw(r) { return mapDef().lanes[r] || 'G'; }
+function laneOf(r) { const L = laneRaw(r); return L === 'L' ? 'W' : L; }
+function colAtX(x) { return clamp(Math.floor((x - GRID_X) / CELL_W), 0, COLS - 1); }
+function terrainRaw(r, c) {
+  const M = mapDef();
+  if (M.waterCols && M.waterCols.indexOf(c) >= 0) return M.waterKind || 'W';
+  return M.lanes[r] || 'G';
+}
+function terrainAt(r, c) { const L = terrainRaw(r, c); return L === 'L' ? 'W' : L; }
+function terrainAtX(r, x) { return terrainAt(r, colAtX(x)); }
 function isWaterRow(r) { return laneOf(r) === 'W'; }
 function isSkyRow(r) { return laneOf(r) === 'S'; }
-// 这一行能不能放这台机器
-/* 这一格能不能放：水行上，非水战机器要求先铺平台。
+// 这一行上有没有水格（整行是水，或者被竖水道穿过）
+function rowTouchesWater(r) {
+  if (laneOf(r) === 'W') return true;
+  const wc = mapDef().waterCols;
+  return !!(wc && wc.length);
+}
+/* 这一格能不能放：水格上，非水战机器要求先铺平台。
    杂交产物（带 modules）跟着宿主格走，不再二次收费。 */
 function waterOk(type, row, col, modules) {
-  if (laneOf(row) !== 'W') return true;
+  if (terrainAt(row, col) !== 'W') return true;
   if (type === 'lilypad') return !hasPad(row, col);      // 已经有平台就别重复铺
   if (WATER_NATIVE.indexOf(type) >= 0) return true;
   if (modules) return true;
   return hasPad(row, col);
 }
-function rowAllows(type, r) {
+// 这一格能不能放这台机器（地雷钉刺只认实地）
+function rowAllows(type, r, c) {
   const mods = modulesOfType(type);
   if (!mods) return true;
-  if (laneOf(r) === 'G') return true;
+  if (c === undefined) {                    // 只问行：这一行但凡有一格能放就算能放
+    for (let cc = 0; cc < COLS; cc++) if (rowAllows(type, r, cc)) return true;
+    return false;
+  }
+  if (terrainAt(r, c) === 'G') return true;
   return !mods.some(x => GROUND_ONLY.indexOf(x.kind) >= 0);
 }
 // 这一行走不走得了这种敌人
 function rowPassable(info, r) {
   const L = laneOf(r);
-  if (L === 'G') return !info.swim;        // 纯水生上不了岸
-  if (L === 'W') return !!(info.swim || info.fly);
-  return true;                             // 悬空平台：全都按飞行处理
+  if (info.swim) return rowTouchesWater(r);  // 会游的：这一行有水就来得了
+  if (L === 'W') return !!info.fly;          // 整行都是水：只有会飞的过得去
+  return true;                               // 地面 / 悬空 / 被竖水道穿过的行：都能走
+}
+/* 蹚水：地面单位走进水格会被拖慢，水生单位爬上岸也一样难受。
+   竖着的那条水道就是这么变成天然屠宰场的。 */
+function wadeMul(e) {
+  if (e.fly) return 1;
+  const w = terrainAt(e.row, colAtX(e.x)) === 'W';
+  if (e.swim) return w ? 1 : 0.55;
+  return w ? 0.6 : 1;
 }
 const BOX_COST = 50;
 const BOX_HP = 150;
@@ -296,6 +332,13 @@ const MACHINES = {
   voidprism: { name: '虚空棱镜',   rarity: 'fusion', hp: 330, desc: '棱光分裂三行，命中处再塌出一个小引力井' },
   obeliskgun:{ name: '方尖碑炮',   rarity: 'fusion', hp: 460, desc: '一边打贯穿光柱一边产电——法老抽走多少，它就给你挣回来多少' },
   sandworm:  { name: '沙虫巢',     rarity: 'fusion', hp: 520, desc: '沙下养着一条虫：埋雷，还会把爬到跟前的敌人整个吞掉' },
+  junkcoil:  { name: '废铁电磁桩', rarity: 'fusion', hp: 400, desc: '电磁桩：把本行敌人往回拽的同时过一遍电' },
+  icetrawler:{ name: '结冰拖网',   rarity: 'fusion', hp: 480, desc: '网住飞行单位拖到地面，落地那一下顺手把它冻上' },
+  tidehorn:  { name: '浊浪号角',   rarity: 'fusion', hp: 420, desc: '把毒浪吹出去：震退一片，还留一身毒' },
+  brazier:   { name: '炙铁火盆',   rarity: 'fusion', hp: 820, desc: '烧红的铁栅：敌人能踩过去，但会被扎穿又被烫穿' },
+  auroradome:{ name: '极光护穹',   rarity: 'fusion', hp: 460, desc: '给周围机器罩护盾，同时一波脉冲把本行敌人瘫痪' },
+  skyhive:   { name: '天穹蜂巢',   rarity: 'fusion', hp: 400, desc: '放无人机，还给周围机器加速——蜂群越打越快' },
+  voideye:   { name: '虚空瞳',     rarity: 'fusion', hp: 380, desc: '跨行狙击最肥的目标，同时拦下本行飞来的炮弹' },
 };
 
 // 普通模式：卡槽顺序、价格与冷却（秒）
@@ -314,30 +357,93 @@ const CLASSIC_ORDER = [
   'storm', 'skylance',
   'blackhole', 'voidprism',
   'obeliskgun', 'sandworm',
+  'junkcoil', 'icetrawler', 'tidehorn', 'brazier', 'auroradome', 'skyhive', 'voideye',
 ];
 /* 每张地图的专属机器：只有打这张图的战役时才会出现在卡槽里。
    其中「融合机」那张在任何地图上都能靠杂交对应的两张卡做出来，
    卡槽里卖的只是个快捷方式。 */
 const MAP_CARDS = {
-  scrapyard: ['scrapult', 'rivetgun'],
-  pool:      ['vortex', 'torpedo'],
-  beach:     ['quicksand', 'conch'],
-  forge:     ['lavavent', 'moltengun'],
-  tundra:    ['blizzard', 'icespire'],
-  skyport:   ['storm', 'skylance'],
-  tomb:      ['obeliskgun', 'sandworm'],
-  abyss:     ['blackhole', 'voidprism'],
+  scrapyard: ['scrapult', 'rivetgun', 'junkcoil'],
+  pool:      ['vortex', 'torpedo', 'icetrawler'],
+  beach:     ['quicksand', 'conch', 'tidehorn'],
+  forge:     ['lavavent', 'moltengun', 'brazier'],
+  tundra:    ['blizzard', 'icespire', 'auroradome'],
+  skyport:   ['storm', 'skylance', 'skyhive'],
+  tomb:      ['obeliskgun', 'sandworm', 'brazier'],
+  abyss:     ['blackhole', 'voidprism', 'voideye'],
+};
+/* ===== 每张地图只给「传统机器 + 这张图自己的机器」=====
+   一口气把 48 张卡全摊开，每张图打起来就是同一局。
+   所以战役里卡槽只发三样东西：
+     1. CORE —— 传统那几台，哪张图都得有；
+     2. MAP_KIT —— 分给这张图的常规机器，别的图见不到；
+     3. MAP_CARDS —— 这张图的专属机型（见上）。
+   创造模式不受限，单局的盲盒/普通模式也照旧给全套。 */
+const CORE_CARDS = ['generator', 'turret', 'barricade', 'spikes', 'puncher',
+                    'mine', 'fan', 'shredder', 'aa', 'repair'];
+const MAP_KIT = {
+  scrapyard: ['saw', 'magnet', 'mortar'],
+  pool:      ['net', 'deflect', 'sonic'],
+  beach:     ['poison', 'booster', 'hunter'],
+  tomb:      ['sniper', 'gravity', 'prism'],
+  forge:     ['flame', 'rocket', 'mortar'],
+  tundra:    ['tesla', 'emp', 'shield'],
+  skyport:   ['hunter', 'drone', 'railgun'],
+  abyss:     ['prism', 'gravity', 'sniper', 'railgun', 'tesla'],
 };
 // 水战卡：只要这张图有水就发，没水的图连平台都用不上
 const WATER_KIT = ['lilypad', 'sub', 'kelp'];
-function mapHasWater() { const L = mapDef().lanes; return L.indexOf('W') >= 0 || L.indexOf('L') >= 0; }
+/* ===== 机器解锁 =====
+   开局只给最基础的一套，打通第一张地图（废铁厂第 10 关）之后，
+   剩下的常规机器一次性全开 —— 第一张图就是那个「最普通的关卡」。
+   地图专属卡另算：它们跟着地图走，不进这个解锁池。 */
+const STARTER_CARDS = ['generator', 'turret', 'barricade', 'spikes', 'puncher',
+                       'mine', 'fan', 'shredder', 'aa', 'mortar'];
+const STARTER_MAP = 'scrapyard';
+function allCardsUnlocked() {
+  const pg = loadProgress();
+  return !!(pg[campaignId(STARTER_MAP, STAGES_PER_MAP)] || pg.soloWin);
+}
+function markSoloWin() {
+  const pg = loadProgress();
+  if (pg.soloWin) return false;
+  pg.soloWin = 1;
+  try { localStorage.setItem('mg_campaign', JSON.stringify(pg)); } catch (e) {}
+  return true;
+}
+function cardUnlocked(type) {
+  if (creative()) return true;
+  if (STARTER_CARDS.indexOf(type) >= 0) return true;
+  return allCardsUnlocked();
+}
+
+/* ===== 关卡难度 =====
+   同一关可以按三档打：怪的血量、数量和得分一起变。 */
+const DIFFS = {
+  easy:   { name: '轻松', hp: 0.7,  count: 0.75, score: 0.7, tip: '敌人更少更脆，适合熟悉地形' },
+  normal: { name: '普通', hp: 1,    count: 1,    score: 1,   tip: '标准配置' },
+  hard:   { name: '困难', hp: 1.45, count: 1.3,  score: 1.8, tip: '又多又硬，得分也翻着涨' },
+};
+let campDiff = 'normal';
+function diff() { return DIFFS[campDiff] || DIFFS.normal; }
+function saveDiff() { try { localStorage.setItem('mg_campDiff', campDiff); } catch (e) {} }
+try { const v = localStorage.getItem('mg_campDiff'); if (v && DIFFS[v]) campDiff = v; } catch (e) {}
+function mapHasWater() {
+  const M = mapDef();
+  return M.lanes.indexOf('W') >= 0 || M.lanes.indexOf('L') >= 0 || !!(M.waterCols && M.waterCols.length);
+}
 const MAP_ONLY = Object.keys(MAP_CARDS).reduce((a, k) => a.concat(MAP_CARDS[k]), []);
 // 这张卡现在该不该出现在卡槽里
 function cardAvailable(type) {
-  if (WATER_KIT.indexOf(type) >= 0) return creative() || (campaign() && mapHasWater());
-  if (MAP_ONLY.indexOf(type) < 0) return true;      // 普通卡：永远在
-  if (creative()) return true;                       // 创造模式：全都给
-  return campaign() && (MAP_CARDS[curMap] || []).indexOf(type) >= 0;
+  if (creative()) return true;                      // 创造模式：全都给
+  if (WATER_KIT.indexOf(type) >= 0) return campaign() && mapHasWater();
+  if (MAP_ONLY.indexOf(type) >= 0) {                // 地图专属：只在自己那张图
+    return campaign() && (MAP_CARDS[curMap] || []).indexOf(type) >= 0;
+  }
+  if (!cardUnlocked(type)) return false;            // 还没解锁
+  if (!campaign()) return true;                     // 单局的盲盒/普通：常规卡全给
+  // 战役：传统那几台 + 分给这张图的那几台
+  return CORE_CARDS.indexOf(type) >= 0 || (MAP_KIT[curMap] || []).indexOf(type) >= 0;
 }
 const CLASSIC_COST = {
   generator: 50, turret: 100, barricade: 50, spikes: 75, puncher: 100, mine: 100, fan: 150,
@@ -350,6 +456,8 @@ const CLASSIC_COST = {
   scrapult: 250, rivetgun: 200, torpedo: 275, conch: 200, moltengun: 225, icespire: 200,
   skylance: 300, voidprism: 325,
   obeliskgun: 275, sandworm: 225,
+  junkcoil: 250, icetrawler: 225, tidehorn: 225, brazier: 200,
+  auroradome: 275, skyhive: 300, voideye: 325,
   lilypad: 25, sub: 225, kelp: 150,
 };
 const CLASSIC_CD = {
@@ -363,6 +471,8 @@ const CLASSIC_CD = {
   scrapult: 14, rivetgun: 11, torpedo: 15, conch: 15, moltengun: 12, icespire: 12,
   skylance: 17, voidprism: 18,
   obeliskgun: 16, sandworm: 13,
+  junkcoil: 14, icetrawler: 12, tidehorn: 12, brazier: 11,
+  auroradome: 16, skyhive: 17, voideye: 18,
   lilypad: 3, sub: 13, kelp: 10,
 };
 
@@ -626,6 +736,13 @@ const PAIR_TYPE = [
   [['prism', 'gravity'], 'voidprism', '虚空棱镜'],
   [['laser', 'energy'], 'obeliskgun', '方尖碑炮'],
   [['shred', 'mine'], 'sandworm', '沙虫巢'],
+  [['zap', 'magnet'], 'junkcoil', '废铁电磁桩'],
+  [['frost', 'net'], 'icetrawler', '结冰拖网'],
+  [['poison', 'sonic'], 'tidehorn', '浊浪号角'],
+  [['flame', 'spikes'], 'brazier', '炙铁火盆'],
+  [['emp', 'shield'], 'auroradome', '极光护穹'],
+  [['drone', 'booster'], 'skyhive', '天穹蜂巢'],
+  [['sniper', 'deflect'], 'voideye', '虚空瞳'],
 ];
 
 // 等级超过 3 时沿用 3 级的名字与造型
@@ -1026,7 +1143,7 @@ function applyModeUI() {
   $('classicTray').style.display = cardTray ? '' : 'none';
   $('wavesBtn').style.display = (creative() && !campaign()) ? '' : 'none';
   $('brandMode').textContent = campaign()
-    ? (STYLE_NAME[campStyle] + ' · ' + mapDef().name + ' 第' + curStage + '关')
+    ? (STYLE_NAME[campStyle] + ' · ' + diff().name + ' · ' + mapDef().name + ' 第' + curStage + '关')
     : creative() ? '创造模式'
     : mode === 'classic' ? '普通模式' : '盲盒塔防';
   document.body.classList.toggle('boxmode', boxMode());
@@ -1252,7 +1369,10 @@ function rollType() {
     rarity = Math.random() < 0.75 ? 'rare' : 'epic';
   }
   pity = rarity === 'common' ? pity + 1 : 0;
-  const pool = BOX_POOL[rarity];
+  // 还没解锁的机器不该从盲盒里开出来
+  let pool = BOX_POOL[rarity].filter(x => cardAvailable(x[0]));
+  if (!pool.length) pool = BOX_POOL.common.filter(x => cardAvailable(x[0]));
+  if (!pool.length) pool = BOX_POOL.common;
   const total = pool.reduce((s, p) => s + p[1], 0);
   let x = Math.random() * total;
   for (const [type, wgt] of pool) {
@@ -1366,7 +1486,7 @@ function showReveal(typeOrMachine) {
 /* ========== 部署 ========== */
 function place(type, row, col, modules) {
   if (row < 0 || row >= ROWS || col < 0 || col >= COLS || grid[row][col]) return false;
-  if (!modules && !rowAllows(type, row)) return false;   // 地雷/钉刺放不进水里和空中
+  if (!modules && !rowAllows(type, row, col)) return false;   // 地雷/钉刺放不进水里和空中
   if (!waterOk(type, row, col, modules)) return false;   // 水面上要先有平台
   if (type === 'lilypad') {
     // 平台不是机器：它只是把这一格变成能站人的地方
@@ -1572,7 +1692,9 @@ function spawnEnemy(type, row, affixKey) {
   const am = af || { hp: 1, speed: 1, dmg: 1, score: 1 };
   // 重甲与 Boss 本体血量已经很高，波次成长对它们减半，
   // 否则后期会变成防线打不穿的移动城墙（压力应该来自数量与词缀，不是单体血条）
-  const hm = (info.heavy || info.boss) ? 1 + (hpMult() - 1) * 0.4 : hpMult();
+  // 战役难度：血量与得分一起动，速度不动（提速会直接毁掉手感）
+  const dm = campaign() ? diff() : null;
+  const hm = ((info.heavy || info.boss) ? 1 + (hpMult() - 1) * 0.4 : hpMult()) * (dm ? dm.hp : 1);
   const hp = Math.round(info.hp * hm * am.hp);
   const sh = info.shield ? Math.round(info.shield * hm * am.hp) : 0;
   enemies.push({
@@ -1584,7 +1706,7 @@ function spawnEnemy(type, row, affixKey) {
     affix: afk, aura: 0,
     speed: info.speed * am.speed * spdMult(),
     dmg: Math.round(info.dmg * am.dmg * dmgMult()),
-    scoreVal: Math.round(info.score * am.score), w: info.w,
+    scoreVal: Math.round(info.score * am.score * (dm ? dm.score : 1)), w: info.w,
     fly: !!info.fly || isSkyRow(row), skyLift: !info.fly && isSkyRow(row),
     king: !!info.king,
     boss: !!info.boss, heavy: !!info.heavy, suicide: !!info.suicide,
@@ -1619,7 +1741,7 @@ function pickRow(type) {
   const info = type ? ENEMIES[type] : null;
   const okRows = [];
   for (let r = 0; r < ROWS; r++) if (!info || rowPassable(info, r)) okRows.push(r);
-  const pool = okRows.length ? okRows : [0, 1, 2, 3, 4];
+  const pool = okRows.length ? okRows : Array.from({ length: ROWS }, (_, i) => i);
   let r = pool[Math.floor(Math.random() * pool.length)];
   if (pool.length > 1 && lastRows.length >= 2 && lastRows[0] === r && lastRows[1] === r) {
     r = pool[Math.floor(Math.random() * pool.length)];
@@ -1650,9 +1772,10 @@ function campaignWave(n) {
   const ice = ['glacier', 'snowdrone', 'frostbot'];
   const void_ = ['voidspawn', 'riftwalker', 'stealthbot'];
   const desert = ['scarab', 'mummybot', 'burrower'];
-  pick(light, Math.round(1 + n + prog * 0.085 * ramp));
-  if (n >= 2) pick(tough, Math.round(0.4 + (0.8 + prog * 0.07) * ramp));
-  if (n >= 2) pick(mid, Math.round(0.2 + prog * 0.09 * ramp));
+  const dq = diff().count;
+  pick(light, Math.round((1 + n + prog * 0.085 * ramp) * dq));
+  if (n >= 2) pick(tough, Math.round((0.4 + (0.8 + prog * 0.07) * ramp) * dq));
+  if (n >= 2) pick(mid, Math.round((0.2 + prog * 0.09 * ramp) * dq));
   // 本图的主题兵种
   const theme = curMap === 'pool' ? sea
     : curMap === 'beach' ? (n % 2 ? sand : sea)
@@ -1661,7 +1784,7 @@ function campaignWave(n) {
     : curMap === 'forge' ? fire
     : curMap === 'tundra' ? ice
     : curMap === 'abyss' ? (n % 2 ? void_ : air) : null;
-  if (theme && n >= 2) pick(theme, Math.round(0.6 + (1 + prog * 0.07) * ramp));
+  if (theme && n >= 2) pick(theme, Math.round((0.6 + (1 + prog * 0.07) * ramp) * dq));
   else if (!theme && prog >= 2 && n >= 3) pick(air, Math.max(1, Math.round(prog * 0.08 * ramp)));
   if (prog >= 8 && n >= 4) push('crusher', 1 + Math.floor(prog / 18));
   if (prog >= 22 && n >= 5) push('titan', 1 + Math.floor(prog / 30));
@@ -1821,7 +1944,13 @@ function updateWaves(dt) {
       addFloat(W / 2, GRID_Y + 40, '波次奖励 +100', '#58d68b');
       if (campaign()) {
         if (wave >= STAGE_WAVES) { clearStage(); return; }
-      } else if (!endless && wave >= TOTAL_WAVES) { endGame(true); return; }
+      } else if (!endless && wave >= TOTAL_WAVES) {
+        // 单局打通 10 波也算「获得大部分机器」：不打战役的人不该被卡在 8 张卡上
+        if (!creative() && markSoloWin()) {
+          addFloat(W / 2, GRID_Y + 60, '🔓 全部机器解锁！', '#ffc531');
+        }
+        endGame(true); return;
+      }
       waveState = 'pre';
       waveTimer = 6.5;
     }
@@ -2936,7 +3065,7 @@ function updateMachines(dt) {
 // 敌人的远程弹药（向左飞，打中第一台机器）
 // 拦截力场：本行有就绪的折射机器时，把飞来的敌弹打掉
 // 潜艇是沉在水下的：敌人的炮弹从它头上飞过去
-function submerged(m) { return !!(m && m.modules && hasKind(m, 'sub') && laneOf(m.row) === 'W'); }
+function submerged(m) { return !!(m && m.modules && hasKind(m, 'sub') && terrainAt(m.row, m.col) === 'W'); }
 function tryDeflect(b) {
   for (let c = COLS - 1; c >= 0; c--) {
     const o = grid[b.row][c];
@@ -3565,7 +3694,7 @@ function updateEnemies(dt) {
     }
     if (e.firing > 0) e.firing -= dt;
     if (e.recoil > 0) e.recoil -= dt;
-    const mul = (e.castT > 0 ? 0 : 1) * (e.slowT > 0 ? 0.45 : 1) * (e.dashing > 0 ? 3.4 : 1) * (e.aura ? 1.25 : 1);
+    const mul = (e.castT > 0 ? 0 : 1) * (e.slowT > 0 ? 0.45 : 1) * (e.dashing > 0 ? 3.4 : 1) * (e.aura ? 1.25 : 1) * wadeMul(e);
     const front = e.x - e.w / 2;
     const col = Math.floor((front - GRID_X) / CELL_W);
     let m = null;
@@ -3904,9 +4033,11 @@ function frame(now) {
       resHold = 8; setRenderScale(RES_STEPS[--resIdx]);
     }
   }
-  if (state === 'playing') update(dt);
+  if (state === 'whack') { updateWhack(dt); updateFx(dt); }
+  else if (state === 'playing') update(dt);
   else updateAdvance(dt);
-  draw();
+  if (state === 'whack' || state === 'miniover') { g.setTransform(DPR, 0, 0, DPR, 0, 0); g.clearRect(0, 0, W, H); drawWhack(); }
+  else draw();
   updateHud();
   requestAnimationFrame(frame);
 }
@@ -3980,7 +4111,7 @@ function endGame(win) {
     ? '🎉 <span class="gold">防线守住了！</span>'
     : '💥 防线失守…';
   const modeTag = campaign()
-      ? '（🗺️ ' + STYLE_NAME[campStyle] + ' · ' + mapDef().icon + mapDef().name + ' 第 ' + curStage + ' 关）'
+      ? '（🗺️ ' + STYLE_NAME[campStyle] + ' · ' + diff().name + ' · ' + mapDef().icon + mapDef().name + ' 第 ' + curStage + ' 关）'
     : creative() ? '（🛠️ 创造模式）'
     : mode === 'classic' ? '（🃏 普通模式）' : '（🎁 盲盒模式）';
   const totalW = campaign() ? STAGE_WAVES : TOTAL_WAVES;
@@ -4384,7 +4515,10 @@ function toGame(ev) {
     y: (ev.clientY - rect.top) * H / rect.height,
   };
 }
-cv.addEventListener('pointermove', ev => { mouse = toGame(ev); });
+cv.addEventListener('pointermove', ev => {
+  mouse = toGame(ev);
+  if (wk && (state === 'whack' || state === 'miniover')) { wk.mx = mouse.x; wk.my = mouse.y; }
+});
 cv.addEventListener('pointerleave', () => { mouse = { x: -1, y: -1 }; });
 let lastTap = { t: -1e9, x: 0, y: 0, r: -1, c: -1 };
 let pressTimer = 0, pressCell = null, pressPt = null;
@@ -4394,6 +4528,7 @@ function cancelLongPress() {
 }
 cv.addEventListener('pointerdown', ev => {
   ensureAc();
+  if (state === 'whack') { const q = toGame(ev); wkHit(q.x, q.y); return; }
   if (state !== 'playing') return;
   const p = toGame(ev);
   const cell0 = cellAt(p.x, p.y);
@@ -4732,6 +4867,24 @@ function renderStageSel() {
     styleRow.appendChild(sb);
   }
   box.appendChild(styleRow);
+  // 第二步：这一关打哪个难度
+  const diffRow = document.createElement('div');
+  diffRow.className = 'styleRow diffRow';
+  for (const k of ['easy', 'normal', 'hard']) {
+    const db = document.createElement('button');
+    db.className = 'styleBtn' + (campDiff === k ? ' on' : '');
+    db.innerHTML = '<b>' + DIFFS[k].name + '</b>' + DIFFS[k].tip;
+    db.addEventListener('click', () => { campDiff = k; saveDiff(); renderStageSel(); });
+    diffRow.appendChild(db);
+  }
+  box.appendChild(diffRow);
+  if (!allCardsUnlocked()) {
+    const lk = document.createElement('div');
+    lk.className = 'styleWarn';
+    lk.textContent = '现在手上只有 ' + STARTER_CARDS.length + ' 台基础机器 —— 打通 '
+      + MAPS[STARTER_MAP].name + ' 第 ' + STAGES_PER_MAP + ' 关，剩下的一次全解锁';
+    box.appendChild(lk);
+  }
   if (campStyle === 'creative') {
     const warn = document.createElement('div');
     warn.className = 'styleWarn';
@@ -4790,6 +4943,17 @@ $('startCampaignBtn').addEventListener('click', () => {
   $('menu').classList.toggle('picking', show);
   $('startCampaignBtn').textContent = show ? '🗺️ 收起关卡' : '🗺️ 战役';
   if (show) renderStageSel();
+});
+$('startWhackBtn').addEventListener('click', () => { ensureAc(); startWhack(); });
+$('miniAgainBtn').addEventListener('click', () => { show('mini', false); startWhack(); });
+$('miniMenuBtn').addEventListener('click', () => {
+  show('mini', false);
+  document.body.classList.remove('minigame');
+  fitStage();
+  wk = null;
+  initGame();
+  state = 'menu';
+  show('end', false); show('pauseOv', false); show('menu', true);
 });
 $('nextStageBtn').addEventListener('click', goNextStage);
 $('stopCampaignBtn').addEventListener('click', stopCampaign);
@@ -4955,86 +5119,104 @@ function buildBackground() {
       b.stroke();
     }
   }
-  // 地形层：水面 / 悬空平台各有各的画法
+  // 地形层：按格子画。同一行里连着的同种地形合成一段，水面才不会一格一段地断开。
   for (let r = 0; r < ROWS; r++) {
-    const L = M.lanes[r] || 'G';
     const y = GRID_Y + r * CELL_H;
-    if (L === 'W' || L === 'L') {
-      // 水：深蓝渐变 + 水面亮线 + 荡开的波纹
-      const wc = M.water || ['rgba(30,96,140,0.85)', 'rgba(18,64,102,0.9)', 'rgba(10,40,70,0.95)'];
-      const wg = b.createLinearGradient(0, y, 0, y + CELL_H);
-      wg.addColorStop(0, wc[0]);
-      wg.addColorStop(0.5, wc[1]);
-      wg.addColorStop(1, wc[2]);
-      b.fillStyle = wg;
-      b.fillRect(GRID_X, y, COLS * CELL_W, CELL_H);
-      b.strokeStyle = M.foam || 'rgba(150,215,245,0.45)';
-      b.lineWidth = 2;
-      b.beginPath();
-      for (let x = GRID_X; x <= GRID_X + COLS * CELL_W; x += 8) {
-        b.lineTo(x, y + 5 + Math.sin(x * 0.05 + r) * 2.4);
-      }
-      b.stroke();
-      if (L === 'L') {
-        // 岩浆：翻上来的气泡 + 结壳的暗斑，别用水的焦散
-        for (let i = 0; i < 20; i++) {
-          const wx = GRID_X + (i + 0.5) * (COLS * CELL_W / 20);
-          const wy = y + 20 + ((i * 41) % 52);
-          b.fillStyle = i % 3 === 0 ? 'rgba(255,226,150,0.5)' : 'rgba(255,150,46,0.32)';
-          b.beginPath(); b.arc(wx, wy, 2 + (i % 4), 0, TAU); b.fill();
-        }
-        for (let i = 0; i < 7; i++) {
-          const wx = GRID_X + 40 + ((i * 197) % (COLS * CELL_W - 80));
-          const wy = y + 26 + ((i * 29) % 44);
-          b.fillStyle = 'rgba(58,18,10,0.55)';
-          b.beginPath(); b.ellipse(wx, wy, 18, 7, 0, 0, TAU); b.fill();
-        }
-      } else {
-        // 水下光斑
-        b.strokeStyle = M.caustic || 'rgba(160,225,255,0.16)';
-        b.lineWidth = 1.6;
-        for (let i = 0; i < 16; i++) {
-          const wx = GRID_X + (i + 0.5) * (COLS * CELL_W / 16);
-          const wy = y + 22 + ((i * 37) % 50);
-          b.beginPath();
-          b.moveTo(wx - 12, wy); b.quadraticCurveTo(wx, wy - 6, wx + 12, wy);
-          b.stroke();
-        }
-      }
-    } else if (L === 'S') {
-      // 悬空：格子里是敞开的天，只有贴着底边那条浮空石台踩得住
-      const ag = b.createLinearGradient(0, y, 0, y + CELL_H);
-      ag.addColorStop(0, 'rgba(126,170,216,0.42)');
-      ag.addColorStop(0.72, 'rgba(92,136,190,0.3)');
-      ag.addColorStop(1, 'rgba(48,80,126,0.2)');
-      b.fillStyle = ag;
-      b.fillRect(GRID_X, y, COLS * CELL_W, CELL_H);
-      // 云：几坨圆叠成一团，飘在台子之间
-      for (let i = 0; i < 4; i++) {
-        const cx2 = GRID_X + 46 + ((i * 233 + r * 151) % (COLS * CELL_W - 92));
-        const cy2 = y + 20 + ((i * 53 + r * 29) % 24);
-        b.fillStyle = 'rgba(236,245,255,' + (0.09 + (i % 2) * 0.06).toFixed(2) + ')';
-        for (let k = -2; k <= 2; k++) {
-          b.beginPath();
-          b.ellipse(cx2 + k * 18, cy2 + Math.abs(k) * 3.5, 22 - Math.abs(k) * 4, 12 - Math.abs(k) * 2.2, 0, 0, TAU);
-          b.fill();
-        }
-      }
-      // 浮空石台：上面一层亮石面，底下收成一个尖，像一块拔起来的岛
-      for (let c = 0; c < COLS; c++) {
-        const x = GRID_X + c * CELL_W, py = y + CELL_H - 23;
-        b.fillStyle = '#39547a';
+    let c0 = 0;
+    while (c0 < COLS) {
+      const L = terrainRaw(r, c0);
+      let c1 = c0;
+      while (c1 + 1 < COLS && terrainRaw(r, c1 + 1) === L) c1++;
+      const x0 = GRID_X + c0 * CELL_W, wRun = (c1 - c0 + 1) * CELL_W;
+      if (L === 'W' || L === 'L') {
+        // 水：深蓝渐变 + 水面亮线 + 荡开的波纹
+        const wc = M.water || ['rgba(30,96,140,0.85)', 'rgba(18,64,102,0.9)', 'rgba(10,40,70,0.95)'];
+        const wg = b.createLinearGradient(0, y, 0, y + CELL_H);
+        wg.addColorStop(0, wc[0]);
+        wg.addColorStop(0.5, wc[1]);
+        wg.addColorStop(1, wc[2]);
+        b.fillStyle = wg;
+        b.fillRect(x0, y, wRun, CELL_H);
+        b.strokeStyle = M.foam || 'rgba(150,215,245,0.45)';
+        b.lineWidth = 2;
         b.beginPath();
-        b.moveTo(x + 3, py + 10); b.lineTo(x + CELL_W - 3, py + 10);
-        b.lineTo(x + CELL_W - 19, py + 22); b.lineTo(x + 19, py + 22);
-        b.closePath(); b.fill();
-        b.fillStyle = '#6d8bb2';
-        b.fillRect(x + 3, py, CELL_W - 6, 10);
-        b.fillStyle = '#9dbbdd';
-        b.fillRect(x + 3, py - 3, CELL_W - 6, 3);
-        b.fillStyle = 'rgba(255,255,255,0.14)';
-        b.fillRect(x + 3, py - 3, CELL_W - 6, 1);
+        for (let x = x0; x <= x0 + wRun; x += 8) b.lineTo(x, y + 5 + Math.sin(x * 0.05 + r) * 2.4);
+        b.stroke();
+        if (L === 'L') {
+          // 岩浆：翻上来的气泡 + 结壳的暗斑，别用水的焦散
+          const nb = Math.max(4, Math.round(wRun / 46));
+          for (let i = 0; i < nb; i++) {
+            const wx = x0 + (i + 0.5) * (wRun / nb);
+            const wy = y + 20 + ((i * 41) % (CELL_H - 34));
+            b.fillStyle = i % 3 === 0 ? 'rgba(255,226,150,0.5)' : 'rgba(255,150,46,0.32)';
+            b.beginPath(); b.arc(wx, wy, 2 + (i % 4), 0, TAU); b.fill();
+          }
+          for (let i = 0; i < Math.max(2, Math.round(wRun / 140)); i++) {
+            const wx = x0 + 30 + ((i * 197) % Math.max(20, wRun - 60));
+            const wy = y + 26 + ((i * 29) % Math.max(10, CELL_H - 50));
+            b.fillStyle = 'rgba(58,18,10,0.55)';
+            b.beginPath(); b.ellipse(wx, wy, 18, 7, 0, 0, TAU); b.fill();
+          }
+        } else {
+          // 水下光斑
+          b.strokeStyle = M.caustic || 'rgba(160,225,255,0.16)';
+          b.lineWidth = 1.6;
+          const nc = Math.max(3, Math.round(wRun / 55));
+          for (let i = 0; i < nc; i++) {
+            const wx = x0 + (i + 0.5) * (wRun / nc);
+            const wy = y + 22 + ((i * 37) % (CELL_H - 36));
+            b.beginPath();
+            b.moveTo(wx - 12, wy); b.quadraticCurveTo(wx, wy - 6, wx + 12, wy);
+            b.stroke();
+          }
+        }
+        // 竖水道的两侧岸线：让它看起来真的是切进沙滩的一条河
+        if (laneOf(r) !== 'W') {
+          const edge = M.foam || 'rgba(150,215,245,0.45)';
+          b.strokeStyle = edge; b.lineWidth = 2;
+          for (const ex of [x0, x0 + wRun]) {
+            b.beginPath();
+            for (let yy = y; yy <= y + CELL_H; yy += 8) b.lineTo(ex + Math.sin(yy * 0.06 + r) * 2.2, yy);
+            b.stroke();
+          }
+        }
+      } else if (L === 'S') {
+        // 悬空：格子里是敞开的天，只有贴着底边那条浮空石台踩得住
+        const ag = b.createLinearGradient(0, y, 0, y + CELL_H);
+        ag.addColorStop(0, 'rgba(126,170,216,0.42)');
+        ag.addColorStop(0.72, 'rgba(92,136,190,0.3)');
+        ag.addColorStop(1, 'rgba(48,80,126,0.2)');
+        b.fillStyle = ag;
+        b.fillRect(x0, y, wRun, CELL_H);
+        // 云：几坨圆叠成一团，飘在台子之间
+        const ncl = Math.max(2, Math.round(wRun / 240));
+        for (let i = 0; i < ncl; i++) {
+          const cx2 = x0 + 46 + ((i * 233 + r * 151) % Math.max(20, wRun - 92));
+          const cy2 = y + 20 + ((i * 53 + r * 29) % 24);
+          b.fillStyle = 'rgba(236,245,255,' + (0.09 + (i % 2) * 0.06).toFixed(2) + ')';
+          for (let k = -2; k <= 2; k++) {
+            b.beginPath();
+            b.ellipse(cx2 + k * 18, cy2 + Math.abs(k) * 3.5, 22 - Math.abs(k) * 4, 12 - Math.abs(k) * 2.2, 0, 0, TAU);
+            b.fill();
+          }
+        }
+        // 浮空石台：上面一层亮石面，底下收成一个尖，像一块拔起来的岛
+        for (let c = c0; c <= c1; c++) {
+          const x = GRID_X + c * CELL_W, py = y + CELL_H - 23;
+          b.fillStyle = '#39547a';
+          b.beginPath();
+          b.moveTo(x + 3, py + 10); b.lineTo(x + CELL_W - 3, py + 10);
+          b.lineTo(x + CELL_W - 19, py + 22); b.lineTo(x + 19, py + 22);
+          b.closePath(); b.fill();
+          b.fillStyle = '#6d8bb2';
+          b.fillRect(x + 3, py, CELL_W - 6, 10);
+          b.fillStyle = '#9dbbdd';
+          b.fillRect(x + 3, py - 3, CELL_W - 6, 3);
+          b.fillStyle = 'rgba(255,255,255,0.14)';
+          b.fillRect(x + 3, py - 3, CELL_W - 6, 1);
+        }
       }
+      c0 = c1 + 1;
     }
   }
   // 熔岩与深渊：飘在场上的余烬
@@ -5049,9 +5231,9 @@ function buildBackground() {
   // 冰原：格子边缘积一层霜，地上撒些雪粒
   if (M.snow) {
     for (let r = 0; r < ROWS; r++) {
-      if ((M.lanes[r] || 'G') !== 'G') continue;
       const y = GRID_Y + r * CELL_H;
       for (let c = 0; c < COLS; c++) {
+        if (terrainAt(r, c) !== 'G') continue;
         const x = GRID_X + c * CELL_W;
         const fg = b.createLinearGradient(0, y, 0, y + 16);
         fg.addColorStop(0, 'rgba(232,248,255,0.4)');
@@ -5061,6 +5243,7 @@ function buildBackground() {
       }
       for (let i = 0; i < 30; i++) {
         const gx = GRID_X + ((i * 173 + r * 61) % (COLS * CELL_W));
+        if (terrainAt(r, colAtX(gx)) !== 'G') continue;
         const gy = y + ((i * 53) % CELL_H);
         b.fillStyle = 'rgba(242,252,255,0.35)';
         b.beginPath(); b.arc(gx, gy, 1 + (i % 2), 0, TAU); b.fill();
@@ -5070,17 +5253,18 @@ function buildBackground() {
   // 海滩的沙面：暖色颗粒、几枚小贝壳，挨着水的那行压一条湿沙带
   if (M.sand) {
     for (let r = 0; r < ROWS; r++) {
-      if ((M.lanes[r] || 'G') !== 'G') continue;
       const y = GRID_Y + r * CELL_H;
       for (let i = 0; i < 46; i++) {
         const gx = GRID_X + ((i * 131 + r * 71) % (COLS * CELL_W));
+        if (terrainAt(r, colAtX(gx)) !== 'G') continue;
         const gy = y + ((i * 47 + r * 23) % CELL_H);
         b.fillStyle = i % 3 === 0 ? 'rgba(255,232,180,0.16)' : 'rgba(90,64,34,0.2)';
         b.beginPath(); b.arc(gx, gy, 1 + (i % 3) * 0.5, 0, TAU); b.fill();
       }
-      const seaside = M.lanes.indexOf('W') >= 0;
+      const seaside = mapHasWater();
       for (let i = 0; i < 3; i++) {
         const gx = GRID_X + 70 + ((i * 271 + r * 97) % (COLS * CELL_W - 140));
+        if (terrainAt(r, colAtX(gx)) !== 'G') continue;
         const gy = y + 26 + ((i * 41 + r * 17) % (CELL_H - 44));
         b.strokeStyle = 'rgba(255,236,206,0.3)';
         b.lineWidth = 1.4;
@@ -6158,7 +6342,7 @@ function drawMachine(ctx, type, x, y, s, m) {
   ctx.translate(x, y);
   ctx.scale(s, s);
   // 接地表现跟着地形走：水面上的机器踩在一只浮筒上，不能就这么站在水里
-  const onWater = m && m.row !== undefined && laneOf(m.row) === 'W' && !hasPad(m.row, m.col);
+  const onWater = m && m.row !== undefined && terrainAt(m.row, m.col) === 'W' && !hasPad(m.row, m.col);
   if (onWater) {
     const bob = Math.sin(time * 1.6 + (m.col || 0)) * 1.5;
     ctx.save();
@@ -6277,6 +6461,13 @@ function drawChassis(ctx, type, pri, m) {
     case 'voidprism': return drawVoidprism(ctx, m);
     case 'obeliskgun': return drawObeliskgun(ctx, m);
     case 'sandworm': return drawSandworm(ctx, m);
+    case 'junkcoil': return drawJunkcoil(ctx, m);
+    case 'icetrawler': return drawIcetrawler(ctx, m);
+    case 'tidehorn': return drawTidehorn(ctx, m);
+    case 'brazier': return drawBrazier(ctx, m);
+    case 'auroradome': return drawAuroradome(ctx, m);
+    case 'skyhive': return drawSkyhive(ctx, m);
+    case 'voideye': return drawVoideye(ctx, m);
   }
   if (!pri) return;
   const lv = Math.min(pri.lv, 3);
@@ -9203,6 +9394,260 @@ function drawFrostcannon(ctx, m) {
 
 // 废铁投石机：一条上了弦的抛臂，兜里装着绞碎的废铁
 // 方尖碑炮：一根刻着符文的金碑，碑尖蓄光，碑身在发电
+// 废铁电磁桩：一根缠满线圈的铁桩，桩头吸着一堆废铁片
+function drawJunkcoil(ctx, m) {
+  const P = pal(2), t = time;
+  const pulse = m && m.pulse > 0 ? m.pulse / 0.6 : 0;
+  pedestal(ctx, P, 44, 2);
+  ctx.fillStyle = P.dark;
+  rr(ctx, -9, -34, 18, 50, 5); ctx.fill();
+  // 线圈
+  for (let i = 0; i < 6; i++) {
+    ctx.strokeStyle = i % 2 ? '#c08a3a' : '#e0a852';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(0, -28 + i * 8, 13, 4, 0, 0, TAU); ctx.stroke();
+  }
+  // 桩头的电磁铁
+  ctx.fillStyle = '#4c5d70';
+  rr(ctx, -16, -46, 32, 14, 4); ctx.fill();
+  ctx.fillStyle = '#ff5d5d';
+  rr(ctx, -14, -44, 13, 5, 2); ctx.fill();
+  ctx.fillStyle = '#4cc2ff';
+  rr(ctx, 1, -44, 13, 5, 2); ctx.fill();
+  // 被吸住的废铁片
+  ctx.fillStyle = '#8b8172';
+  for (let i = 0; i < 4; i++) {
+    const a = t * 1.4 + i * 1.57;
+    ctx.save();
+    ctx.translate(Math.cos(a) * (20 + pulse * 6), -46 + Math.sin(a) * 7);
+    ctx.rotate(a);
+    ctx.fillRect(-4, -2, 8, 4);
+    ctx.restore();
+  }
+  emissive(ctx, 'rgba(127,215,255,' + (0.5 + pulse * 0.4) + ')', 12, () => {
+    ctx.strokeStyle = '#9df0ff'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.ellipse(0, -46, 22 + pulse * 10, 8 + pulse * 4, 0, 0, TAU); ctx.stroke();
+  });
+}
+
+// 结冰拖网：一台挂着冻硬渔网的绞盘车
+function drawIcetrawler(ctx, m) {
+  const P = pal(2), t = time;
+  pedestal(ctx, P, 48, 2);
+  panel(ctx, -20, -6, 40, 24, 6, P);
+  // 绞盘
+  ctx.save();
+  ctx.translate(-8, 2);
+  ctx.rotate(t * 1.1);
+  ctx.strokeStyle = P.trim; ctx.lineWidth = 2.4;
+  for (let i = 0; i < 4; i++) {
+    const a = i * TAU / 4;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * 9, Math.sin(a) * 9); ctx.stroke();
+  }
+  ctx.restore();
+  // 网架
+  ctx.strokeStyle = '#8fa3b8'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(10, -4); ctx.lineTo(30, -26); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(10, 10); ctx.lineTo(30, -6); ctx.stroke();
+  // 冻硬的网
+  ctx.strokeStyle = 'rgba(200,238,255,0.8)'; ctx.lineWidth = 1.4;
+  for (let i = 0; i <= 4; i++) {
+    ctx.beginPath(); ctx.moveTo(30 - i * 5, -26 + i * 5); ctx.lineTo(30 - i * 5 + 4, -4 + i * 2); ctx.stroke();
+  }
+  for (let i = 0; i <= 3; i++) {
+    ctx.beginPath(); ctx.moveTo(12 + i * 5, -8 + i * 2); ctx.lineTo(30 - i * 2, -22 + i * 6); ctx.stroke();
+  }
+  // 网上挂的冰碴
+  ctx.fillStyle = 'rgba(232,250,255,0.9)';
+  for (const [dx, dy] of [[20, -14], [26, -6], [14, -2]]) {
+    ctx.beginPath();
+    ctx.moveTo(dx - 2, dy); ctx.lineTo(dx, dy + 7 + Math.sin(t * 2 + dx) * 1.2); ctx.lineTo(dx + 2, dy);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+// 浊浪号角：一只斜插在架子上的绿铜号角，号口吐着毒雾
+function drawTidehorn(ctx, m) {
+  const P = pal(2), t = time;
+  pedestal(ctx, P, 46, 2);
+  ctx.fillStyle = P.dark;
+  rr(ctx, -6, -6, 12, 24, 4); ctx.fill();
+  // 号角
+  ctx.save();
+  ctx.translate(-4, -12);
+  ctx.rotate(-0.22);
+  ctx.fillStyle = '#4e8a5c';
+  ctx.beginPath();
+  ctx.moveTo(6, -6); ctx.lineTo(-30, -18); ctx.lineTo(-30, 14); ctx.lineTo(6, 6);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#6fb37e';
+  ctx.beginPath();
+  ctx.moveTo(4, -4); ctx.lineTo(-26, -14); ctx.lineTo(-26, 10); ctx.lineTo(4, 4);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#2f5c3c';
+  ctx.beginPath(); ctx.ellipse(-29, -2, 3.5, 15, 0, 0, TAU); ctx.fill();
+  ctx.restore();
+  // 吹出去的毒浪
+  for (let i = 0; i < 3; i++) {
+    const ph = (t * 1.1 + i * 0.34) % 1;
+    ctx.strokeStyle = 'rgba(139,224,74,' + (0.6 * (1 - ph)).toFixed(2) + ')';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(-34, -14, 6 + ph * 22, Math.PI * 0.68, Math.PI * 1.32);
+    ctx.stroke();
+  }
+  // 号身上的铜环
+  ctx.strokeStyle = '#ffc531'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-2, -16); ctx.lineTo(-2, 2); ctx.stroke();
+}
+
+// 炙铁火盆：一张烧红的铁栅，栅上支着尖刺
+function drawBrazier(ctx, m) {
+  const P = pal(2), t = time, glow = 0.55 + Math.sin(t * 3.2) * 0.3;
+  pedestal(ctx, P, 52, 2);
+  // 盆
+  ctx.fillStyle = '#3a2a1e';
+  ctx.beginPath();
+  ctx.moveTo(-26, -6); ctx.lineTo(26, -6); ctx.lineTo(20, 18); ctx.lineTo(-20, 18);
+  ctx.closePath(); ctx.fill();
+  // 炭火
+  emissive(ctx, 'rgba(255,140,50,' + glow + ')', 16, () => {
+    ctx.fillStyle = cachedRG(ctx, 0, -4, 1, 0, -4, 24, [0, '#fff0b0', 0.45, '#ff7a2e', 1, '#8c1f04']);
+    ctx.beginPath(); ctx.ellipse(0, -4, 24, 7, 0, 0, TAU); ctx.fill();
+  });
+  // 栅条
+  ctx.fillStyle = '#5c4234';
+  for (let i = -3; i <= 3; i++) rr(ctx, i * 7 - 1.6, -8, 3.2, 6, 1), ctx.fill();
+  // 尖刺
+  ctx.fillStyle = '#c8d4e0';
+  for (let i = -2; i <= 2; i++) {
+    const hgt = 16 - Math.abs(i) * 2;
+    ctx.beginPath();
+    ctx.moveTo(i * 10 - 4, -8); ctx.lineTo(i * 10, -8 - hgt); ctx.lineTo(i * 10 + 4, -8);
+    ctx.closePath(); ctx.fill();
+    // 尖上烧红的一截
+    ctx.fillStyle = hexA('#ff7a2e', 0.8);
+    ctx.beginPath();
+    ctx.moveTo(i * 10 - 2, -8 - hgt * 0.5); ctx.lineTo(i * 10, -8 - hgt); ctx.lineTo(i * 10 + 2, -8 - hgt * 0.5);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#c8d4e0';
+  }
+  if (fxQuality > 0.4) for (let i = 0; i < 3; i++) {
+    const ph = (t * 1.4 + i * 0.33) % 1;
+    ctx.fillStyle = 'rgba(255,180,74,' + (0.6 * (1 - ph)).toFixed(2) + ')';
+    ctx.beginPath(); ctx.arc(rand(-16, 16), -10 - ph * 26, 2 * (1 - ph * 0.5), 0, TAU); ctx.fill();
+  }
+}
+
+// 极光护穹：一只半透明的穹顶，穹里挂着脉冲环
+function drawAuroradome(ctx, m) {
+  const P = pal(3), t = time;
+  pedestal(ctx, P, 46, 3);
+  panel(ctx, -16, 2, 32, 16, 5, P);
+  // 三根支柱
+  ctx.fillStyle = P.dark;
+  for (const sx of [-18, 0, 18]) { rr(ctx, sx - 2.5, -14, 5, 18, 2); ctx.fill(); }
+  // 穹顶
+  const grd = ctx.createLinearGradient(0, -44, 0, -6);
+  grd.addColorStop(0, 'rgba(160,255,214,0.45)');
+  grd.addColorStop(0.5, 'rgba(120,200,255,0.3)');
+  grd.addColorStop(1, 'rgba(120,200,255,0.05)');
+  ctx.fillStyle = grd;
+  ctx.beginPath(); ctx.arc(0, -12, 26, Math.PI, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(180,255,230,0.75)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, -12, 26, Math.PI, TAU); ctx.stroke();
+  // 穹里流动的极光带
+  for (let i = 0; i < 3; i++) {
+    const ph = (t * 0.5 + i * 0.33) % 1;
+    ctx.strokeStyle = 'rgba(' + (i % 2 ? '160,255,214' : '150,190,255') + ',' + (0.5 * (1 - Math.abs(ph - 0.5) * 2)).toFixed(2) + ')';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, -12, 8 + ph * 16, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+  }
+  // 脉冲环
+  for (let i = 0; i < 2; i++) {
+    const ph = (t * 1.1 + i * 0.5) % 1;
+    ctx.strokeStyle = 'rgba(159,196,255,' + (0.55 * (1 - ph)).toFixed(2) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 12, 18 + ph * 30, 6 + ph * 9, 0, 0, TAU); ctx.stroke();
+  }
+  emissive(ctx, 'rgba(160,255,214,0.9)', 12, () => {
+    ctx.fillStyle = '#c8ffe8';
+    ctx.beginPath(); ctx.arc(0, -14, 4, 0, TAU); ctx.fill();
+  });
+}
+
+// 天穹蜂巢：六边巢体，巢口飞出小无人机，底下一圈加速环
+function drawSkyhive(ctx, m) {
+  const P = pal(3), t = time;
+  pedestal(ctx, P, 44, 3);
+  // 巢
+  ctx.save();
+  ctx.translate(0, -14);
+  for (const [dx, dy, rr2] of [[0, 0, 17], [-14, 9, 11], [14, 9, 11]]) {
+    ctx.fillStyle = dx === 0 ? '#e0b554' : '#c08a3a';
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = i * TAU / 6 + Math.PI / 6;
+      const px = dx + Math.cos(a) * rr2, py = dy + Math.sin(a) * rr2;
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#4a3410';
+    ctx.beginPath(); ctx.arc(dx, dy, rr2 * 0.42, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+  // 飞出去的小机
+  for (let i = 0; i < 3; i++) {
+    const a = t * 1.8 + i * 2.1;
+    const px = Math.cos(a) * 30, py = -14 + Math.sin(a) * 14;
+    ctx.fillStyle = '#9fb2c6';
+    rr(ctx, px - 4, py - 2.5, 8, 5, 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,225,245,0.5)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(px - 6, py - 3); ctx.lineTo(px + 6, py - 3); ctx.stroke();
+  }
+  // 加速环
+  for (let i = 0; i < 2; i++) {
+    const ph = (t * 1.3 + i * 0.5) % 1;
+    ctx.strokeStyle = 'rgba(255,215,100,' + (0.5 * (1 - ph)).toFixed(2) + ')';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.ellipse(0, 14, 16 + ph * 26, 6 + ph * 8, 0, 0, TAU); ctx.stroke();
+  }
+}
+
+// 虚空瞳：一只悬着的紫瞳，瞳前架着一根细长的狙击管
+function drawVoideye(ctx, m) {
+  const P = pal(3), t = time;
+  const rec = (m && m.recoil > 0) ? m.recoil * 22 : 0;
+  pedestal(ctx, P, 44, 3);
+  panel(ctx, -14, 4, 28, 14, 5, P);
+  // 悬浮的瞳
+  const fy = -20 + Math.sin(t * 1.4) * 2.5;
+  emissive(ctx, 'rgba(201,138,255,0.85)', 16, () => {
+    ctx.fillStyle = cachedRG(ctx, 0, fy, 1, 0, fy, 22, [0, '#ffffff', 0.4, '#d8b8ff', 1, '#6b2ab0']);
+    ctx.beginPath(); ctx.ellipse(0, fy, 21, 14, 0, 0, TAU); ctx.fill();
+  });
+  ctx.fillStyle = '#1a0a30';
+  ctx.beginPath(); ctx.ellipse(-3 + Math.sin(t * 0.9) * 5, fy, 5.5, 10, 0, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(232,213,255,0.85)'; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.ellipse(0, fy, 21, 14, 0, 0, TAU); ctx.stroke();
+  // 狙击管
+  ctx.fillStyle = '#2f2545';
+  rr(ctx, 6 - rec, fy - 3, 36, 7, 3); ctx.fill();
+  ctx.fillStyle = '#a76ee8';
+  rr(ctx, 14 - rec, fy - 1.5, 20, 3, 1.5); ctx.fill();
+  // 前面的折射片
+  ctx.strokeStyle = 'rgba(201,138,255,0.8)'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(30, fy - 16); ctx.lineTo(38, fy); ctx.lineTo(30, fy + 16);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(201,138,255,0.14)';
+  ctx.beginPath();
+  ctx.moveTo(30, fy - 16); ctx.lineTo(38, fy); ctx.lineTo(30, fy + 16);
+  ctx.closePath(); ctx.fill();
+}
+
 function drawObeliskgun(ctx, m) {
   const t = time;
   const ch = m && m.charge !== undefined ? m.charge : 0.5;
@@ -9690,7 +10135,7 @@ function drawEnemy(e) {
   const flash = e.flash > 0;
   const frozen = e.slowT > 0;
   // 接地表现跟着地形走：泡在水里的推开一圈涟漪，站在地上的落一块影子
-  if (laneOf(e.row) === 'W' && !e.fly) {
+  if (terrainAtX(e.row, e.x) === 'W' && !e.fly) {
     g.lineWidth = 1.6;
     for (let i = 0; i < 2; i++) {
       const rp = (time * 0.8 + e.row * 0.37 + i * 0.5) % 1;
@@ -14150,6 +14595,246 @@ function drawBanner() {
 }
 
 /* ========== 调试接口（供自动化测试） ========== */
+/* ========== 小游戏：锤机器人 ==========
+   和塔防共用画布与指针事件，但完全是另一套状态机：
+   state === 'whack' 时主循环走 updateWhack / drawWhack，不碰战场那一套。 */
+const WK_COLS = 5, WK_ROWS = 3;
+const WK_TIME = 60;
+let wk = null;
+function wkBest() { try { return +(localStorage.getItem('mg_whackBest') || 0); } catch (e) { return 0; } }
+function wkSaveBest(v) { try { localStorage.setItem('mg_whackBest', String(v)); } catch (e) {} }
+
+function startWhack() {
+  closeDeck();
+  const holes = [];
+  const gw = W - 200, gh = H - 170;
+  for (let r = 0; r < WK_ROWS; r++) {
+    for (let c = 0; c < WK_COLS; c++) {
+      holes.push({
+        x: 100 + gw * (c + 0.5) / WK_COLS,
+        y: 120 + gh * (r + 0.5) / WK_ROWS,
+        up: 0,          // 0..1 冒出来的高度
+        dir: 0,         // 1 上升 / -1 缩回
+        kind: null,     // scrap | armored | repair
+        life: 0, hit: 0, flash: 0,
+      });
+    }
+  }
+  wk = { t: WK_TIME, score: 0, combo: 0, bestCombo: 0, hits: 0, miss: 0,
+         spawnT: 0.6, best: wkBest(), swing: 0, mx: W / 2, my: H / 2, ended: false };
+  wk.holes = holes;
+  state = 'whack';
+  document.body.classList.add('minigame');
+  fitStage();
+  show('menu', false); show('end', false); show('mini', false); show('clear', false);
+  banner('🔨 锤机器人', '冒头就砸 —— 蓝色的维修机器人别砸，砸了扣分');
+}
+
+// 三种冒头的目标：分值、停留时间、砸中的反馈都不一样
+const WK_KIND = {
+  scrap:   { score: 10, dur: [1.15, 0.7], w: 0.55 },
+  armored: { score: 25, dur: [0.85, 0.5], w: 0.3 },
+  repair:  { score: -30, dur: [1.3, 0.9], w: 0.15 },
+};
+function wkPick() {
+  const r = Math.random();
+  return r < 0.55 ? 'scrap' : r < 0.85 ? 'armored' : 'repair';
+}
+function updateWhack(dt) {
+  if (!wk || wk.ended) return;
+  wk.t -= dt;
+  if (wk.swing > 0) wk.swing -= dt;
+  // 越到后面冒得越快、缩得越急
+  const prog = 1 - wk.t / WK_TIME;
+  wk.spawnT -= dt;
+  if (wk.spawnT <= 0) {
+    wk.spawnT = Math.max(0.22, 0.85 - prog * 0.55) * rand(0.7, 1.3);
+    const idle = wk.holes.filter(h => !h.kind);
+    if (idle.length) {
+      const h = idle[Math.floor(Math.random() * idle.length)];
+      h.kind = wkPick();
+      const d = WK_KIND[h.kind].dur;
+      h.life = d[0] + (d[1] - d[0]) * prog;
+      h.dir = 1; h.up = 0; h.hit = 0;
+    }
+  }
+  for (const h of wk.holes) {
+    if (h.flash > 0) h.flash -= dt;
+    if (!h.kind) continue;
+    if (h.hit > 0) {
+      h.hit -= dt;
+      h.up = Math.max(0, h.up - dt * 5);
+      if (h.hit <= 0) { h.kind = null; h.up = 0; h.dir = 0; }
+      continue;
+    }
+    if (h.dir > 0) {
+      h.up = Math.min(1, h.up + dt * 6);
+      if (h.up >= 1) { h.dir = 0; }
+    } else if (h.dir === 0) {
+      h.life -= dt;
+      if (h.life <= 0) {
+        h.dir = -1;
+        if (h.kind !== 'repair') { wk.combo = 0; wk.miss++; }   // 让杂兵溜了：断连击
+      }
+    } else {
+      h.up = Math.max(0, h.up - dt * 4);
+      if (h.up <= 0) { h.kind = null; h.dir = 0; }
+    }
+  }
+  if (wk.t <= 0) endWhack();
+}
+function wkHit(x, y) {
+  if (!wk || wk.ended) return;
+  wk.swing = 0.16;
+  wk.mx = x; wk.my = y;
+  let best = null, bd = 1e9;
+  for (const h of wk.holes) {
+    if (!h.kind || h.hit > 0 || h.up < 0.35) continue;
+    const d = Math.hypot(x - h.x, y - (h.y - h.up * 26));
+    if (d < 52 && d < bd) { best = h; bd = d; }
+  }
+  if (!best) { wk.combo = 0; return; }
+  const K = WK_KIND[best.kind];
+  best.hit = 0.26; best.flash = 0.3;
+  if (K.score > 0) {
+    wk.combo++;
+    wk.bestCombo = Math.max(wk.bestCombo, wk.combo);
+    wk.hits++;
+    const mul = 1 + Math.min(wk.combo - 1, 9) * 0.2;
+    const gain = Math.round(K.score * mul);
+    wk.score += gain;
+    addFloat(best.x, best.y - 40, '+' + gain + (wk.combo > 1 ? ' ×' + wk.combo : ''), '#ffc531');
+    spawnParts(best.x, best.y - 10, '#ffc531', 12, 130, 0.5, 'spark');
+    sfx('shred');
+  } else {
+    wk.combo = 0;
+    wk.score = Math.max(0, wk.score + K.score);
+    addFloat(best.x, best.y - 40, K.score + ' 砸错了！', '#ff5d5d');
+    spawnParts(best.x, best.y - 10, '#4cc2ff', 12, 130, 0.5, 'spark');
+    shake(0.2, 4);
+    sfx('error');
+  }
+}
+function endWhack() {
+  if (!wk || wk.ended) return;
+  wk.ended = true;
+  state = 'miniover';
+  const isBest = wk.score > wk.best;
+  if (isBest) { wkSaveBest(wk.score); wk.best = wk.score; }
+  $('miniTitle').innerHTML = isBest ? '🏆 <span class="gold">新纪录！</span>' : '🔨 时间到';
+  $('miniSub').textContent = '砸中 ' + wk.hits + ' 台 · 漏掉 ' + wk.miss
+    + ' 台 · 最长连击 ×' + wk.bestCombo + ' · 最高分 ' + wk.best;
+  $('miniScore').textContent = wk.score;
+  show('mini', true);
+  sfx(isBest ? 'win' : 'lose');
+}
+function drawWhack() {
+  // 背景：一块铁皮台面
+  g.fillStyle = cachedLG(g, 0, 0, 0, H, [0, '#1b2430', 0.6, '#141b25', 1, '#0d1219']);
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(255,255,255,0.02)';
+  for (let x = 0; x < W; x += 56) g.fillRect(x, 0, 28, H);
+  // 计时条
+  const tw = (W - 200) * clamp(wk.t / WK_TIME, 0, 1);
+  g.fillStyle = 'rgba(0,0,0,0.45)';
+  rr(g, 100, 46, W - 200, 14, 7); g.fill();
+  g.fillStyle = wk.t < 10 ? '#ff5d5d' : '#58d68b';
+  rr(g, 100, 46, Math.max(2, tw), 14, 7); g.fill();
+  g.font = '900 22px sans-serif';
+  g.textAlign = 'left';
+  g.fillStyle = '#ffc531';
+  g.fillText('得分 ' + wk.score, 100, 34);
+  g.textAlign = 'right';
+  g.fillStyle = '#9fb4c8';
+  g.fillText('剩余 ' + Math.ceil(Math.max(wk.t, 0)) + 's', W - 100, 34);
+  if (wk.combo > 1) {
+    g.textAlign = 'center';
+    g.fillStyle = '#ff9d2e';
+    g.font = '900 20px sans-serif';
+    g.fillText('连击 ×' + wk.combo, W / 2, 34);
+  }
+  g.textAlign = 'left';
+  // 洞 + 冒头的机器人
+  for (const h of wk.holes) {
+    // 洞
+    g.fillStyle = '#0a0e14';
+    g.beginPath(); g.ellipse(h.x, h.y, 46, 17, 0, 0, TAU); g.fill();
+    g.strokeStyle = '#3a4a5e'; g.lineWidth = 4;
+    g.beginPath(); g.ellipse(h.x, h.y, 46, 17, 0, 0, TAU); g.stroke();
+    if (!h.kind || h.up <= 0.01) continue;
+    const lift = h.up * 52;
+    g.save();
+    // 用洞口裁一下，冒出来的部分才像是从洞里升上来
+    g.beginPath();
+    g.rect(h.x - 48, h.y - 124, 96, 124 + 4);
+    g.clip();
+    g.translate(h.x, h.y + 6 - lift);
+    const squash = h.hit > 0 ? 1 + (0.26 - h.hit) * 2.2 : 1;
+    g.scale(1, 1 / squash);
+    wkDrawBot(h.kind, h.flash > 0);
+    g.restore();
+    // 洞沿压在身体前面
+    g.fillStyle = '#26323f';
+    g.beginPath(); g.ellipse(h.x, h.y + 4, 46, 13, 0, 0, TAU); g.fill();
+  }
+  // 锤子跟着指针
+  const sw = wk.swing > 0 ? (0.16 - wk.swing) / 0.16 : 1;
+  g.save();
+  g.translate(wk.mx + 26, wk.my - 16);
+  g.rotate(-0.9 + sw * 0.95);
+  g.fillStyle = '#6b5233';
+  rr(g, -4, 0, 8, 46, 4); g.fill();
+  g.fillStyle = '#8fa3b8';
+  rr(g, -20, -16, 40, 22, 6); g.fill();
+  g.fillStyle = '#c2d3e2';
+  rr(g, -20, -16, 40, 7, 4); g.fill();
+  g.fillStyle = '#5c6d80';
+  rr(g, -22, -13, 6, 16, 3); g.fill();
+  rr(g, 16, -13, 6, 16, 3); g.fill();
+  g.restore();
+  drawParts();
+  drawFloats();
+}
+// 三种目标的小造型（只有上半身，下半身在洞里）
+function wkDrawBot(kind, flash) {
+  if (kind === 'repair') {
+    eBody(-24, -34, 48, 44, 12, '#bfe9ff', '#3f7a9c', '#1e3d52');
+    g.fillStyle = '#4cc2ff';
+    rr(g, -14, -26, 28, 9, 4); g.fill();
+    eEye(-9, -10, 5, '#ffffff');
+    eEye(9, -10, 5, '#ffffff');
+    // 头顶的十字灯：一眼看出来是自己人
+    emissive(g, 'rgba(88,214,139,0.95)', 12, () => {
+      g.fillStyle = '#58d68b';
+      rr(g, -4, -50, 8, 20, 3); g.fill();
+      rr(g, -10, -44, 20, 8, 3); g.fill();
+    });
+  } else if (kind === 'armored') {
+    eBody(-27, -36, 54, 48, 10, '#9fb2c6', '#4c5f74', '#232f3d');
+    hazardE(-22, -30, 44, 9);
+    eEye(-10, -12, 5.5, '#ff5d5d');
+    eEye(10, -12, 5.5, '#ff5d5d');
+    g.fillStyle = '#6b7c90';
+    for (const sgn of [-1, 1]) {
+      g.beginPath();
+      g.moveTo(sgn * 26, -30); g.lineTo(sgn * 40, -36); g.lineTo(sgn * 26, -16);
+      g.closePath(); g.fill();
+    }
+  } else {
+    eBody(-22, -32, 44, 42, 11, '#c8d4e0', '#5f6f80', '#2a3543');
+    eEye(-8, -12, 5, '#ff9d2e');
+    eEye(8, -12, 5, '#ff9d2e');
+    g.fillStyle = '#7f8ca0';
+    rr(g, -3, -46, 6, 14, 3); g.fill();
+    g.fillStyle = '#ffc531';
+    g.beginPath(); g.arc(0, -48, 4, 0, TAU); g.fill();
+  }
+  if (flash) {
+    g.fillStyle = 'rgba(255,255,255,0.55)';
+    rr(g, -28, -50, 56, 62, 12); g.fill();
+  }
+}
+
 window.__game = {
   start: m => startGame(m),
   addEnergy: n => { energy += n; },
@@ -14230,6 +14915,15 @@ window.__game = {
   shovelPad: (r, c) => { if (!hasPad(r, c)) return false; pads[r][c] = false; return true; },
   kingHold: () => kingHoldX(),
   get campStyle() { return campStyle; },
+  get campDiff() { return campDiff; },
+  setDiff: (k) => { if (DIFFS[k]) { campDiff = k; saveDiff(); } },
+  get unlockedAll() { return allCardsUnlocked(); },
+  cardOn: (t) => cardAvailable(t),
+  rollBox: () => rollType(),
+  get geom() { return { GRID_X, GRID_Y, CELL_W, CELL_H, COLS, ROWS, W, H }; },
+  get whack() { return wk; },
+  whackTick: (dt) => { updateWhack(dt); updateFx(dt); },
+  whackHit: (x, y) => wkHit(x, y),
   setStyle: (k) => { if (STYLE_NAME[k]) { campStyle = k; saveStyle(); } },
   stopCamp: () => stopCampaign(),
   damageMachine: (r, c, d) => { if (grid[r][c]) damageMachine(grid[r][c], d); },
@@ -14296,7 +14990,8 @@ window.__game = {
   get curStage() { return curStage; },
   get mapBoss() { return mapDef().boss; },
   laneAt: (r) => laneOf(r),
-  rowOk: (t, r) => rowAllows(t, r),
+  terrainAt: (r, c) => terrainAt(r, c),
+  rowOk: (t, r, c) => rowAllows(t, r, c),
   nextOf: (m, st) => nextStage(m, st),
   furthest: () => furthestStage(),
   clearNow: () => clearStage(),

@@ -184,7 +184,7 @@
     border: 1px solid var(--line); background: #10151c;
     box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
     width: 100%; max-width: 100%; max-height: 100%;
-    aspect-ratio: 940 / 526;   /* JS 会按可用空间写死精确像素，这里只是首帧兜底 */
+    aspect-ratio: 1088 / 590;   /* JS 会按可用空间写死精确像素，这里只是首帧兜底 */
   }
   #cv {
     display: block; width: 100%; height: 100%;
@@ -348,6 +348,13 @@
     background: linear-gradient(160deg, #8fd0ff, #3f8fbf);
     box-shadow: 0 4px 0 #2a6a92, 0 8px 18px rgba(80, 170, 220, .25); color: #082334;
   }
+  body.minigame #tray { display: none; }
+  body.minigame #stats, body.minigame #pauseBtn, body.minigame #restartBtn { display: none; }
+  body.minigame footer { opacity: .5; }
+  .bigBtn.mini {
+    background: linear-gradient(160deg, #ffd7a0, #e08a2f);
+    box-shadow: 0 4px 0 #a75f12, 0 8px 18px rgba(230, 150, 60, .28); color: #3a2206;
+  }
   .bigBtn.campaign {
     background: linear-gradient(160deg, #8fe3b0, #2f9a68);
     box-shadow: 0 4px 0 #1d6a46, 0 8px 20px rgba(80, 220, 150, .3); color: #04301e;
@@ -387,6 +394,7 @@
   .styleBtn.on { border-color: var(--ok); background: rgba(88, 214, 139, .12); }
   .styleBtn.on b { color: var(--ok); }
   .styleWarn { font-size: 11px; color: var(--accent); margin: -4px 0 8px; text-align: left; }
+  .diffRow { margin-top: -4px; }
   body.compact .styleBtn { padding: 5px 4px; font-size: 9px; }
   body.compact .styleBtn b { font-size: 11px; }
   body.compact .styleWarn { font-size: 9px; }
@@ -425,12 +433,12 @@
     100% { transform: scale(1) rotate(0); opacity: 1; }
   }
 
-  #endStats { display: flex; gap: 18px; margin-bottom: 14px; flex-wrap: wrap; justify-content: center; }
-  #endStats .st {
+  #endStats, #miniStats { display: flex; gap: 18px; margin-bottom: 14px; flex-wrap: wrap; justify-content: center; }
+  #endStats .st, #miniStats .st {
     background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
     padding: 8px 18px; font-size: 13px; color: var(--dim);
   }
-  #endStats .st b { display: block; font-size: 22px; color: var(--text); }
+  #endStats .st, #miniStats .st b { display: block; font-size: 22px; color: var(--text); }
   #submitRow { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; justify-content: center; }
   #nameInput {
     background: var(--panel2); border: 1px solid var(--line); color: var(--text);
@@ -502,7 +510,10 @@
   }
   body.compact .bigBtn { font-size: 14px; padding: 9px 18px; }
   /* 横屏手机：关卡表要一屏放下四张地图 */
-  body.compact #stageSel { max-height: 54vh; }
+  /* 横屏手机上选关：把标题让出来，列表尽量撑满 */
+  body.compact .ov.picking h1, body.compact .ov.picking .sub,
+  body.compact .ov.picking .modeNote { display: none; }
+  body.compact #stageSel { max-height: 72vh; }
   body.compact .mapRow { margin-bottom: 5px; }
   body.compact .mapRow h4 { font-size: 11px; margin-bottom: 3px; gap: 5px; }
   body.compact .mapRow h4 small { font-size: 9px; }
@@ -511,8 +522,8 @@
   body.compact .stageBtn.boss { font-size: 9px; }
   body.compact .stageBtn.boss b { font-size: 10px; }
   body.compact #resumeCampaign { padding: 5px 14px; font-size: 12px; margin-bottom: 6px; }
-  body.compact #endStats .st { padding: 5px 12px; font-size: 11px; }
-  body.compact #endStats .st b { font-size: 17px; }
+  body.compact #endStats .st, #miniStats .st { padding: 5px 12px; font-size: 11px; }
+  body.compact #endStats .st, #miniStats .st b { font-size: 17px; }
   body.compact #board, body.compact .board { max-height: 130px; min-width: 220px; font-size: 12px; }
   body.compact #revealCard { padding: 10px 18px; }
   body.compact #revealCard canvas { width: 62px; height: 62px; }
@@ -668,6 +679,7 @@
         <button class="bigBtn classic" id="startClassicBtn">🃏 普通模式</button>
         <button class="bigBtn campaign" id="startCampaignBtn">🗺️ 战役</button>
         <button class="bigBtn creative" id="startCreativeBtn">🛠️ 创造模式</button>
+        <button class="bigBtn mini" id="startWhackBtn">🔨 锤机器人</button>
         <button class="bigBtn alt" id="menuBoardBtn">🏆 排行榜</button>
       </div>
       <div class="modeNote">战役：先挑玩法，再挑地图与关卡 —— 每张图 10 关，第 10 关是专属 Boss · 单局模式：盲盒拼手气 / 普通种卡 / 创造沙盒</div>
@@ -689,6 +701,16 @@
       <div class="btnRow">
         <button class="bigBtn" id="resumeBtn">继续游戏</button>
         <button class="bigBtn alt" id="pauseRestartBtn">重新开始</button>
+      </div>
+    </div>
+
+    <div class="ov" id="mini">
+      <h1 id="miniTitle"></h1>
+      <div class="sub" id="miniSub"></div>
+      <div id="miniStats"><div class="st">本局得分<b id="miniScore">0</b></div></div>
+      <div class="btnRow">
+        <button class="bigBtn" id="miniAgainBtn">🔄 再来一次</button>
+        <button class="bigBtn alt" id="miniMenuBtn">■ 回菜单</button>
       </div>
     </div>
 
