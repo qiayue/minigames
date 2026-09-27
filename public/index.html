@@ -394,6 +394,15 @@
   .styleBtn.on { border-color: var(--ok); background: rgba(88, 214, 139, .12); }
   .styleBtn.on b { color: var(--ok); }
   .styleWarn { font-size: 11px; color: var(--accent); margin: -4px 0 8px; text-align: left; }
+  #miniSel { max-width: 720px; margin: 0 auto; }
+  .miniBtn {
+    display: block; width: 100%; padding: 12px 16px; border-radius: 12px; cursor: pointer;
+    background: var(--panel2); color: var(--dim); border: 2px solid var(--line);
+    font-size: 12px; font-weight: 600; line-height: 1.5; text-align: left; margin-bottom: 8px;
+  }
+  .miniBtn b { display: block; font-size: 17px; font-weight: 800; color: var(--text); margin-bottom: 2px; }
+  .miniBtn:hover { border-color: var(--accent); background: var(--panel); }
+  .miniBtn .best { float: right; font-size: 12px; color: var(--accent); font-weight: 800; }
   .diffRow { margin-top: -4px; }
   body.compact .styleBtn { padding: 5px 4px; font-size: 9px; }
   body.compact .styleBtn b { font-size: 11px; }
@@ -672,18 +681,16 @@
         <div>🗑️ <b>碎纸机</b>：把靠近的机器人整个塞进去粉碎；🥊 弹簧拳机近战无视护盾</div>
         <div>🧪 <b>杂交</b>：<b>任意两台机器都能合成</b>！同类升级（炮台→双管→<b>加特林</b>）；异类叠能力，一台机器最多同时拥有 <b>5 种能力</b></div>
         <div>⚠️ <b>新威胁</b>：自爆无人蜂撞机自爆、盾卫机器人的护盾能挡住子弹！</div>
-        <div>🛡️ <b>目标</b>：守住 10 波进攻，别让机器人冲进左侧基地；<b>战役</b>每关 5 波，四张地图各有专属关底 Boss</div>
+        <div>🛡️ <b>目标</b>：战役每关守住 5 波，别让机器人冲进左侧基地；每张图第 10 关是专属关底 Boss</div>
       </div>
       <div class="btnRow">
-        <button class="bigBtn" id="startBtn">🎁 盲盒模式</button>
-        <button class="bigBtn classic" id="startClassicBtn">🃏 普通模式</button>
         <button class="bigBtn campaign" id="startCampaignBtn">🗺️ 战役</button>
-        <button class="bigBtn creative" id="startCreativeBtn">🛠️ 创造模式</button>
-        <button class="bigBtn mini" id="startWhackBtn">🔨 锤机器人</button>
+        <button class="bigBtn mini" id="startMiniBtn">🔨 小游戏</button>
         <button class="bigBtn alt" id="menuBoardBtn">🏆 排行榜</button>
       </div>
-      <div class="modeNote">战役：先挑玩法，再挑地图与关卡 —— 每张图 10 关，第 10 关是专属 Boss · 单局模式：盲盒拼手气 / 普通种卡 / 创造沙盒</div>
+      <div class="modeNote">战役：先挑玩法（盲盒 / 普通 / 创造）与难度，再挑地图与关卡 —— 八张图各 10 关，第 10 关是专属 Boss</div>
       <div id="stageSel" style="display:none; margin-top:12px;"></div>
+      <div id="miniSel" style="display:none; margin-top:12px;"></div>
       <div id="menuBoard" style="margin-top:14px; display:none;"></div>
     </div>
 
