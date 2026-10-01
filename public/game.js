@@ -115,6 +115,9 @@ const AMMO_KINDS = ['shot', 'aa', 'laser', 'mortar', 'sniper', 'zap', 'prism', '
 let linkSeq = 0;          // 虚空链接的组号
 const _fxSeen = { vortex: 0, rewind: 0, salvage: 0 };   // 只给自动化测试看的计数
 let suckLines = [];       // 抽能潜艇的管线特效
+let worms = [];           // 沙虫巢放出去的小沙虫
+const MINE_ARM = 2.2;     // 地雷下地之后要装多久的药
+let energyFlash = 0;      // 能量被抽走时 HUD 闪一下
 let pads = [];
 function hasPad(r, c) { return !!(pads[r] && pads[r][c]); }
 
@@ -297,7 +300,7 @@ const MACHINES = {
   tesla:     { name: '特斯拉线圈', rarity: 'epic',   hp: 350,  desc: '闪电链同时打击本行多个敌人' },
   railgun:   { name: '轨道激光炮', rarity: 'epic',   hp: 300,  desc: '激光贯穿本行所有敌人' },
   rocket:    { name: '火箭发射井', rarity: 'epic',   hp: 200,  desc: '发射火箭贯穿全行，随后自动装填 15 秒' },
-  mine:      { name: '地雷布设器', rarity: 'common', hp: 260,  desc: '在本行前方埋设地雷，敌人踩中即爆炸' },
+  mine:      { name: '地雷',       rarity: 'common', hp: 260,  desc: '直接种在地上的雷：装好药之后，谁踩上这一格就跟它同归于尽' },
   flame:     { name: '火焰喷射器', rarity: 'rare',   hp: 340,  desc: '向前喷火，持续灼烧范围内的敌人' },
   poison:    { name: '毒液喷射塔', rarity: 'rare',   hp: 300,  desc: '毒液弹让敌人中毒，持续掉血' },
   mortar:    { name: '迫击炮台',   rarity: 'rare',   hp: 280,  desc: '曲射炮弹轰炸本行最远的敌人，范围溅射' },
@@ -328,6 +331,7 @@ const MACHINES = {
   rewind:    { name: '霜钟回溯塔', rarity: 'epic',   hp: 340,  desc: '每隔几秒把范围内所有敌人拽回它们上一次脉冲时站的位置——走过的路要重走一遍' },
   blackhole: { name: '黑洞发生器', rarity: 'epic',   hp: 300,  desc: '开一个黑洞把周围敌人吸住定身，并按当前生命百分比撕伤害' },
   salvage:   { name: '拆解回收站', rarity: 'rare',   hp: 400,  desc: '范围内每死一个敌人就地拆成废料，按它的身价返还能量——杀得越多越有钱' },
+  sandworm:  { name: '沙虫巢',     rarity: 'epic',   hp: 520,  desc: '往前放小沙虫：在沙底下拱着走，一路啃穿挡在前面的敌人——巢越大，放出来的虫越多越长' },
   curse:     { name: '诅咒石碑',   rarity: 'epic',   hp: 360,  desc: '给敌人挂上法老的诅咒：带着诅咒死的会炸开（按它最大生命算），并把诅咒传染给炸到的人' },
   voidlink:  { name: '虚空链接',   rarity: 'epic',   hp: 320,  desc: '把几个敌人链在一起：打其中任意一个，其余被链住的同步掉血' },
   // ---- 合成机型（只能通过合成获得，不进盲盒池） ----
@@ -365,7 +369,7 @@ const CLASSIC_ORDER = [
   // 地图专属卡排在最后，只有对应地图（和创造模式）才会出现在卡槽里
   'scrapult', 'rivetgun',
   'lilypad', 'sub', 'bubble',
-  'salvage', 'vortex', 'torpedo',
+  'salvage', 'vortex', 'torpedo', 'sandworm',
   'quicksand', 'conch',
   'curse', 'forgeammo', 'moltengun',
   'rewind', 'icespire',
@@ -468,7 +472,7 @@ const CLASSIC_COST = {
   salvage: 175, curse: 275, voidlink: 275,
   scrapult: 250, rivetgun: 200, torpedo: 275, conch: 200, moltengun: 225, icespire: 200,
   skylance: 300, voidprism: 325,
-  obeliskgun: 275, sandworm: 225,
+  obeliskgun: 275, sandworm: 250,
   junkcoil: 250, icetrawler: 225, tidehorn: 225, brazier: 200,
   auroradome: 275, skyhive: 300, voideye: 325,
   lilypad: 15, sub: 225, bubble: 175,
@@ -484,7 +488,7 @@ const CLASSIC_CD = {
   salvage: 11, curse: 16, voidlink: 16,
   scrapult: 14, rivetgun: 11, torpedo: 15, conch: 15, moltengun: 12, icespire: 12,
   skylance: 17, voidprism: 18,
-  obeliskgun: 16, sandworm: 13,
+  obeliskgun: 16, sandworm: 14,
   junkcoil: 14, icetrawler: 12, tidehorn: 12, brazier: 11,
   auroradome: 16, skyhive: 17, voideye: 18,
   lilypad: 1.5, sub: 13, bubble: 11,
@@ -500,7 +504,7 @@ const KIND_ORDER = [
   'hunter', 'saw', 'shred', 'mine', 'net', 'flame', 'poison', 'emp', 'gravity', 'magnet',
   'melee', 'frost', 'drone', 'spikes', 'armor', 'deflect',
   'vortex', 'jammer', 'blackhole', 'forgeammo', 'rewind', 'quicksand', 'sub', 'bubble',
-  'salvage', 'curse', 'voidlink',
+  'salvage', 'curse', 'voidlink', 'worm',
   'shield', 'booster', 'repair', 'energy',
   // 元素排在最后：它们是「附魔」，机体永远让给别的模块
   'voidglass', 'rimeglass', 'acidglass', 'ionstorm', 'venomplasma', 'cryotoxin',
@@ -556,7 +560,7 @@ const LADDER_NAME = {
   zap:    ['特斯拉线圈', '高压电塔', '雷暴中枢'],
   laser:  ['轨道激光炮', '相位激光炮', '歼星激光'],
   rocket: ['火箭发射井', '双联火箭井', '末日火箭井'],
-  mine:   ['地雷布设器', '高爆布雷器', '湮灭雷区'],
+  mine:   ['地雷', '高爆地雷', '湮灭地雷'],
   flame:  ['火焰喷射器', '烈焰喷射器', '地狱火炬'],
   poison: ['毒液喷射塔', '剧毒喷射塔', '瘟疫散布器'],
   mortar: ['迫击炮台', '重型迫击炮', '轨道轰炸台'],
@@ -575,17 +579,19 @@ const LADDER_NAME = {
   drone:  ['无人机工厂', '蜂群工厂', '天空母舰'],
   gravity:['引力井', '奇点井', '黑洞发生器'],
   prism:  ['光棱塔', '三棱激光塔', '虹光棱镜'],
-  vortex:    ['换位漩涡', '双涡换位器', '深渊传送涡'],
-  quicksand: ['流沙陷阱', '沼泽陷阱', '吞噬沙海'],
-  jammer:    ['干扰天线', '压制天线', '静默穹顶'],
-  forgeammo: ['军械熔炉', '重装军械炉', '神兵铸炉'],
-  rewind:    ['霜钟回溯塔', '时停钟塔', '永冻时之塔'],
-  blackhole: ['黑洞发生器', '塌缩发生器', '事件视界'],
-  sub:       ['抽能潜艇', '掠能潜艇', '深海抽取舰'],
-  bubble:    ['气泡发生器', '浮空泡发生器', '天顶泡工厂'],
-  salvage:   ['拆解回收站', '重工回收站', '湮灭回收厂'],
-  curse:     ['诅咒石碑', '亡灵方碑', '法老诅咒碑'],
-  voidlink:  ['虚空链接', '深渊链接', '万物同命'],
+  // 新机器升级不改名：它还是那台机器，只是更大更强（造型随等级长大）
+  vortex:    ['换位漩涡', '换位漩涡', '换位漩涡'],
+  quicksand: ['流沙陷阱', '流沙陷阱', '流沙陷阱'],
+  jammer:    ['干扰天线', '干扰天线', '干扰天线'],
+  forgeammo: ['军械熔炉', '军械熔炉', '军械熔炉'],
+  rewind:    ['霜钟回溯塔', '霜钟回溯塔', '霜钟回溯塔'],
+  blackhole: ['黑洞发生器', '黑洞发生器', '黑洞发生器'],
+  sub:       ['抽能潜艇', '抽能潜艇', '抽能潜艇'],
+  bubble:    ['气泡发生器', '气泡发生器', '气泡发生器'],
+  salvage:   ['拆解回收站', '拆解回收站', '拆解回收站'],
+  curse:     ['诅咒石碑', '诅咒石碑', '诅咒石碑'],
+  voidlink:  ['虚空链接', '虚空链接', '虚空链接'],
+  worm:      ['沙虫巢', '沙虫巢', '沙虫巢'],
   // ---- 元素融合产物：只能由两种元素杂交得到，买不到 ----
   obsidian:   ['黑曜石炮', '曜岩重炮', '玄曜裂地炮'],
   plasma:     ['等离子喷枪', '等离子炬', '恒星喷流炉'],
@@ -641,6 +647,7 @@ const LADDER_TYPE = {
   salvage:   ['salvage', 'salvage2', 'salvage3'],
   curse:     ['curse', 'curse2', 'curse3'],
   voidlink:  ['voidlink', 'voidlink2', 'voidlink3'],
+  worm:      ['sandworm', 'sandworm2', 'sandworm3'],
   obsidian:   ['obsidian', 'obsidian2', 'obsidian3'],
   plasma:     ['plasma', 'plasma2', 'plasma3'],
   stormfrost: ['stormfrost', 'stormfrost2', 'stormfrost3'],
@@ -662,6 +669,7 @@ const KIND_ADJ = {
   net: '捕网', hunter: '猎空',
   vortex: '换位', quicksand: '流沙', jammer: '干扰', forgeammo: '熔铸', rewind: '回溯', blackhole: '黑洞',
   sub: '抽能', bubble: '气泡', salvage: '回收', curse: '诅咒', voidlink: '链接',
+  worm: '沙虫',
   obsidian: '黑曜石', plasma: '等离子', stormfrost: '霜雷', corrosion: '腐蚀',
   voidglass: '曜离', rimeglass: '零曜', acidglass: '蚀曜',
   ionstorm: '离暴', venomplasma: '疫离', cryotoxin: '寒疫',
@@ -670,7 +678,7 @@ const KIND_DESC = {
   shot: '发射能量弹', energy: '产出能量', armor: '高耐久装甲', melee: '近战铁拳（无视护盾）',
   frost: '冰弹减速敌人', shred: '粉碎靠近的敌人', magnet: '把敌人拖回后方',
   zap: '闪电链打击多个敌人', laser: '激光贯穿整行', rocket: '火箭轰击整行',
-  mine: '前方埋设地雷', flame: '喷火灼烧近处敌人', poison: '毒液让敌人持续掉血',
+  mine: '种在这一格的雷：踩上来就同归于尽', flame: '喷火灼烧近处敌人', poison: '毒液让敌人持续掉血',
   mortar: '曲射炮弹范围轰炸', sniper: '跨行狙击最肥的敌人', repair: '修复周围机器',
   spikes: '钉刺割伤踩上来的敌人', shield: '给周围机器套护盾', booster: '加快周围机器攻速',
   saw: '来回穿梭的锯片', emp: '脉冲瘫痪本行敌人',
@@ -689,6 +697,7 @@ const KIND_DESC = {
   salvage: '范围内的敌人死了就拆成废料，按身价返还能量',
   curse: '挂诅咒：带咒死亡会炸开并把诅咒传染出去',
   voidlink: '把几个敌人链在一起，伤害同步分摊',
+  worm: '往前放小沙虫，在沙底下拱着一路啃过去',
   obsidian: '黑曜石弹贯穿整行，命中叠「碎裂」——每层让目标多吃 12% 伤害',
   plasma: '等离子喷流灼烧走廊内所有敌人，并不断麻痹它们',
   stormfrost: '闪电链同时冻结；对已被冻结或减速的目标伤害翻倍',
@@ -710,6 +719,7 @@ const KIND_HP = {
   net: 120, hunter: -40,
   vortex: 20, quicksand: 180, jammer: 0, forgeammo: 120, rewind: 40, blackhole: 0,
   sub: 120, bubble: -40, salvage: 100, curse: 60, voidlink: 20,
+  worm: 200,
   obsidian: 260, plasma: 60, stormfrost: 90, corrosion: 40,
   voidglass: 200, rimeglass: 220, acidglass: 180, ionstorm: 120, venomplasma: 100, cryotoxin: 140,
 };
@@ -759,7 +769,6 @@ const PAIR_TYPE = [
   [['laser', 'aa'], 'skylance', '天穹长枪'],
   [['prism', 'gravity'], 'voidprism', '虚空棱镜'],
   [['laser', 'energy'], 'obeliskgun', '方尖碑炮'],
-  [['shred', 'mine'], 'sandworm', '沙虫巢'],
   [['zap', 'magnet'], 'junkcoil', '废铁电磁桩'],
   [['frost', 'net'], 'icetrawler', '结冰拖网'],
   [['poison', 'sonic'], 'tidehorn', '浊浪号角'],
@@ -816,13 +825,18 @@ function fusedElementOf(mods) {
   const hit = mods.find(mod => ELEM_TIER[mod.kind]);
   return hit ? hit.kind : null;
 }
+/* 融合机型一旦成形就不再变回「杂交」：只要身上还是那两种能力，
+   升到几级都还是它自己 —— 沙虫巢练到 5 级也是沙虫巢，不会变成「布雷粉碎机」。
+   造型随等级长大，名字后面加 Lv。 */
+function pairOf(mods) {
+  if (mods.length !== 2) return null;
+  const kinds = [mods[0].kind, mods[1].kind];
+  return PAIR_TYPE.find(p => p[0].every(k => kinds.includes(k))) || null;
+}
 function typeOfModules(mods) {
   if (mods.length === 1) return ladderType(mods[0].kind, mods[0].lv);
-  if (mods.length === 2 && mods[0].lv === 1 && mods[1].lv === 1) {
-    const kinds = [mods[0].kind, mods[1].kind];
-    const pair = PAIR_TYPE.find(p => p[0].every(k => kinds.includes(k)));
-    if (pair) return pair[1];
-  }
+  const pair = pairOf(mods);
+  if (pair) return pair[1];
   return 'hybrid';
 }
 function totalLv(mods) { return mods.reduce((s, mod) => s + mod.lv, 0); }
@@ -830,13 +844,14 @@ function nameOfModules(mods) {
   const t = totalLv(mods);
   if (mods.length === 1) {
     const m0 = mods[0];
-    return m0.lv <= 3 ? ladderName(m0.kind, m0.lv) : ladderName(m0.kind, 3) + ' Lv' + m0.lv;
+    const nm = ladderName(m0.kind, Math.min(m0.lv, 3));
+    // 名字三级同款的（新机器）就靠 Lv 标等级，老机器仍然是「炮台→双管→加特林」那一套
+    const flat = LADDER_NAME[m0.kind][0] === LADDER_NAME[m0.kind][2];
+    if (m0.lv <= 1 || (!flat && m0.lv <= 3)) return nm;
+    return nm + ' Lv' + m0.lv;
   }
-  if (mods.length === 2 && mods[0].lv === 1 && mods[1].lv === 1) {
-    const kinds = [mods[0].kind, mods[1].kind];
-    const pair = PAIR_TYPE.find(p => p[0].every(k => kinds.includes(k)));
-    if (pair) return pair[2];
-  }
+  const pr = pairOf(mods);
+  if (pr) return t > 2 ? pr[2] + ' Lv' + t : pr[2];
   // 修饰词链 + 本体名：碎纸机+装甲=装甲碎纸机，再+电池=充能装甲碎纸机……
   const adjs = [];
   for (let i = mods.length - 1; i >= 1; i--) adjs.push(KIND_ADJ[mods[i].kind]);
@@ -1151,7 +1166,7 @@ function initGame() {
   }
   enemies = []; bullets = []; orbs = []; parts = []; floats = []; zaps = []; beams = [];
   mines = []; shells = []; tracers = []; saws = []; ebullets = []; allies = []; shocks = [];
-  nets = []; missiles = []; pools = []; suckLines = []; linkSeq = 0;
+  nets = []; missiles = []; pools = []; suckLines = []; worms = []; linkSeq = 0;
   waveState = 'pre'; waveTimer = 15; queue = []; spawnT = 0;
   surgeDone = false; surgeAt = 0; alarmT = 0;
   skyT = 3; lastRows = [];
@@ -2117,7 +2132,7 @@ const MOD_STAT = {
   zap:    { cd: [2.6, 1.9, 1.3], dmg: [55, 65, 75], targets: [4, 5, 6], range: [3.4, 4.0, 4.6] },
   laser:  { cd: [3.8, 2.9, 2.1], dmg: [60, 72, 85] },
   rocket: { cd: [15, 11, 8] },
-  mine:   { cd: [7, 5, 3.5], dmg: [220, 320, 450] },
+  mine:   { cd: [7, 5, 3.5], dmg: [900, 1400, 2100] },   // 一次性的雷，所以单发给得起
   flame:  { interval: [0.28, 0.22, 0.16], dmg: [9, 13, 18], range: [1.6, 2.0, 2.4], burn: [10, 16, 24] },
   poison: { interval: [1.6, 1.2, 0.9], dmg: [14, 18, 24], dot: [16, 26, 38], dur: [4, 5, 6], range: [3.6, 4.2, 4.8] },
   mortar: { cd: [3.2, 2.4, 1.8], dmg: [70, 95, 125], splash: [58, 68, 80], range: [6.5, 7.3, 8.1] },
@@ -2148,6 +2163,7 @@ const MOD_STAT = {
   salvage:   { radius: [2.4, 3.0, 3.6], pct: [0.7, 1.1, 1.6] },
   curse:     { cd: [3.0, 2.3, 1.7], range: [4.0, 4.6, 5.2], pct: [0.20, 0.30, 0.42], targets: [2, 3, 4] },
   voidlink:  { cd: [4.5, 3.4, 2.5], range: [4.2, 4.8, 5.4], targets: [2, 3, 4], pct: [0.35, 0.5, 0.7], hold: [5, 6, 7] },
+  worm:      { cd: [5.0, 3.8, 2.8], dmg: [130, 185, 260], targets: [1, 2, 3], range: [4.5, 5.5, 6.5] },
   // ---- 元素融合产物 ----
   obsidian:   { cd: [1.5, 1.15, 0.85], dmg: [110, 150, 205], range: [4.8, 5.4, 6.0], shatter: [1, 1, 2] },
   plasma:     { interval: [0.24, 0.18, 0.13], dmg: [18, 26, 36], range: [2.8, 3.4, 4.0],
@@ -2508,21 +2524,33 @@ function updateMachines(dt) {
           }
           m.reload = clamp((m.mcd.rocket || 0) / st('cd'), 0, 1);
         } else if (kind === 'mine') {
-          // 在本行前方尚未布雷的格子埋设地雷
-          if ((m.mcd.mine || 0) <= 0) {
-            const cols = [];
-            for (let cc = c + 1; cc < COLS; cc++) {
-              if (!mines.some(mn => mn.row === r && mn.col === cc)) cols.push(cc);
+          /* 地雷不再是「布雷器」：它自己就是那颗雷，种在哪炸在哪。
+             下地要先装药（armT），装好之后谁踩上这一格谁完蛋，然后自己也没了。 */
+          if (m.armT === undefined) m.armT = MINE_ARM;
+          if (m.armT > 0) {
+            m.armT -= dt;
+            if (m.armT <= 0) {
+              spawnParts(cx, cellCy(r) + 10, '#ff9d2e', 8, 70, 0.4, 'spark');
+              addFloat(cx, cellCy(r) - 34, '已装药', '#ff9d2e');
             }
-            if (cols.length && mines.length < 60) {
-              const col = cols[Math.floor(rand(0, cols.length))];
-              m.mcd.mine = st('cd');
-              m.recoil = 0.2;
-              mines.push({
-                row: r, col, x: cellCx(col), y: cellCy(r) + 22,
-                dmg: st('dmg'), t: 0, arm: 0.6,
-              });
-              spawnParts(cellCx(col), cellCy(r) + 20, '#8fa1b8', 5, 60, 0.35, 'smoke');
+          } else {
+            const left = GRID_X + c * CELL_W;
+            const victim = enemiesInRow(r).find(e => !e.dead && !e.fly && !e.under
+              && e.x > left - 8 && e.x < left + CELL_W + 8);
+            if (victim) {
+              const dmg = st('dmg');
+              for (const e of enemies) {
+                if (e.dead || e.fly || e.row !== r) continue;
+                if (Math.abs(e.x - cx) > CELL_W * 0.85) continue;
+                damageEnemy(e, dmg, 'true');
+              }
+              spawnParts(cx, cellCy(r) + 8, '#ff9d2e', 22, 190, 0.6, 'spark');
+              spawnParts(cx, cellCy(r) + 8, '#6b7480', 10, 100, 0.8, 'smoke');
+              addFloat(cx, cellCy(r) - 40, '轰！', '#ff9d2e');
+              shake(0.22, 4.5);
+              sfx('boom');
+              removeMachine(r, c);
+              continue;
             }
           }
         } else if (kind === 'flame') {
@@ -3110,6 +3138,25 @@ function updateMachines(dt) {
               sfx('zap');
             }
           }
+        } else if (kind === 'worm') {
+          /* 沙虫巢：往前放小沙虫。虫在沙底下拱着走，地面上只看得见一串鼓包，
+             啃穿它路上的每一个敌人，走完射程就钻回去。 */
+          if ((m.mcd.worm || 0) <= 0 && enemyAhead(r, cx, modReach(st))) {
+            m.mcd.worm = st('cd');
+            m.chew = 0.5;
+            const n = Math.round(st('targets'));
+            const lv2 = kindLv(m, 'worm');
+            for (let k = 0; k < n; k++) {
+              worms.push({
+                row: r, x: cx + 10 - k * 26, dmg: st('dmg'),
+                left: modReach(st), seg: 3 + Math.min(lv2, 6),
+                hit: new Set(), t: 0,
+              });
+            }
+            spawnParts(cx, cellCy(r) + 14, '#c9a06a', 12, 110, 0.5, 'smoke');
+            addFloat(cx, cellCy(r) - 44, '放虫 ×' + n, '#d8b378');
+            sfx('shred');
+          }
         } else if (kind === 'curse') {
           // 诅咒石碑：自己几乎不打伤害，但被它标记的敌人死的时候会炸，
           // 炸到的又被传染 —— 打得越顺，连锁越大。
@@ -3414,6 +3461,52 @@ function onBulletHit(b, e, wasFull) {
 
 // 岩浆池：熔岩机器人的遗产，会一直烧着脚下那一格
 // 抽能潜艇的管线：一闪而过的一条光带
+/* 小沙虫：在沙底下往前拱，碰到谁啃谁（同一只只啃一次），走完射程钻回去。
+   飞行单位在天上，虫够不着。 */
+const WORM_SPD = 150;
+function updateWorms(dt) {
+  for (let i = worms.length - 1; i >= 0; i--) {
+    const w = worms[i];
+    const step = WORM_SPD * dt;
+    w.x += step; w.left -= step; w.t += dt;
+    if (w.left <= 0 || w.x > FIELD_X + 20) {
+      spawnParts(w.x, cellCy(w.row) + 16, '#c9a06a', 8, 80, 0.5, 'smoke');
+      worms.splice(i, 1);
+      continue;
+    }
+    for (const e of enemies) {
+      if (e.dead || e.fly || e.under || e.row !== w.row || w.hit.has(e)) continue;
+      if (Math.abs(e.x - w.x) > e.w / 2 + 14) continue;
+      w.hit.add(e);
+      damageEnemy(e, w.dmg, 'true');
+      spawnParts(e.x, rowCy(e) + 10, '#d8b378', 10, 120, 0.5, 'spark');
+      addFloat(e.x, rowCy(e) - 30, '啃！', '#d8b378');
+    }
+  }
+}
+function drawWorms() {
+  if (!worms.length) return;
+  for (const w of worms) {
+    const y = cellCy(w.row) + 20;
+    // 地面上只看得见一串往前推的鼓包
+    for (let i = 0; i < w.seg; i++) {
+      const bx = w.x - i * 13;
+      const h = (10 - i * 1.1) * Math.max(0.3, 1 - i / w.seg);
+      const wob = Math.sin(w.t * 9 - i * 0.8) * 2;
+      g.fillStyle = i === 0 ? '#caa06c' : 'rgba(186,146,96,' + (0.85 - i * 0.1).toFixed(2) + ')';
+      g.beginPath();
+      g.ellipse(bx, y + wob * 0.3, 13 - i, h, 0, Math.PI, TAU);
+      g.fill();
+      g.strokeStyle = 'rgba(90,62,34,0.5)';
+      g.lineWidth = 1.2;
+      g.beginPath(); g.ellipse(bx, y + wob * 0.3, 13 - i, h, 0, Math.PI, TAU); g.stroke();
+    }
+    // 翻起来的沙
+    if (fxQuality > 0.4 && Math.random() < 0.5) {
+      spawnParts(w.x + rand(-8, 8), y - 4, '#d8b378', 1, 40, 0.4, 'smoke');
+    }
+  }
+}
 function updateSuck(dt) {
   for (let i = suckLines.length - 1; i >= 0; i--) {
     suckLines[i].t -= dt;
@@ -3813,6 +3906,7 @@ function updateEnemies(dt) {
     // 远程敌人：先走进战场，再在本行射程内找机器停下开火。
     // 站桩会「失去耐心」：每多打一秒就往前压一点，站到最后必然走进防线的射程里。
     // 没有这条，射程比防御远的远程兵会永远停在场边对射，波次清不掉。
+    e.marching = 1;
     if (e.range && e.silenceT <= 0 && e.x <= W - e.w * 0.5 - 8) {
       const front = e.x - e.w / 2;
       const standoff = Math.max(0.8, e.range - e.pressT * 0.22) * CELL_W;
@@ -3848,13 +3942,18 @@ function updateEnemies(dt) {
             : e.rkind === 'slug' ? 'snipe' : 'shoot');
         }
         if (e.recoil > 0) e.recoil -= dt;
-        continue;   // 开火时停止推进
+        // 边打边走：开火只是让脚步慢下来，不再钉死在原地。
+        // 以前这里直接 continue，远程兵会站在射程外和防线干耗，看着很呆。
+        e.marching = 0.5;
+      } else {
+        e.chargeT = 0;
+        e.marching = 1;
       }
-      e.chargeT = 0;
     }
     if (e.firing > 0) e.firing -= dt;
     if (e.recoil > 0) e.recoil -= dt;
-    const mul = (e.castT > 0 ? 0 : 1) * (e.slowT > 0 ? 0.45 : 1) * (e.dashing > 0 ? 3.4 : 1) * (e.aura ? 1.25 : 1) * wadeMul(e);
+    const mul = (e.castT > 0 ? 0 : 1) * (e.slowT > 0 ? 0.45 : 1) * (e.dashing > 0 ? 3.4 : 1)
+      * (e.aura ? 1.25 : 1) * wadeMul(e) * (e.marching === undefined ? 1 : e.marching);
     const front = e.x - e.w / 2;
     const col = Math.floor((front - GRID_X) / CELL_W);
     let m = null;
@@ -3972,14 +4071,28 @@ function bossSkill(e) {
     /* 抽电：法老把你攒的能量抽走，抽到的每 80⚡ 就当场立一尊黄金石像挡在它前面。
        抽不到电（创造模式、或者你确实是穷光蛋）就自己回一截护盾——
        所以「把钱花光」是对付它的正解，而不是攒着等大招。 */
-    const take = creative() ? 0 : Math.min(energy, 80 + Math.floor(wave * 40));
-    if (take > 0) {
-      energy -= take;
-      // 被抽走的电顺着一条金线飞回法老身上
-      for (let i = 0; i < 10; i++) {
-        spawnParts(rand(GRID_X, e.x), gy + rand(-40, 40), '#ffc531', 1, 40, 0.6, 'spark');
+    // 连场上还没捡的电池一起吸走 —— 这一下玩家一定看得见
+    let orbTake = 0;
+    if (!creative()) {
+      for (let i = orbs.length - 1; i >= 0; i--) {
+        orbTake += orbs[i].val || 25;
+        suckLines.push({ x0: orbs[i].x, y0: orbs[i].y, x1: e.x, y1: gy, t: 0.5, max: 0.5 });
+        orbs.splice(i, 1);
       }
-      addFloat(e.x, gy - 92, '吸走 ' + take + '⚡', '#ffc531');
+    }
+    // 固定一口 + 当前存量的三成：你攒得越多，它抽得越狠
+    const take = creative() ? 0
+      : Math.min(energy, 90 + Math.floor(wave * 45) + Math.floor(energy * 0.3));
+    if (take > 0 || orbTake > 0) {
+      energy = Math.max(0, energy - take);
+      // 被抽走的电顺着一条金线飞回法老身上
+      for (let i = 0; i < 14; i++) {
+        suckLines.push({ x0: rand(GRID_X, GRID_X + 120), y0: rand(GRID_Y + 20, H - 40),
+          x1: e.x, y1: gy, t: rand(0.3, 0.7), max: 0.7 });
+      }
+      energyFlash = 1;
+      shake(0.3, 6);
+      addFloat(e.x, gy - 92, '吸走 ' + (take + orbTake) + '⚡', '#ffc531');
       const n = Math.max(1, Math.min(4, Math.round(take / 80)));
       for (let k = 0; k < n; k++) {
         const r2 = pickRow('sentinel');
@@ -3993,6 +4106,7 @@ function bossSkill(e) {
       e.shield = Math.min(e.maxShield, e.shield + e.maxShield * 0.18);
       addFloat(e.x, gy - 92, '没电可抽 —— 法老自行结甲', '#ffc531');
     }
+    if (orbTake > 0) addFloat(e.x, gy - 112, '连地上的电池一起卷走了', '#ffc531');
     shake(0.4, 8); sfx('horn');
   } else if (K === 'rift') {
     // 裂隙：随机抽走三台机器的护盾并重创，同时自己闪现向前
@@ -4156,6 +4270,7 @@ function updateFx(dt) {
     if (beams[i].t <= 0) beams.splice(i, 1);
   }
   if (bannerT > 0) bannerT -= dt;
+  if (energyFlash > 0) energyFlash -= dt * 1.4;
   if (shakeT > 0) shakeT -= dt;
 }
 // 过关演出的读秒：到点自动进下一关（面板上也能手动点）
@@ -4185,6 +4300,7 @@ function update(dt) {
   updateShells(dt);
   updatePools(dt);
   updateSuck(dt);
+  updateWorms(dt);
   updateNets(dt);
   updateMissiles(dt);
   updateBullets(dt);
@@ -4246,6 +4362,14 @@ function frame(now) {
 function updateHud() {
   if (deckOpen) refreshDeckState();
   $('energyVal').textContent = creative() ? '∞' : fmtBig(energy);
+  // 被法老抽电：能量条整个红闪一下，不然玩家根本注意不到钱没了
+  const ep = $('energyPill');
+  if (energyFlash > 0) {
+    ep.style.boxShadow = '0 0 ' + (10 + energyFlash * 16).toFixed(0) + 'px rgba(255,93,93,' + Math.min(1, energyFlash).toFixed(2) + ')';
+    ep.style.borderColor = '#ff5d5d';
+  } else if (ep.style.boxShadow) {
+    ep.style.boxShadow = ''; ep.style.borderColor = '';
+  }
   $('scoreVal').textContent = score;
   let wtxt;
   if (campaign()) wtxt = mapDef().icon + ' 第' + curStage + '关 · ' + Math.max(wave, 1) + '/' + STAGE_WAVES + '波';
@@ -5301,6 +5425,7 @@ function draw() {
   drawAllies();
   drawEnemyBullets();
   drawTracers();
+  drawWorms();
   drawLinks();
   drawZaps();
   drawSuck();
@@ -6698,7 +6823,19 @@ function drawMachine(ctx, type, x, y, s, m) {
 }
 
 // 机体造型分发：经典组合有专属造型，其余按主模块 + 等级（1/2/3 各有专属外观）
+// 融合机型的总等级：造型要随它长大（沙虫巢越练越长，炮管越练越粗）
+function fuseLv(m) { return (m && m.modules) ? totalLv(m.modules) : 2; }
+// 单模块机器：造型按它自己的等级长大
+function soloLv(m, k) { return (m && m.modules) ? Math.max(1, kindLv(m, k)) : 1; }
 function drawChassis(ctx, type, pri, m) {
+  // 融合机型升级不改名也不换造型，只是整台长大一圈
+  if (PAIR_TYPE.some(q => q[1] === type)) {
+    const k = 1 + Math.min(Math.max(fuseLv(m) - 2, 0), 8) * 0.028;
+    if (k > 1.001) { ctx.save(); ctx.scale(k, k); drawChassisInner(ctx, type, pri, m); ctx.restore(); return; }
+  }
+  return drawChassisInner(ctx, type, pri, m);
+}
+function drawChassisInner(ctx, type, pri, m) {
   switch (type) {
     case 'arcturret': return drawArcturret(ctx, m);
     case 'magshredder': return drawMagshredder(ctx, m);
@@ -6713,7 +6850,6 @@ function drawChassis(ctx, type, pri, m) {
     case 'skylance': return drawSkylance(ctx, m);
     case 'voidprism': return drawVoidprism(ctx, m);
     case 'obeliskgun': return drawObeliskgun(ctx, m);
-    case 'sandworm': return drawSandworm(ctx, m);
     case 'junkcoil': return drawJunkcoil(ctx, m);
     case 'icetrawler': return drawIcetrawler(ctx, m);
     case 'tidehorn': return drawTidehorn(ctx, m);
@@ -6764,6 +6900,7 @@ function drawChassis(ctx, type, pri, m) {
     case 'salvage': return drawSalvage(ctx, m, lv);
     case 'curse': return drawCurseStele(ctx, m, lv);
     case 'voidlink': return drawVoidLink(ctx, m, lv);
+    case 'worm': return drawSandworm(ctx, m, lv);
     case 'blackhole': return drawBlackhole(ctx, m, lv);
     case 'obsidian': return drawObsidian(ctx, m, lv);
     case 'plasma': return drawPlasma(ctx, m, lv);
@@ -10098,36 +10235,42 @@ function drawObeliskgun(ctx, m) {
   }
 }
 
-// 沙虫巢：沙地上一个翻起来的洞口，虫头探出来一截
-function drawSandworm(ctx, m) {
+// 沙虫巢：沙地上一个翻起来的洞口，虫头探出来一截。
+// 等级越高，探出来的那一截越长、环节越多 —— 升级就是「这条虫长大了」。
+function drawSandworm(ctx, m, lvArg) {
   const t = time;
+  const lv = soloLv(m, 'worm');
+  const grow = Math.min((lv - 1) * 1.6, 10);        // 等级越高，探出来的那一截越长
+  const bodyH = 46 + grow * 7;
+  const segs = 3 + Math.min(grow, 5);
   const ready = !m || (m.cd || 0) <= 0;
   const chew = m && m.chew > 0 ? m.chew : 0;
-  const rise = ready ? 6 + Math.sin(t * 1.8) * 3 : -6;
+  const rise = (ready ? 6 + Math.sin(t * 1.8) * 3 : -6) + grow * 3;
   // 洞口翻起来的沙圈
   ctx.fillStyle = '#8a6a3c';
-  ctx.beginPath(); ctx.ellipse(0, 20, 32, 11, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, 20, 32 + grow * 1.5, 11, 0, 0, TAU); ctx.fill();
   ctx.fillStyle = '#2b1d10';
-  ctx.beginPath(); ctx.ellipse(0, 20, 22, 7, 0, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, 20, 22 + grow, 7, 0, 0, TAU); ctx.fill();
   // 虫身
   ctx.save();
   ctx.translate(0, 16 - rise);
-  const grd = ctx.createLinearGradient(0, -34, 0, 10);
+  const grd = ctx.createLinearGradient(0, -bodyH + 12, 0, 10);
   grd.addColorStop(0, '#c98a5a');
   grd.addColorStop(1, '#6b4326');
   ctx.fillStyle = grd;
-  rr(ctx, -15, -34, 30, 46, 14); ctx.fill();
+  rr(ctx, -15, 12 - bodyH, 30, bodyH, 14); ctx.fill();
   // 环节
   ctx.strokeStyle = 'rgba(60,36,18,0.6)'; ctx.lineWidth = 2;
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath(); ctx.moveTo(-14, -20 + i * 11); ctx.lineTo(14, -20 + i * 11); ctx.stroke();
+  for (let i = 0; i < segs; i++) {
+    const yy = 2 - bodyH + 12 + i * ((bodyH - 20) / segs);
+    ctx.beginPath(); ctx.moveTo(-14, yy); ctx.lineTo(14, yy); ctx.stroke();
   }
   // 口器：三瓣，咬合时张开
   const open = 0.5 + chew * 1.6;
   for (let i = 0; i < 3; i++) {
     const a = -Math.PI / 2 + (i - 1) * open;
     ctx.save();
-    ctx.translate(0, -32);
+    ctx.translate(0, 14 - bodyH);
     ctx.rotate(a + Math.PI / 2);
     ctx.fillStyle = '#e0a878';
     ctx.beginPath();
@@ -10143,7 +10286,7 @@ function drawSandworm(ctx, m) {
   }
   emissive(ctx, 'rgba(255,140,60,0.7)', 9, () => {
     ctx.fillStyle = '#ff9d2e';
-    ctx.beginPath(); ctx.arc(0, -26, 3.4, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 20 - bodyH, 3.4, 0, TAU); ctx.fill();
   });
   ctx.restore();
   // 洞边埋的雷
@@ -15430,6 +15573,7 @@ window.__game = {
   fxCursed: () => enemies.filter(e => e.cursed > 0).length,
   fxLinked: () => enemies.filter(e => e.linkG > 0).length,
   ammoAt: (r, c) => (grid[r][c] ? (grid[r][c].ammo || 0) : -1),
+  typeAt: (r, c) => (grid[r][c] ? grid[r][c].type : null),
   killAt: (i) => { const e = enemies[i]; if (e) damageEnemy(e, e.hp + e.shield + 1, 'true'); },
   hurtAt: (i, d) => { const e = enemies[i]; if (e) damageEnemy(e, d, 'true'); },
   get whack() { return wk; },
