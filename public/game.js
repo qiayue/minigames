@@ -117,7 +117,7 @@ const GROUND_ONLY = ['mine', 'spikes'];
    平台不占机器位——它是格子的属性，机器拆了平台还在，跟睡莲叶一样。 */
 const WATER_NATIVE = ['lilypad', 'sub', 'bubble', 'torpedo', 'vortex'];
 // 军械熔炉能给哪些「会开火」的模块塞熔铸弹（纯辅助机体塞了也没用）
-const AMMO_KINDS = ['shot', 'tri', 'aa', 'laser', 'mortar', 'sniper', 'zap', 'prism', 'hunter'];
+const AMMO_KINDS = ['shot', 'tri', 'column', 'holo', 'aa', 'laser', 'mortar', 'sniper', 'zap', 'prism', 'hunter'];
 let linkSeq = 0;          // 虚空链接的组号
 const _fxSeen = { vortex: 0, rewind: 0, salvage: 0 };   // 只给自动化测试看的计数
 let suckLines = [];       // 抽能潜艇的管线特效
@@ -126,13 +126,17 @@ let ultFx = [];           // 大招的专属画面：横扫、光柱、延时爆
 let ultFlash = null;      // 放大招那一下全屏泛一层颜色
 let reflectT = 0;         // 反射屏障：这几秒里敌人的子弹全部反弹回去
 let virusT = 0;           // 病毒投放：这几秒里咬任何一台机器都会被改写
+let bossFx = [];          // Boss 招式的飞行物：飞钳、鱼雷、地震波、炸弹……
+let tiles = [];           // 特殊地板：tiles[r][c] = null | { kind: 'buff' | 'charge' | 'trap', ... }
 /* 飞船图（天空之城）：场地左边不是基地而是一艘飞船。
    漏过去的敌人不会「冲进基地」直接判负，而是贴着船舷烧船；
    船体血量见底才算输，所以漏一两只还有救。 */
 let shipHp = 0, shipMax = 0, shipHit = 0, shipFires = [];
 let _frameDt = 1 / 60;    // 给纯画面用的帧长（船体火苗之类不该跟暂停状态走）
 let carts = [];           // 每行一辆小推车：最后一道保险
-const MINE_ARM = 2.2;     // 地雷下地之后要装多久的药
+const MINE_ARM = 2.2;
+const HOLO_RESPAWN = 6;    // 全息敌人：底座撑过这么久，影像就回来
+const HOLO_DOWN = 12;      // 我方全息炮台：被打坏后底座要这么久才重新投影     // 地雷下地之后要装多久的药
 const SHORT_TIME = 26;    // 浅滩上的机器撑多久会进水短路（秒）
 let energyFlash = 0;      // 能量被抽走时 HUD 闪一下
 let pads = [];
@@ -182,7 +186,12 @@ function stageUnlocked(map, st) {
   const prev = MAP_ORDER[MAP_ORDER.indexOf(map) - 1];
   return !!(prev && pg[campaignId(prev, STAGES_PER_MAP)]);
 }
-function isBossStage() { return campaign() && curStage >= STAGES_PER_MAP; }
+/* 自定义关卡：玩家自己定地图、波数、难度、出哪些敌人。null = 正常战役。
+   它走的还是战役那一套（编组、地板、Boss 坐镇），只是名单和波数换成玩家定的，
+   打完不记进度。 */
+let customCfg = null;
+function stageWaves() { return customCfg ? customCfg.waves : STAGE_WAVES; }
+function isBossStage() { return campaign() && (customCfg ? !!customCfg.boss : curStage >= STAGES_PER_MAP); }
 /* 关底 Boss 坐镇后三列：推进到这条线就停下，靠召唤和大招施压。
    这样 Boss 战是一场攻城战 —— 你得凿穿它的护卫打到它，
    而不是站在原地和一台会走过来的血包对拼 DPS。 */
@@ -215,6 +224,7 @@ function furthestStage() {
 let advanceT = 0;          // >0 时正在做过关演出，读秒结束自动进下一关
 let advanceTo = null;
 function clearStage() {
+  if (customCfg) { endGame(true); return; }       // 自定义关卡：打完就结算，不记进度、不进下一关
   const wasLocked = !allCardsUnlocked();
   // 创造玩法是沙盒：想在哪张已解锁的图上折腾都行，但不算进度
   if (campStyle !== 'creative') saveCleared(curMap, curStage);
@@ -260,6 +270,7 @@ function goNextStage() {
   startGame('campaign');
 }
 function stopCampaign() {
+  customCfg = null;
   advanceTo = null; advanceT = 0;
   show('clear', false);
   initGame();
@@ -395,6 +406,9 @@ const MACHINES = {
   salvage:   { name: '拆解回收站', rarity: 'rare',   hp: 400,  desc: '范围内每死一个敌人就地拆成废料，按它的身价返还能量——杀得越多越有钱' },
   sandworm:  { name: '沙虫巢',     rarity: 'epic',   hp: 520,  desc: '往前放小沙虫：在沙底下拱着走，一路啃穿挡在前面的敌人——巢越大，放出来的虫越多越长' },
   beacon:    { name: '召唤信标',   rarity: 'epic',   hp: 380,  desc: '放出我方的机械巨兽：猎犬冲在前面，巨象压阵——它们会一路平推出去' },
+  holoturret: { name: '全息炮台', rarity: 'rare', hp: 240, desc: '全息投影出来的炮台：被打坏只剩底座，敌人可以从底座上走过去，12 秒后影像自己回来' },
+  gridbomb:  { name: '九宫爆弹',   rarity: 'rare',   hp: 400,  desc: '种下一秒就炸：自己周围 3×3 九格里的敌人一起炸飞，炸完它也没了（樱桃炸弹）' },
+  thunderpillar: { name: '天雷柱', rarity: 'epic',  hp: 320,  desc: '找到前方最近的敌人，对它所在的那一整列（上下所有行）劈下一道天雷' },
   threepeater: { name: '三线射手', rarity: 'rare', hp: 300, desc: '一次朝本行和上下两行各打一发穿透弹，每一发打穿整排——三排一起扫' },
   hacker:    { name: '程序改写器', rarity: 'epic',   hp: 340,  desc: '自己不出手，等着被吃：哪个敌人一口咬下去，就被改写成我方、掉头去打自己人（改写器被吃掉；Boss 改不动）' },
   curse:     { name: '诅咒石碑',   rarity: 'epic',   hp: 360,  desc: '给敌人挂上法老的诅咒：带着诅咒死的会炸开（按它最大生命算），并把诅咒传染给炸到的人' },
@@ -428,7 +442,7 @@ const MACHINES = {
 // 普通模式：卡槽顺序、价格与冷却（秒）
 const CLASSIC_ORDER = [
   'generator', 'turret', 'barricade', 'spikes', 'puncher', 'mine', 'fan', 'shredder',
-  'threepeater', 'flame', 'poison', 'mortar', 'magnet', 'shield', 'booster', 'saw',
+  'threepeater', 'gridbomb', 'thunderpillar', 'holoturret', 'flame', 'poison', 'mortar', 'magnet', 'shield', 'booster', 'saw',
   'aa', 'net', 'hunter', 'deflect', 'sonic',
   'tesla', 'railgun', 'prism', 'sniper', 'emp', 'gravity', 'drone', 'repair', 'rocket',
   // 地图专属卡排在最后，只有对应地图（和创造模式）才会出现在卡槽里
@@ -464,7 +478,7 @@ const MAP_CARDS = {
      3. MAP_CARDS —— 这张图的专属机型（见上）。
    创造模式不受限，单局的盲盒/普通模式也照旧给全套。 */
 const CORE_CARDS = ['generator', 'turret', 'barricade', 'spikes', 'puncher',
-                    'mine', 'fan', 'shredder', 'aa', 'repair', 'threepeater'];
+                    'mine', 'fan', 'shredder', 'aa', 'repair', 'threepeater', 'gridbomb', 'thunderpillar'];
 // 废铁厂是老家：传统机器一台不少（fullKit），只是别的图的专属卡进不来。
 // 其余地图才按 MAP_KIT 分配常规机器。
 const FULL_KIT_MAP = 'scrapyard';
@@ -473,10 +487,10 @@ const MAP_KIT = {
   pool:      ['net', 'deflect', 'sonic'],
   beach:     ['poison', 'booster', 'hunter'],
   tomb:      ['sniper', 'gravity', 'prism'],
-  forge:     ['flame', 'rocket', 'mortar'],
+  forge:     ['flame', 'rocket', 'mortar', 'holoturret'],
   tundra:    ['tesla', 'emp', 'shield'],
-  skyport:   ['hunter', 'drone', 'railgun'],
-  abyss:     ['prism', 'gravity', 'sniper', 'railgun', 'tesla'],
+  skyport:   ['hunter', 'drone', 'railgun', 'holoturret'],
+  abyss:     ['prism', 'gravity', 'sniper', 'railgun', 'tesla', 'holoturret'],
 };
 // 水战卡：只要这张图有水就发，没水的图连平台都用不上
 const WATER_KIT = ['lilypad', 'sub', 'bubble'];
@@ -519,6 +533,11 @@ function cardAvailable(type) {
   if (creative()) return true;                      // 创造模式：全都给
   // 出战编组：这一局只带了这几台（平台是地形工具，永远给）
   if (pickedCards && type !== 'lilypad' && pickedCards.indexOf(type) < 0) return false;
+  // 自定义关卡：哪张图的机器都能带，只看解锁（水战卡照旧要有水）
+  if (customCfg) {
+    if (WATER_KIT.indexOf(type) >= 0) return mapHasWater();
+    return MAP_ONLY.indexOf(type) >= 0 ? allCardsUnlocked() : cardUnlocked(type);
+  }
   if (WATER_KIT.indexOf(type) >= 0) return campaign() && mapHasWater();
   if (MAP_ONLY.indexOf(type) >= 0) {                // 地图专属：只在自己那张图
     return campaign() && (MAP_CARDS[curMap] || []).indexOf(type) >= 0;
@@ -542,7 +561,7 @@ function pickPool() {
 }
 const CLASSIC_COST = {
   generator: 50, turret: 100, barricade: 50, spikes: 75, puncher: 100, mine: 100, fan: 150,
-  shredder: 150, threepeater: 300, flame: 175, poison: 175, mortar: 200, magnet: 175,
+  shredder: 150, threepeater: 300, gridbomb: 150, thunderpillar: 275, holoturret: 200, flame: 175, poison: 175, mortar: 200, magnet: 175,
   shield: 175, booster: 200, saw: 200,
   aa: 150, net: 160, hunter: 225, deflect: 175, sonic: 175,
   tesla: 250, railgun: 250, prism: 275, sniper: 275, emp: 250,
@@ -558,7 +577,7 @@ const CLASSIC_COST = {
 };
 const CLASSIC_CD = {
   generator: 5, turret: 5, barricade: 15, spikes: 8, puncher: 5, mine: 8, fan: 8,
-  shredder: 12, threepeater: 9, flame: 10, poison: 10, mortar: 12, magnet: 12,
+  shredder: 12, threepeater: 9, gridbomb: 25, thunderpillar: 16, holoturret: 14, flame: 10, poison: 10, mortar: 12, magnet: 12,
   shield: 14, booster: 14, saw: 12,
   aa: 10, net: 11, hunter: 15, deflect: 14, sonic: 12,
   tesla: 15, railgun: 15, prism: 16, sniper: 18, emp: 16,
@@ -579,7 +598,7 @@ const CLASSIC_CD = {
  * 能力数量与等级都没有上限——理论上可以无限叠加。
  */
 const KIND_ORDER = [
-  'shot', 'tri', 'laser', 'prism', 'sniper', 'zap', 'rocket', 'mortar', 'sonic', 'aa',
+  'shot', 'tri', 'column', 'blast9', 'holo', 'laser', 'prism', 'sniper', 'zap', 'rocket', 'mortar', 'sonic', 'aa',
   'hunter', 'saw', 'shred', 'mine', 'net', 'flame', 'poison', 'emp', 'gravity', 'magnet',
   'melee', 'frost', 'drone', 'spikes', 'armor', 'deflect',
   'vortex', 'jammer', 'blackhole', 'forgeammo', 'rewind', 'quicksand', 'sub', 'bubble',
@@ -674,6 +693,9 @@ const LADDER_NAME = {
   summon:    ['召唤信标', '召唤信标', '召唤信标'],
   hack:      ['程序改写器', '程序改写器', '程序改写器'],
   tri:       ['三线射手', '三线射手', '三线射手'],
+  column:    ['天雷柱', '天雷柱', '天雷柱'],
+  blast9:    ['九宫爆弹', '九宫爆弹', '九宫爆弹'],
+  holo:      ['全息炮台', '全息炮台', '全息炮台'],
   // ---- 元素融合产物：只能由两种元素杂交得到，买不到 ----
   obsidian:   ['黑曜石炮', '曜岩重炮', '玄曜裂地炮'],
   plasma:     ['等离子喷枪', '等离子炬', '恒星喷流炉'],
@@ -733,6 +755,9 @@ const LADDER_TYPE = {
   summon:    ['beacon', 'beacon2', 'beacon3'],
   hack:      ['hacker', 'hacker2', 'hacker3'],
   tri:       ['threepeater', 'threepeater2', 'threepeater3'],
+  column:    ['thunderpillar', 'thunderpillar2', 'thunderpillar3'],
+  blast9:    ['gridbomb', 'gridbomb2', 'gridbomb3'],
+  holo:      ['holoturret', 'holoturret2', 'holoturret3'],
   obsidian:   ['obsidian', 'obsidian2', 'obsidian3'],
   plasma:     ['plasma', 'plasma2', 'plasma3'],
   stormfrost: ['stormfrost', 'stormfrost2', 'stormfrost3'],
@@ -748,13 +773,13 @@ const LADDER_TYPE = {
 const KIND_ADJ = {
   shot: '机炮', energy: '充能', armor: '装甲', melee: '重拳', frost: '冰霜',
   shred: '绞碎', magnet: '磁暴', zap: '雷电', laser: '激光', rocket: '轰爆',
-  mine: '布雷', flame: '烈焰', poison: '剧毒', mortar: '轰炸', sniper: '狙击', repair: '自愈',
+  mine: '地雷', flame: '烈焰', poison: '剧毒', mortar: '轰炸', sniper: '狙击', repair: '自愈',
   spikes: '钉刺', shield: '护盾', booster: '超频', saw: '锯轮', emp: '脉冲',
   aa: '防空', deflect: '折射', sonic: '音爆', drone: '蜂群', gravity: '引力', prism: '棱光',
   net: '捕网', hunter: '猎空',
   vortex: '换位', quicksand: '流沙', jammer: '干扰', forgeammo: '熔铸', rewind: '回溯', blackhole: '黑洞',
   sub: '抽能', bubble: '气泡', salvage: '回收', curse: '诅咒', voidlink: '链接',
-  worm: '沙虫', summon: '召唤', hack: '改写', tri: '三线',
+  worm: '沙虫', summon: '召唤', hack: '改写', tri: '三线', column: '天雷', blast9: '爆弹', holo: '全息',
   obsidian: '黑曜石', plasma: '等离子', stormfrost: '霜雷', corrosion: '腐蚀',
   voidglass: '曜离', rimeglass: '零曜', acidglass: '蚀曜',
   ionstorm: '离暴', venomplasma: '疫离', cryotoxin: '寒疫',
@@ -786,6 +811,9 @@ const KIND_DESC = {
   summon: '放出我方机械巨兽，一路平推出去',
   hack: '等着被咬：咬它的敌人被改写成我方，掉头去打自己人',
   tri: '同时朝三行各打一发穿透弹，每发打穿整排',
+  column: '对前方最近敌人所在的整列（所有行）劈天雷',
+  blast9: '炸掉自己周围 3×3 九格（单独一台是一次性的，杂交进别的机器就隔一阵炸一次）',
+  holo: '全息投影：被打坏只剩底座，过一阵影像自己回来（杂交进去的机器也一样）',
   obsidian: '黑曜石弹贯穿整行，命中叠「碎裂」——每层让目标多吃 12% 伤害',
   plasma: '等离子喷流灼烧走廊内所有敌人，并不断麻痹它们',
   stormfrost: '闪电链同时冻结；对已被冻结或减速的目标伤害翻倍',
@@ -807,7 +835,7 @@ const KIND_HP = {
   net: 120, hunter: -40,
   vortex: 20, quicksand: 180, jammer: 0, forgeammo: 120, rewind: 40, blackhole: 0,
   sub: 120, bubble: -40, salvage: 100, curse: 60, voidlink: 20,
-  worm: 200, summon: 60, hack: 0, tri: 0,
+  worm: 200, summon: 60, hack: 0, tri: 0, column: 0, blast9: 140, holo: -60,
   obsidian: 260, plasma: 60, stormfrost: 90, corrosion: 40,
   voidglass: 200, rimeglass: 220, acidglass: 180, ionstorm: 120, venomplasma: 100, cryotoxin: 140,
 };
@@ -969,7 +997,7 @@ function descOfModules(mods) {
   }).join('，');
 }
 // 会索敌的模块（用来算这台机器的射程）。狙击/激光/火箭没有 range 属性＝覆盖整行。
-const RANGED_KINDS = ['shot', 'tri', 'frost', 'poison', 'zap', 'aa', 'prism', 'mortar',
+const RANGED_KINDS = ['shot', 'tri', 'column', 'holo', 'frost', 'poison', 'zap', 'aa', 'prism', 'mortar',
                       'flame', 'sonic', 'sniper', 'laser', 'rocket'];
 // 返回这台机器的最远索敌距离（格）；Infinity 表示整行
 function machineReach(m) {
@@ -1074,6 +1102,9 @@ const ENEMIES = {
   voidspawn:  { name: '虚空爬虫', hp: 260, speed: 15, dmg: 55, score: 70, w: 46, splits: 2 },
   riftwalker: { name: '裂隙行者', hp: 420, speed: 10, dmg: 70, score: 95, w: 52, jumps: 3, cloak: true },
   // ---- 碾压型：碰到机器直接压碎，只有钉刺治得了它 ----
+  // 全息单位：打「死」只是把影像打散，地上留一座投影底座；底座没被拆掉，几秒后影像又回来
+  holobot:   { name: '全息兵',     hp: 360, speed: 12, dmg: 70, score: 90, w: 50, holo: true },
+  holodrone: { name: '全息无人机', hp: 220, speed: 20, dmg: 45, score: 80, w: 46, fly: true, holo: true },
   zomboni:   { name: '碾压雪橇', hp: 1500, speed: 11, dmg: 300, score: 150, w: 92, heavy: true,
                crush: true, coldResist: 2 },
   // ---- 我方单位（由召唤/改写产生，不会自己刷出来）----
@@ -1183,8 +1214,8 @@ function rollAffix(type) {
 
 const BOX_POOL = {
   common: [['turret', 16], ['generator', 16], ['barricade', 8], ['puncher', 9], ['mine', 8], ['spikes', 8]],
-  rare:   [['shredder', 6], ['threepeater', 5], ['fan', 6], ['magnet', 5], ['flame', 6], ['poison', 5], ['mortar', 5], ['shield', 5], ['booster', 5], ['saw', 5], ['aa', 6], ['deflect', 5], ['sonic', 5]],
-  epic:   [['tesla', 4], ['rocket', 3], ['railgun', 3], ['sniper', 3], ['emp', 3], ['repair', 3], ['prism', 3], ['gravity', 3], ['drone', 3]],
+  rare:   [['shredder', 6], ['threepeater', 5], ['gridbomb', 4], ['holoturret', 4], ['fan', 6], ['magnet', 5], ['flame', 6], ['poison', 5], ['mortar', 5], ['shield', 5], ['booster', 5], ['saw', 5], ['aa', 6], ['deflect', 5], ['sonic', 5]],
+  epic:   [['tesla', 4], ['thunderpillar', 3], ['rocket', 3], ['railgun', 3], ['sniper', 3], ['emp', 3], ['repair', 3], ['prism', 3], ['gravity', 3], ['drone', 3]],
 };
 
 /* ========== 工具 ========== */
@@ -1214,7 +1245,7 @@ const $ = id => document.getElementById(id);
 
 /* ========== DOM ========== */
 const cv = $('cv');
-const g = cv.getContext('2d');
+let g = cv.getContext('2d');   // let：图鉴里画敌人小图时会临时换成离屏画布
 // 渲染倍率可变：辉光都关光了还是掉帧（弱手机的常态），就降采样。
 // 画布 CSS 尺寸不变，所以布局、点击坐标都不受影响。
 const DPR_MAX = Math.min(window.devicePixelRatio || 1, 2);
@@ -1272,7 +1303,8 @@ function initGame() {
   // 每行门口摆一辆小推车：被摸到就冲出去清场，每行只有一次
   carts = Array.from({ length: ROWS }, (_, r) => ({ row: r, x: GRID_X - 30, go: false, used: false }));
   shipMax = mapDef().ship || 0; shipHp = shipMax; shipHit = 0; shipFires = [];
-  ults = 0; ultFx = []; ultFlash = null; reflectT = 0; virusT = 0;
+  ults = 0; ultFx = []; ultFlash = null; reflectT = 0; virusT = 0; bossFx = [];
+  buildTiles();
   waveState = 'pre'; waveTimer = 15; queue = []; spawnT = 0;
   surgeDone = false; surgeAt = 0; alarmT = 0;
   skyT = 3; lastRows = [];
@@ -1812,6 +1844,7 @@ function wardBite(m, e) {
 }
 
 function damageMachine(m, d) {
+  if (m.down > 0) return;                  // 只剩全息底座：没东西可打
   // 绝对领域：这几秒刀枪不入
   if (m.invT > 0) { m.shHit = 0.25; return; }
   // 能量护盾优先承伤
@@ -1827,8 +1860,22 @@ function damageMachine(m, d) {
     if (d <= 0) return;
   }
   m.hp -= d;
-  if (m.hp <= 0) removeMachine(m.row, m.col);
+  if (m.hp <= 0 && !holoDown(m)) removeMachine(m.row, m.col);
 }
+/* 我方全息机器被打坏：不拆，只是关掉投影。底座留在格子上（敌人能从上面走过去、也打不着它），
+   倒数完自己满血回来。返回 true 表示已经转成底座了。 */
+function holoDown(m) {
+  if (!m || !m.modules || !hasKind(m, 'holo')) return false;
+  if (m.down > 0) return true;
+  m.down = modStat('holo', 'down', Math.max(1, kindLv(m, 'holo')));
+  m.downMax = m.down;
+  m.hp = 0; m.sh = 0; m.stunT = 0;
+  spawnParts(cellCx(m.col), cellCy(m.row), '#6fe8ff', 16, 140, 0.6, 'spark');
+  addFloat(cellCx(m.col), cellCy(m.row) - 40, '投影中断', '#6fe8ff');
+  sfx('zap');
+  return true;
+}
+function solidMachine(m) { return !!(m && !(m.down > 0)); }
 // 纯钉刺地垫可以让敌人踩过去
 function isWalkable(m) {
   return !!(m && m.modules && m.modules.length === 1 && m.modules[0].kind === 'spikes');
@@ -1896,7 +1943,7 @@ function spawnEnemy(type, row, affixKey) {
     // 新机制用到的状态：下沉 / 诅咒 / 气泡 / 屏蔽 / 链接 / 回溯锚点
     // 背超级电池的：越硬的越可能带，关底 Boss 必带
     sbat: !!info.king || Math.random() < (info.boss ? 0.55 : info.heavy ? 0.22 : 0.07),
-    crush: !!info.crush, charmed: false, charmT: 0,
+    crush: !!info.crush, holo: !!info.holo, charmed: false, charmT: 0,
     sink: 0, sinkT: 0, cursed: 0, bubbleT: 0, bubbleDmg: 0, baseFly: !!info.fly || isSkyRow(row),
     silenceT: 0, linkG: 0, linkT: 0, linkPct: 0, rwX: undefined,
     beamCd: info.beamCd || 0, beamT: (info.beamCd || 0) * 2.2,   // 开场给足时间先把防线搭起来
@@ -1929,43 +1976,251 @@ function pickRow(type) {
 }
 
 // 战役：波次由「第几张图 + 第几关 + 本关第几波」决定，最后一关的最后一波放 Boss
+/* ===== 每关的敌人名单 =====
+   一关只出 6~7 种敌人（Boss 关另加 Boss）。名单按「地图 + 关卡」播种，
+   每次进同一关都是同一份——所以进关前就能把这一关有哪些敌人摆给玩家看。
+   名单里一定有能打第 1 波的杂兵，有这张图的主题兵种，再配硬货、远程/特殊、空中。 */
+function seededRand(seed) {
+  let x = (seed >>> 0) || 1;
+  return () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; };
+}
+const ROSTER_LIGHT = ['scrap', 'runner', 'jumper', 'scrap'];
+const ROSTER_TOUGH = ['armored', 'shieldbot', 'splitter', 'regenbot', 'zomboni'];
+const ROSTER_MID = ['gunner', 'spitter', 'stealthbot', 'arcwalker', 'frostbot', 'holobot', 'healer', 'grenadier', 'sniperbot', 'burrower'];
+const ROSTER_AIR = ['drone', 'bomber', 'holodrone', 'laserdrone', 'rocketdrone', 'stormdrone'];
+const ROSTER_THEME = {
+  pool: ['mechshark', 'minejelly', 'diverbot'],
+  beach: ['crablet', 'mechshark', 'burrower', 'diverbot'],
+  tomb: ['scarab', 'mummybot', 'burrower'],
+  forge: ['slagcrawler', 'forgeknight', 'magmabot'],
+  tundra: ['glacier', 'snowdrone', 'frostbot'],
+  skyport: ['drone', 'laserdrone', 'stormdrone', 'rocketdrone', 'holodrone'],
+  abyss: ['voidspawn', 'riftwalker', 'stealthbot', 'holobot'],
+};
+function stageRoster(map, st) {
+  if (customCfg) return customCfg.roster.filter(t => ENEMIES[t]);
+  const mi = Math.max(0, MAP_ORDER.indexOf(map));
+  const prog = mi * STAGES_PER_MAP + (st - 1);
+  const R = seededRand(mi * 977 + st * 131 + 7);
+  const out = [];
+  const add = t => { if (t && ENEMIES[t] && out.indexOf(t) < 0) out.push(t); };
+  const pickFrom = (arr, n) => {
+    const pool = arr.filter(t => ENEMIES[t] && out.indexOf(t) < 0);
+    for (let i = 0; i < n && pool.length; i++) add(pool.splice(Math.floor(R() * pool.length), 1)[0]);
+  };
+  const size = 6 + (R() < 0.5 ? 1 : 0);
+  add('scrap');                                         // 第 1 波的杂兵
+  if (prog >= 1) pickFrom(ROSTER_LIGHT, 1);
+  const theme = ROSTER_THEME[map];
+  if (theme) pickFrom(theme, Math.min(theme.length, prog >= 3 ? 3 : 2));
+  // 越往后硬货、特殊兵越多；开头几关别一上来就塞重甲
+  const tough = ROSTER_TOUGH.filter(t => t !== 'zomboni' || prog >= 6);
+  const mid = ROSTER_MID.filter((t, i) => i < 3 + Math.floor(prog / 3));
+  const air = ROSTER_AIR.filter((t, i) => i < 1 + Math.floor(prog / 4));
+  pickFrom(tough, prog >= 2 ? 2 : 1);
+  pickFrom(mid, prog >= 2 ? 2 : 1);
+  if (out.length < size && map !== 'skyport') pickFrom(air, 1);
+  if (prog >= 8 && out.length < size) add('crusher');
+  if (prog >= 22 && out.length < size) add('titan');
+  // 还不够数就从「这个进度该有的」里补，别给前几关塞后期兵
+  while (out.length < size) {
+    const before = out.length;
+    pickFrom(ROSTER_LIGHT.concat(mid, tough, air), 1);
+    if (out.length === before) break;
+  }
+  return out.slice(0, 7);
+}
+function curRoster() { return stageRoster(curMap, curStage); }
+
+/* ===== 特殊地板 =====
+   强化地板：站在上面的机器血量 ×1.6。
+   充能地板：站在上面的机器每 35 秒产出一颗超级电池（攒大招用）。
+   陷阱地板：上了膛的陷阱 —— 你在上面建机器，它会把你的机器夹碎；
+             敌人踩上去也一样被夹碎（Boss 只崩一截）。夹过一次要 15 秒重新上膛。
+   位置按「地图 + 关卡」播种，进关前图鉴里就能看到有哪几种。 */
+const TILE_INFO = {
+  buff:   { name: '强化地板', icon: '🟩', tip: '机器种在上面血量 ×1.6' },
+  charge: { name: '充能地板', icon: '🟪', tip: '上面的机器每 35 秒产出一颗超级电池' },
+  trap:   { name: '陷阱地板', icon: '🟥', tip: '在上面建机器会被夹碎；敌人踩上去也会被夹碎，夹完要 15 秒上膛' },
+};
+const TILE_CHARGE = 35, TILE_TRAP_CD = 15, TILE_TRAP_SNAP = 1.2;
+function stageTiles(map, st) {
+  if (customCfg && !customCfg.tiles) return [];
+  if (!customCfg && st < 3) return [];                // 前两关先别添乱
+  const mi = Math.max(0, MAP_ORDER.indexOf(map));
+  const R = seededRand(mi * 613 + (customCfg ? 999 + customCfg.waves : st) * 89 + 3);
+  const n = customCfg ? 5 : Math.min(5, 2 + Math.floor(st / 4));
+  const kinds = ['buff', 'charge', 'trap'];
+  const out = [];
+  const keep = curMap; curMap = map;                  // terrainAt 看的是当前地图
+  for (let k = 0, tries = 0; k < n && tries < 200; tries++) {
+    const r = Math.floor(R() * ROWS), c = 1 + Math.floor(R() * (COLS - 4));
+    if (terrainAt(r, c) !== 'G' || out.some(t => Math.abs(t.r - r) + Math.abs(t.c - c) < 2)) continue;
+    out.push({ r, c, kind: kinds[(k + Math.floor(R() * 3)) % 3] });
+    k++;
+  }
+  curMap = keep;
+  // 至少有一块不是陷阱：给玩家一点甜头
+  if (out.length && out.every(t => t.kind === 'trap')) out[0].kind = 'buff';
+  return out;
+}
+function buildTiles() {
+  tiles = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+  if (!campaign()) return;
+  for (const t of stageTiles(curMap, curStage)) {
+    tiles[t.r][t.c] = { kind: t.kind, armed: true, cd: 0, snap: 0, prog: 0 };
+  }
+}
+function tileAt(r, c) { return tiles[r] ? tiles[r][c] : null; }
+function updateTiles(dt) {
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const tl = tiles[r] && tiles[r][c];
+    if (!tl || tl.kind !== 'trap') continue;
+    if (!tl.armed) {
+      tl.cd -= dt;
+      if (tl.cd <= 0) { tl.armed = true; tl.snap = 0; }
+      continue;
+    }
+    const cx = cellCx(c), cy = cellCy(r);
+    // 有人在上面建了机器：陷阱慢慢合拢，然后夹碎
+    const m = grid[r][c];
+    if (m && m.type !== 'box') {
+      tl.snap += dt;
+      if (tl.snap >= TILE_TRAP_SNAP) {
+        addFloat(cx, cy - 46, '陷阱！机器被夹碎', '#ff5d5d');
+        spawnParts(cx, cy, '#8fa1b8', 18, 160, 0.6, 'gear');
+        removeMachine(r, c);
+        tl.armed = false; tl.cd = TILE_TRAP_CD; tl.fired = 0.4;
+        shake(0.25, 5); sfx('break');
+      }
+      continue;
+    }
+    tl.snap = 0;
+    // 敌人踩上来：一样夹碎
+    for (const e of enemies) {
+      if (e.dead || e.fly || e.under || e.charmed || e.row !== r || e.x > FIELD_X) continue;
+      if (colAtX(e.x) !== c) continue;
+      damageEnemy(e, e.king ? e.maxHp * 0.15 : e.boss ? e.maxHp * 0.4 : e.hp + e.shield + 1, 'true');
+      addFloat(cx, cy - 46, '陷阱！', '#ff5d5d');
+      spawnParts(cx, cy, '#c8935a', 16, 160, 0.6, 'gear');
+      tl.armed = false; tl.cd = TILE_TRAP_CD; tl.fired = 0.4;
+      shake(0.2, 4); sfx('shred');
+      break;
+    }
+  }
+}
+// 地板的画法：画在机器底下
+function drawTiles() {
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const tl = tiles[r] && tiles[r][c];
+    if (!tl) continue;
+    const x = GRID_X + c * CELL_W, y = GRID_Y + r * CELL_H, cx = x + CELL_W / 2, cy = y + CELL_H / 2;
+    const pulse = 0.5 + Math.sin(time * 3 + r + c) * 0.5;
+    g.save();
+    if (tl.kind === 'buff') {
+      g.fillStyle = 'rgba(88,214,139,' + (0.16 + pulse * 0.08).toFixed(3) + ')';
+      g.fillRect(x + 4, y + 4, CELL_W - 8, CELL_H - 8);
+      g.strokeStyle = 'rgba(120,240,170,0.75)'; g.lineWidth = 2;
+      g.strokeRect(x + 5, y + 5, CELL_W - 10, CELL_H - 10);
+      // 四角的加号
+      g.fillStyle = 'rgba(160,255,200,0.8)';
+      for (const [dx, dy] of [[14, 14], [CELL_W - 14, 14], [14, CELL_H - 14], [CELL_W - 14, CELL_H - 14]]) {
+        g.fillRect(x + dx - 5, y + dy - 1.5, 10, 3); g.fillRect(x + dx - 1.5, y + dy - 5, 3, 10);
+      }
+    } else if (tl.kind === 'charge') {
+      g.fillStyle = 'rgba(201,138,255,' + (0.14 + pulse * 0.08).toFixed(3) + ')';
+      g.fillRect(x + 4, y + 4, CELL_W - 8, CELL_H - 8);
+      g.strokeStyle = 'rgba(201,138,255,0.75)'; g.lineWidth = 2;
+      g.setLineDash([8, 5]); g.lineDashOffset = -time * 14;
+      g.strokeRect(x + 5, y + 5, CELL_W - 10, CELL_H - 10);
+      g.setLineDash([]);
+      if (!grid[r][c]) {
+        g.fillStyle = 'rgba(201,138,255,0.55)';
+        rr(g, cx - 7, cy - 10, 14, 22, 3); g.fill();
+        g.fillRect(cx - 3, cy - 13, 6, 3);
+      } else if (tl.prog > 0) {
+        g.strokeStyle = '#e4c8ff'; g.lineWidth = 3;
+        g.beginPath(); g.arc(cx, y + CELL_H - 12, 7, -Math.PI / 2, -Math.PI / 2 + TAU * tl.prog); g.stroke();
+      }
+    } else if (tl.kind === 'trap') {
+      const live = tl.armed;
+      g.fillStyle = live ? 'rgba(120,20,20,' + (0.32 + pulse * 0.12).toFixed(3) + ')' : 'rgba(60,60,70,0.3)';
+      g.fillRect(x + 4, y + 4, CELL_W - 8, CELL_H - 8);
+      // 警示斜纹边
+      g.save();
+      g.beginPath(); g.rect(x + 4, y + 4, CELL_W - 8, CELL_H - 8); g.rect(x + 12, y + 12, CELL_W - 24, CELL_H - 24); g.clip('evenodd');
+      for (let k = -CELL_H; k < CELL_W + CELL_H; k += 14) {
+        g.fillStyle = live ? (Math.floor(k / 14) % 2 ? '#ffc531' : '#2a1a1a') : '#4a4a55';
+        g.beginPath(); g.moveTo(x + k, y); g.lineTo(x + k + 7, y); g.lineTo(x + k + 7 - CELL_H, y + CELL_H); g.lineTo(x + k - CELL_H, y + CELL_H); g.closePath(); g.fill();
+      }
+      g.restore();
+      // 夹子：两排齿，合拢程度看 snap
+      const close = live ? clamp(tl.snap / TILE_TRAP_SNAP, 0, 1) : (tl.fired > 0 ? 1 : 0);
+      if (tl.fired > 0) tl.fired -= 1 / 60;
+      const gap = 16 * (1 - close);
+      g.fillStyle = live ? '#d8dee6' : '#7a808a';
+      for (const side of [-1, 1]) {
+        const yy = cy + side * (gap + 2);
+        for (let k = -3; k <= 3; k++) {
+          g.beginPath();
+          g.moveTo(cx + k * 8 - 4, yy); g.lineTo(cx + k * 8, yy - side * 9); g.lineTo(cx + k * 8 + 4, yy); g.closePath(); g.fill();
+        }
+        g.fillRect(cx - 30, yy + (side > 0 ? 0 : -3), 60, 3);
+      }
+      if (!live) {
+        g.strokeStyle = '#ffc531'; g.lineWidth = 3;
+        g.beginPath(); g.arc(cx, cy, 13, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - tl.cd / TILE_TRAP_CD)); g.stroke();
+      } else if (tl.snap > 0) {
+        g.fillStyle = 'rgba(255,93,93,' + (0.3 + Math.sin(time * 30) * 0.3).toFixed(2) + ')';
+        g.fillRect(x + 4, y + 4, CELL_W - 8, CELL_H - 8);
+      }
+    }
+    g.restore();
+  }
+}
+function renderPickTiles() {
+  const box = $('pickTiles');
+  box.innerHTML = '';
+  const list = stageTiles(curMap, curStage);
+  if (!list.length) return;
+  box.innerHTML = '<span class="lbl">本关地板</span>';
+  const kinds = [...new Set(list.map(t => t.kind))];
+  for (const k of kinds) {
+    const d = document.createElement('div');
+    d.className = 'tile';
+    const n = list.filter(t => t.kind === k).length;
+    d.innerHTML = '<i>' + TILE_INFO[k].icon + '</i><span><b>' + TILE_INFO[k].name + ' ×' + n + '</b><br>' + TILE_INFO[k].tip + '</span>';
+    box.appendChild(d);
+  }
+}
+
 function campaignWave(n) {
   const list = [];
   const mi = Math.max(0, MAP_ORDER.indexOf(curMap));
-  const prog = mi * STAGES_PER_MAP + (curStage - 1);   // 总推进度 0..(图数×关数-1)
+  const prog = customCfg ? 20 : mi * STAGES_PER_MAP + (curStage - 1);
   // 每一关都是从空场地重新开始，所以推进度只能乘在「关内进度」上：
   // 第 1 波必须小到能靠 150 起始能量接住，压力全放在后面几波。
-  const ramp = campEndless ? 1 + (n - 1) * 0.16 : n / STAGE_WAVES;
+  const ramp = campEndless ? 1 + (n - 1) * 0.16 : n / stageWaves();
   const push = (t, c) => { for (let i = 0; i < c; i++) list.push(t); };
-  const pick = (arr, c) => { for (let i = 0; i < c; i++) push(arr[Math.floor(Math.random() * arr.length)], 1); };
-  // 基地一被摸到就直接结束，所以第 1 波只放杂兵：硬货一律从第 2 波起
-  const light = ['scrap', 'scrap', 'runner', 'jumper'];
-  const tough = ['armored', 'shieldbot', 'splitter'];
-  const mid = ['gunner', 'spitter', 'stealthbot', 'regenbot', 'arcwalker', 'frostbot'];
-  const air = ['drone', 'bomber', 'laserdrone', 'rocketdrone', 'stormdrone'];
-  const sea = ['mechshark', 'minejelly', 'diverbot'];
-  const sand = ['crablet', 'burrower', 'magmabot'];
-  const fire = ['slagcrawler', 'forgeknight', 'magmabot'];
-  const ice = ['glacier', 'snowdrone', 'frostbot'];
-  const void_ = ['voidspawn', 'riftwalker', 'stealthbot'];
-  const desert = ['scarab', 'mummybot', 'burrower'];
+  const roster = curRoster();
+  const inR = arr => arr.filter(t => roster.indexOf(t) >= 0);
+  const pick = (arr, c) => {
+    const pool = arr.length ? arr : roster;
+    for (let i = 0; i < c; i++) push(pool[Math.floor(Math.random() * pool.length)], 1);
+  };
+  // 基地一被摸到就直接结束，所以第 1 波只放名单里最弱的那几种
+  const weak = roster.filter(t => (ENEMIES[t].hp || 0) <= 300 && !ENEMIES[t].range);
+  const light = inR(ROSTER_LIGHT).length ? inR(ROSTER_LIGHT) : (weak.length ? weak : roster);
+  const theme = inR(ROSTER_THEME[curMap] || []);
+  const rest = roster.filter(t => light.indexOf(t) < 0 && theme.indexOf(t) < 0);
+  const heavy = rest.filter(t => ENEMIES[t].heavy);
+  const other = rest.filter(t => !ENEMIES[t].heavy);
   const dq = diff().count;
   pick(light, Math.round((1 + n + prog * 0.085 * ramp) * dq));
-  if (n >= 2) pick(tough, Math.round((0.4 + (0.8 + prog * 0.07) * ramp) * dq));
-  if (n >= 2) pick(mid, Math.round((0.2 + prog * 0.09 * ramp) * dq));
-  // 本图的主题兵种
-  const theme = curMap === 'pool' ? sea
-    : curMap === 'beach' ? (n % 2 ? sand : sea)
-    : curMap === 'skyport' ? air
-    : curMap === 'tomb' ? desert
-    : curMap === 'forge' ? fire
-    : curMap === 'tundra' ? ice
-    : curMap === 'abyss' ? (n % 2 ? void_ : air) : null;
-  if (theme && n >= 2) pick(theme, Math.round((0.6 + (1 + prog * 0.07) * ramp) * dq));
-  else if (!theme && prog >= 2 && n >= 3) pick(air, Math.max(1, Math.round(prog * 0.08 * ramp)));
-  if (prog >= 8 && n >= 4) push('crusher', 1 + Math.floor(prog / 18));
-  if (prog >= 22 && n >= 5) push('titan', 1 + Math.floor(prog / 30));
-  // Boss 关：Boss 一开场就坐进来，整整五波都在它眼皮底下打 —— 不是等到最后一波才见面
+  if (n >= 2) pick(other, Math.round((0.6 + (0.8 + prog * 0.1) * ramp) * dq));
+  if (n >= 2 && theme.length) pick(theme, Math.round((0.6 + (1 + prog * 0.07) * ramp) * dq));
+  if (n >= 3 && heavy.length) pick(heavy, Math.max(1, Math.round((0.2 + prog * 0.04 * ramp) * dq)));
+  // Boss 关：Boss 一开场就坐进来，整整几波都在它眼皮底下打 —— 不是等到最后一波才见面
   if (isBossStage() && n === 1 && !campEndless) push(mapDef().boss, 1);
   // 无尽：每 5 波再来一头，一轮比一轮硬（造型不变，就是原来那只）
   if (campEndless && n % 5 === 0) push(mapDef().boss, 1);
@@ -2079,12 +2334,12 @@ function startWave() {
       sfx('horn');
       return;
     }
-    if (isBossStage() && wave >= STAGE_WAVES) {
+    if (isBossStage() && wave >= stageWaves()) {
       banner('☠️ ' + ENEMIES[M.boss].name + ' 降临！', '它会不停召唤小 Boss——先打本体，不然永远清不完');
     } else if (wave === 1) {
       banner(M.icon + ' ' + M.name + ' · 第 ' + curStage + ' 关', M.tip);
     } else {
-      banner('第 ' + wave + ' / ' + STAGE_WAVES + ' 波', isBossStage() ? '守住这几波，Boss 就在后面' : '');
+      banner('第 ' + wave + ' / ' + stageWaves() + ' 波', isBossStage() ? '守住这几波，Boss 就在后面' : '');
     }
     sfx('horn');
     return;
@@ -2130,13 +2385,13 @@ function updateWaves(dt) {
   } else if (waveState === 'clear') {
     // 坐镇的 Boss 不拦波次：它第 1 波就进场，要是非得先打死它才来下一波，
     // 整关就卡死在第 1 波。只有最后一波（以及非战役）才要求清场清干净。
-    const lastWave = !campaign() || (!campEndless && wave >= STAGE_WAVES);
+    const lastWave = !campaign() || (!campEndless && wave >= stageWaves());
     const blocking = lastWave ? enemies.length : enemies.filter(e => !e.king && !e.charmed).length;
     if (blocking === 0) {
       score += 100;
       addFloat(W / 2, GRID_Y + 40, '波次奖励 +100', '#58d68b');
       if (campaign()) {
-        if (!campEndless && wave >= STAGE_WAVES) { clearStage(); return; }
+        if (!campEndless && wave >= stageWaves()) { clearStage(); return; }
       } else if (!endless && wave >= TOTAL_WAVES) { endGame(true); return; }
       waveState = 'pre';
       waveTimer = 6.5;
@@ -2212,6 +2467,20 @@ function damageEnemy(e, d, kind, noFlash) {
       damageEnemy(o, share, 'true', true);
     }
     linkBusy = false;
+  }
+  if (e.hp <= 0 && !e.dead && e.holo && !e.holoBase && !e.charmed) {
+    // 全息单位：影像被打散，留下投影底座。底座要再打一遍才算真死
+    e.holoBase = true;
+    e.baseMax = Math.round(e.maxHp * 0.4);
+    e.hp = e.baseMax;
+    e.shield = 0;
+    e.holoT = HOLO_RESPAWN;
+    if (e.fly) { e.wasFly = true; e.fly = false; }   // 飞着的影像散了，底座掉在地上
+    e.burnT = 0; e.poisonT = 0; e.cursed = 0;
+    spawnParts(e.x, rowCy(e), '#6fe8ff', 16, 150, 0.6, 'spark');
+    addFloat(e.x, rowCy(e) - 40, '影像打散！拆掉底座', '#6fe8ff');
+    sfx('zap');
+    return;
   }
   if (e.hp <= 0 && !e.dead) {
     e.dead = true;
@@ -2327,6 +2596,9 @@ const MOD_STAT = {
   summon:    { cd: [14, 11, 8], life: [16, 20, 26], targets: [1, 1, 2] },
   hack:      { cd: [12, 9, 6.5], hold: [10, 14, 20] },   // 不隔空出手，没有射程
   tri:       { interval: [1.7, 1.4, 1.15], dmg: [40, 58, 84] },   // 没有射程 = 整排
+  column:    { cd: [6.0, 4.8, 3.8], dmg: [190, 280, 410], range: [5, 6, 7] },
+  blast9:    { dmg: [1800, 2600, 3700], cd: [14, 11, 8], fuse: [1.0, 0.9, 0.8] },
+  holo:      { interval: [1.3, 1.1, 0.9], dmg: [26, 38, 54], range: [6, 7, 8], down: [12, 10, 8] },
   // ---- 元素融合产物 ----
   obsidian:   { cd: [1.5, 1.15, 0.85], dmg: [110, 150, 205], range: [4.8, 5.4, 6.0], shatter: [1, 1, 2] },
   plasma:     { interval: [0.24, 0.18, 0.13], dmg: [18, 26, 36], range: [2.8, 3.4, 4.0],
@@ -2431,6 +2703,23 @@ function enemiesInRange(r, cx, cells) {
   return enemies.filter(e => e.row === r && !e.dead && !e.under && e.x > cx - CELL_W / 2 && e.x < cx + rng);
 }
 
+/* 以 (r, c) 为中心炸 3×3 九格：这九格里的敌人全部挨炸（关底 Boss 打折） */
+function blast9At(r, c, dmg) {
+  const cx = cellCx(c), cy = cellCy(r);
+  for (const e of enemies) {
+    if (e.dead || e.under || e.charmed || e.x > FIELD_X) continue;
+    if (Math.abs(e.row - r) > 1 || Math.abs(colAtX(e.x) - c) > 1) continue;
+    damageEnemy(e, dmg * (e.king ? 0.3 : 1), 'true');
+  }
+  ultFx.push({ kind: 'grid9', r, c, t: 0.6, max: 0.6 });
+  shocks.push({ x: cx, y: cy, t: 0.55, max: 0.55, reach: CELL_W * 1.6, color: '#ff7a2e' });
+  spawnParts(cx, cy, '#ff9d2e', 34, 260, 0.8, 'spark');
+  spawnParts(cx, cy, '#ffd764', 18, 200, 0.6, 'spark');
+  spawnParts(cx, cy, '#5b6470', 16, 120, 1.0, 'smoke');
+  addFloat(cx, cy - 50, '九宫爆破！', '#ff9d2e');
+  shake(0.45, 10);
+  sfx('boom');
+}
 function updateMachines(dt) {
   // 第一遍：超频光环（周围 8 格获得攻速加成）
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
@@ -2459,6 +2748,37 @@ function updateMachines(dt) {
       if (!m) continue;
       const cx = cellCx(c);
       if (m.shHit > 0) m.shHit -= dt;
+      if (m.fade > 0 && (m.fade -= dt) <= 0) { spawnParts(cx, cellCy(r), '#6fe8ff', 12, 100, 0.5, 'spark'); removeMachine(r, c); continue; }
+      // 全息底座：什么都不干，倒数完满血回来
+      if (m.down > 0) {
+        m.down -= dt;
+        if (m.down <= 0) {
+          m.down = 0; m.hp = m.maxHp;
+          spawnParts(cx, cellCy(r), '#6fe8ff', 18, 130, 0.6, 'spark');
+          addFloat(cx, cellCy(r) - 44, '重新投影', '#6fe8ff');
+        }
+        continue;
+      }
+      // 特殊地板：强化地板加血上限；充能地板定时产超级电池
+      const tl = m.type !== 'box' ? tileAt(r, c) : null;
+      const wantBuff = !!(tl && tl.kind === 'buff');
+      if (wantBuff !== !!m.tileBuff) {
+        const k = wantBuff ? 1.6 : 1 / 1.6;
+        m.maxHp = Math.round(m.maxHp * k);
+        m.hp = Math.min(m.maxHp, Math.round(m.hp * k));
+        m.tileBuff = wantBuff;
+        if (wantBuff) spawnParts(cx, cellCy(r), '#58d68b', 8, 80, 0.5, 'spark');
+      }
+      if (tl && tl.kind === 'charge') {
+        m.chargeT = (m.chargeT || 0) + dt;
+        tl.prog = m.chargeT / TILE_CHARGE;
+        if (m.chargeT >= TILE_CHARGE && orbs.length < ORB_CAP) {
+          m.chargeT = 0; tl.prog = 0;
+          orbs.push({ x: cx + 18, y: cellCy(r) + 8, ty: cellCy(r) + 8, vy: 0, val: 0, life: 20, falling: false, sbat: true });
+          addFloat(cx, cellCy(r) - 44, '充能完成：超级电池', '#c98aff');
+          sfx('power');
+        }
+      }
       m.spin += dt * (m.type === 'box' ? 10 : hasKind(m, 'frost') ? 9 : 1.2);
       if (m.flash > 0) m.flash -= dt;
       if (m.recoil > 0) m.recoil -= dt;
@@ -2524,6 +2844,58 @@ function updateMachines(dt) {
             }
             if (bt >= 4) { m.recoil = 0.2; if (shakeT <= 0.02) shake(0.05, 1.2); }
             sfx(bk === 'arc' ? 'zap' : bk === 'ice' ? 'ice' : 'shoot');
+          }
+        } else if (kind === 'holo') {
+          // 全息炮台：打一串青色光弹
+          m.mt.holo = (m.mt.holo || 0) + mdt;
+          if (m.mt.holo >= st('interval') && enemyAhead(r, cx, modReach(st)) && bulletBudget()) {
+            m.mt.holo = 0;
+            m.recoil = 0.1;
+            bullets.push({ kind: 'holo', row: r, x: cx + 30, dmg: st('dmg') * useAmmo(m), speed: 520, dy: -4, bt: bulletTier(lv), pierce: 0, hit: null, spin: 0 });
+            sfx('shoot');
+          }
+        } else if (kind === 'column') {
+          /* 天雷柱：盯住前方最近的那个敌人，对它所在的整列劈一道雷 ——
+             不管哪一行，只要站在那一列上就一起挨劈。专治一窝蜂齐头并进的。 */
+          if ((m.mcd.column || 0) <= 0) {
+            const far = cx + CELL_W * st('range');
+            let near = null;
+            for (const e of enemies) {
+              if (e.dead || e.under || e.charmed || e.x <= cx - 10 || e.x > Math.min(far, FIELD_X)) continue;
+              if (!near || e.x < near.x) near = e;
+            }
+            if (near) {
+              m.mcd.column = st('cd');
+              m.flash = 0.35; m.pulse = 0.5;
+              const col = colAtX(near.x);
+              const am2 = useAmmo(m);
+              let n = 0;
+              for (const e of enemies) {
+                if (e.dead || e.under || e.charmed || colAtX(e.x) !== col || e.x > FIELD_X) continue;
+                damageEnemy(e, st('dmg') * am2, 'true');
+                e.stunT = Math.max(e.stunT || 0, e.king ? 0.15 : 0.45);
+                spawnParts(e.x, rowCy(e), '#cfe3ff', 6, 110, 0.4, 'spark');
+                n++;
+              }
+              ultFx.push({ kind: 'colstrike', col, t: 0.45, max: 0.45 });
+              zaps.push({ pts: [{ x: cx, y: cellCy(r) - 40 }, { x: cellCx(col), y: GRID_Y + 4 }], t: 0.25, max: 0.25, color: '#cfe3ff', bt: 3 });
+              if (n >= 3) addFloat(cellCx(col), GRID_Y + 30, '天雷 ×' + n, '#cfe3ff');
+              shake(0.12, 2.5);
+              sfx('zap');
+            }
+          }
+        } else if (kind === 'blast9') {
+          /* 九宫爆弹：单独一台就是一颗樱桃炸弹，种下去点着引信，几乎立刻炸掉周围 3×3；
+             杂交进别的机器里就变成「隔一阵炸一次」，宿主不会被炸没。 */
+          const pure = m.modules.length === 1;
+          if (pure) {
+            if (m.fuseT === undefined) m.fuseT = st('fuse');
+            m.fuseT -= dt;
+            m.pulse = Math.max(m.pulse, 0.2);
+            if (m.fuseT <= 0) { blast9At(r, c, st('dmg')); removeMachine(r, c); break; }
+          } else if ((m.mcd.blast9 || 0) <= 0) {
+            const hit = enemies.some(e => !e.dead && !e.under && !e.charmed && Math.abs(e.row - r) <= 1 && Math.abs(colAtX(e.x) - c) <= 1 && e.x <= FIELD_X);
+            if (hit) { m.mcd.blast9 = st('cd'); blast9At(r, c, st('dmg') * 0.5); }
           }
         } else if (kind === 'tri') {
           /* 三线射手：本行 + 上下两行，每行一发穿透弹，一发打穿整排。
@@ -4082,6 +4454,20 @@ function updateEnemies(dt) {
     }
     // 被程序改写器策反的：掉头往右走，见谁打谁
     if (e.charmed) { updateCharmed(e, dt); continue; }
+    // 全息底座：原地不动、不咬人；倒数完影像回来，满血接着走
+    if (e.holoBase) {
+      if (e.flash > 0) e.flash -= dt;
+      e.holoT -= dt;
+      if (e.holoT <= 0) {
+        e.holoBase = false;
+        e.hp = e.maxHp;
+        if (e.wasFly) { e.fly = true; e.wasFly = false; }
+        spawnParts(e.x, rowCy(e), '#6fe8ff', 20, 140, 0.6, 'spark');
+        addFloat(e.x, rowCy(e) - 44, '重新投影', '#6fe8ff');
+        sfx('gen');
+      }
+      continue;
+    }
     /* 步频只在真的在挪的时候走：站着啃机器还迈腿会很假。
        飞行单位例外——它停下来也得把旋翼转着，不然看着像掉下去了。 */
     e.anim += dt * (e.moving ? 1 : (e.fly ? 0.75 : 0.16));
@@ -4173,7 +4559,7 @@ function updateEnemies(dt) {
            不然 150 起始电量的开局根本扛不住每 8 秒三只精英。 */
         let n = e.summonN;
         const cdMul = bossRamp(e);
-        if (cdMul > 1) n = Math.max(1, Math.min(e.summonN, Math.ceil(e.summonN * wave / STAGE_WAVES)));
+        if (cdMul > 1) n = Math.max(1, Math.min(e.summonN, Math.ceil(e.summonN * wave / stageWaves())));
         e.summonT = e.summonCd * cdMul;
         const info = ENEMIES[e.summons];
         for (let k = 0; k < n; k++) {
@@ -4249,7 +4635,7 @@ function updateEnemies(dt) {
       let tgt = null;
       for (let cc = COLS - 1; cc >= 0; cc--) {
         const o = grid[e.row][cc];
-        if (!o || isWalkable(o)) continue;
+        if (!o || isWalkable(o) || !solidMachine(o)) continue;
         const ox = cellCx(cc);
         if (ox < front && front - ox <= standoff) { tgt = { o, ox }; break; }
       }
@@ -4317,7 +4703,7 @@ function updateEnemies(dt) {
       // 碾压车连钉刺一起碾 —— 钉刺是「能踩过去」的，但它恰恰是碾压车的克星，
       // 所以这里不能像别的敌人那样直接把钉刺当空气跳过。
       const reach = front <= GRID_X + col * CELL_W + CELL_W * 0.62;
-      if (cand && reach && (!isWalkable(cand) || e.crush)) m = cand;
+      if (cand && reach && solidMachine(cand) && (!isWalkable(cand) || e.crush)) m = cand;
     }
     if (m) {
       /* 碾压雪橇：不啃，直接压过去。
@@ -4570,37 +4956,241 @@ function bossSkill(e) {
 /* 关底 Boss 的火力爬坡：它第 1 波就坐进来了，所以召唤、主炮、远程炮
    都按波次拉长间隔，越到最后一波越凶；狂暴之后不再留手。 */
 function bossRamp(e) {
-  if (!e.king || !campaign() || campEndless || e.raging || wave >= STAGE_WAVES) return 1;
-  return 1 + (STAGE_WAVES - Math.max(wave, 1)) * 0.4;
+  if (!e.king || !campaign() || campEndless || e.raging || wave >= stageWaves()) return 1;
+  return 1 + (stageWaves() - Math.max(wave, 1)) * 0.4;
+}
+/* ===== Boss 的招式轮换 =====
+   每个关底 Boss 有自己的一套：招牌招式 + 主炮激光轮着来，招牌招式出得更勤。
+   每一招都先预警（看得见打哪），再落地。打的都是机器，逼你重新排阵。 */
+const BOSS_MOVES = {
+  titanking:     ['quake', 'beam', 'quake'],
+  sharklord:     ['torpedo', 'beam', 'torpedo'],
+  crabking:      ['pinch', 'claw', 'pinch', 'claw'],
+  pharaoh:       ['sandstorm', 'beam', 'sandstorm'],
+  forgegolem:    ['meteor', 'beam', 'meteor'],
+  frostbehemoth: ['icicle', 'beam', 'icicle'],
+  skymother:     ['airstrike', 'beam', 'airstrike'],
+  voidsovereign: ['tendril', 'beam', 'tendril'],
+};
+const MOVE_NAME = {
+  beam: '主炮充能…', claw: '飞钳横扫！', pinch: '巨钳夹击！', quake: '地震波！', torpedo: '鱼雷扇射！',
+  sandstorm: '沙暴！', meteor: '熔岩陨石！', icicle: '冰锥雨！', airstrike: '空袭！', tendril: '虚空触手！',
+};
+const MOVE_AIM = { beam: 1.1, claw: 0.9, pinch: 0.9, quake: 1.0, torpedo: 0.9, sandstorm: 1.1, meteor: 1.2, icicle: 1.1, airstrike: 1.1, tendril: 1.3 };
+function liveMachines() {
+  const out = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const m = grid[r][c];
+    if (m && m.type !== 'box' && !(m.down > 0)) out.push(m);
+  }
+  return out;
+}
+// 被招式「直接弄掉」的机器：无敌罩挡得住，全息机器只剩底座
+function killMachine(m) {
+  if (!m || m.invT > 0) { if (m) m.shHit = 0.3; return false; }
+  if (typeof holoDown === 'function' && holoDown(m)) return true;
+  spawnParts(cellCx(m.col), cellCy(m.row), '#8fa1b8', 16, 150, 0.6, 'gear');
+  removeMachine(m.row, m.col);
+  return true;
+}
+// 招式要打哪：预警阶段就定下来，画面照着画
+function planBossMove(e, kind) {
+  const ms = liveMachines();
+  const D = { kind, rows: [e.row], targets: [] };
+  if (kind === 'pinch') {
+    // 只够得着身前两格半、上下各一行
+    const reach = ms.filter(m => Math.abs(m.row - e.row) <= 1 && cellCx(m.col) < e.x && e.x - cellCx(m.col) < CELL_W * 2.6);
+    if (!reach.length) return planBossMove(e, 'claw');
+    reach.sort((a2, b2) => b2.maxHp - a2.maxHp);
+    D.targets = [reach[0]];
+  } else if (kind === 'quake' || kind === 'torpedo') {
+    D.rows = [e.row - 1, e.row, e.row + 1].filter(r => r >= 0 && r < ROWS);
+  } else if (kind === 'sandstorm') {
+    const rows = [...new Set(ms.map(m => m.row))].filter(r => r !== e.row);
+    D.rows = [e.row, rows.length ? rows[Math.floor(Math.random() * rows.length)] : (e.row + 2) % ROWS];
+  } else if (kind === 'meteor') {
+    D.targets = ms.sort(() => Math.random() - 0.5).slice(0, 4);
+  } else if (kind === 'icicle') {
+    let best = null, bn = 0;
+    for (const m of ms) {
+      const n = ms.filter(o => Math.abs(o.row - m.row) <= 1 && Math.abs(o.col - m.col) <= 1).length;
+      if (n > bn) { bn = n; best = m; }
+    }
+    D.center = best ? [best.row, best.col] : [e.row, Math.max(0, colAtX(e.x) - 3)];
+  } else if (kind === 'airstrike') {
+    const cnt = Array(COLS).fill(0);
+    for (const m of ms) cnt[m.col]++;
+    let col = 0;
+    for (let c = 1; c < COLS; c++) if (cnt[c] > cnt[col]) col = c;
+    D.col = col;
+  } else if (kind === 'tendril') {
+    D.targets = ms.sort((a2, b2) => (CLASSIC_COST[b2.type] || b2.maxHp / 10) - (CLASSIC_COST[a2.type] || a2.maxHp / 10)).slice(0, 1);
+  }
+  return D;
+}
+function fireBossMove(e) {
+  const D = e.moveData;
+  const P = 1 + (e.raging ? 0.3 : 0);
+  const rd = (e.rdmg || 110) * P;
+  if (D.kind === 'beam') {
+    e.beamFire = 0.55;
+    const dmg = rd * 1.5;
+    for (let c = COLS - 1; c >= 0; c--) { const m = grid[e.row][c]; if (m) damageMachine(m, dmg); }
+    for (const o of enemies) { if (!o.dead && o.charmed && o.row === e.row) damageEnemy(o, dmg, 'foe'); }
+    beams.push({ row: e.row, x0: GRID_X - 24, x1: e.x - e.w * 0.3, t: 0.55, max: 0.55, kind: 'bossbeam' });
+    spawnParts(e.x - 40, rowCy(e), '#ff5d5d', 20, 180, 0.6, 'spark');
+    shake(0.45, 9); sfx('laser');
+  } else if (D.kind === 'claw') {
+    // 发射大钳：贴着这一行一路平推过去，挡路的机器全挨一钳，再收回来
+    bossFx.push({ kind: 'claw', row: e.row, x: e.x - e.w * 0.4, x0: e.x - e.w * 0.4, dir: -1, spd: 560, dmg: rd * 3, hit: new Set(), boss: e });
+    shake(0.3, 6); sfx('shred');
+  } else if (D.kind === 'pinch') {
+    const m = D.targets[0];
+    if (m && grid[m.row][m.col] === m) {
+      bossFx.push({ kind: 'pinchfx', x: cellCx(m.col), y: cellCy(m.row), t: 0.45, max: 0.45 });
+      // 前几波（还在爬坡）只是重创，最后一波 / 狂暴之后才整台夹碎
+      if (bossRamp(e) > 1) { damageMachine(m, rd * 4); addFloat(cellCx(m.col), cellCy(m.row) - 50, '被夹了一下！', '#ff9d5d'); }
+      else if (killMachine(m)) addFloat(cellCx(m.col), cellCy(m.row) - 50, '被夹碎了！', '#ff5d5d');
+    }
+    shake(0.35, 7); sfx('break');
+  } else if (D.kind === 'quake') {
+    for (const r of D.rows) bossFx.push({ kind: 'quake', row: r, x: e.x - e.w * 0.3, spd: 380, dmg: rd * 1.3, hit: new Set() });
+    shake(0.55, 11); sfx('boom');
+  } else if (D.kind === 'torpedo') {
+    for (const r of D.rows) bossFx.push({ kind: 'torp', row: r, x: e.x - e.w * 0.3, spd: 330, dmg: rd * 3.2 });
+    sfx('shoot');
+  } else if (D.kind === 'sandstorm') {
+    for (const r of D.rows) {
+      bossFx.push({ kind: 'sand', row: r, t: 1.2, max: 1.2 });
+      for (let c = 0; c < COLS; c++) {
+        const m = grid[r][c];
+        if (!m || m.type === 'box') continue;
+        damageMachine(m, rd * 1.1);
+        if (!(m.invT > 0)) m.stunT = Math.max(m.stunT || 0, 2);
+      }
+    }
+    shake(0.3, 5); sfx('shred');
+  } else if (D.kind === 'meteor') {
+    D.targets.slice(0, 3).forEach((m, i) => bossFx.push({ kind: 'meteor', m, r: m.row, c: m.col, t: 0, dur: 0.55 + i * 0.15, dmg: rd * 2.6, done: false }));
+    sfx('horn');
+  } else if (D.kind === 'icicle') {
+    const [r0, c0] = D.center;
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const r = r0 + dr, c = c0 + dc;
+      if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+      bossFx.push({ kind: 'icicle', r, c, t: 0, dur: 0.15 + Math.random() * 0.35, done: false, dmg: rd * 1.5 });
+    }
+    sfx('freeze');
+  } else if (D.kind === 'airstrike') {
+    for (let r = 0; r < ROWS; r++) bossFx.push({ kind: 'bomb', r, c: D.col, t: 0, dur: 0.25 + r * 0.12, done: false, dmg: rd * 2.6 });
+    sfx('horn');
+  } else if (D.kind === 'tendril') {
+    for (const m of D.targets) {
+      if (!m || grid[m.row][m.col] !== m) continue;
+      bossFx.push({ kind: 'tendrilfx', x: cellCx(m.col), y: cellCy(m.row), t: 0.7, max: 0.7 });
+      if (bossRamp(e) > 1) { damageMachine(m, rd * 4); addFloat(cellCx(m.col), cellCy(m.row) - 50, '被触手缠住！', '#c98aff'); }
+      else if (killMachine(m)) addFloat(cellCx(m.col), cellCy(m.row) - 50, '被拖进虚空！', '#c98aff');
+      // 旁边的也被扯一下
+      for (const [dr, dc] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+        const o = grid[m.row + dr] && grid[m.row + dr][m.col + dc];
+        if (o && o.type !== 'box') damageMachine(o, rd * 0.8);
+      }
+    }
+    shake(0.4, 8); sfx('zap');
+  }
 }
 function updateBossBeam(e, dt) {
   if (e.beamAim > 0) {
     e.beamAim -= dt;
-    if (e.beamAim <= 0) {
-      e.beamFire = 0.55;
-      const dmg = (e.rdmg || 110) * 1.5;
-      for (let c = COLS - 1; c >= 0; c--) {
-        const m = grid[e.row][c];
-        if (m) damageMachine(m, dmg);
-      }
-      for (const o of enemies) {
-        if (o.dead || !o.charmed || o.row !== e.row) continue;
-        damageEnemy(o, dmg, 'foe');
-      }
-      beams.push({ row: e.row, x0: GRID_X - 24, x1: e.x - e.w * 0.3, t: 0.55, max: 0.55, kind: 'bossbeam' });
-      spawnParts(e.x - 40, rowCy(e), '#ff5d5d', 20, 180, 0.6, 'spark');
-      shake(0.45, 9);
-      sfx('laser');
-    }
+    if (e.beamAim <= 0) fireBossMove(e);
     return;
   }
   if (e.beamFire > 0) { e.beamFire -= dt; return; }
   e.beamT -= dt;
   if (e.beamT <= 0 && e.x < FIELD_X + 40) {
     e.beamT = e.beamCd * (e.raging ? 0.6 : 1) * bossRamp(e);
-    e.beamAim = 1.1;
-    addFloat(e.x, rowCy(e) - 60, '主炮充能…', '#ff5d5d');
+    const list = BOSS_MOVES[e.type] || ['beam'];
+    e.moveIdx = e.moveIdx === undefined ? 0 : e.moveIdx + 1;   // 第一招就是招牌招式
+    const kind = list[e.moveIdx % list.length];
+    e.moveData = planBossMove(e, kind);
+    e.beamAim = MOVE_AIM[e.moveData.kind] || 1;
+    e.aimMax = e.beamAim;
+    addFloat(e.x, rowCy(e) - 60, MOVE_NAME[e.moveData.kind] || '', '#ff5d5d');
     sfx('snipe');
+  }
+}
+// Boss 招式的飞行物 / 落点
+function updateBossFx(dt) {
+  for (let i = bossFx.length - 1; i >= 0; i--) {
+    const f = bossFx[i];
+    if (f.kind === 'claw') {
+      f.x += f.dir * f.spd * dt;
+      if (f.dir < 0) {
+        for (let c = 0; c < COLS; c++) {
+          const m = grid[f.row][c];
+          if (!m || m.type === 'box' || f.hit.has(m) || Math.abs(cellCx(c) - f.x) > 30) continue;
+          f.hit.add(m);
+          damageMachine(m, f.dmg);
+          spawnParts(cellCx(c), cellCy(f.row), '#ff9d5d', 12, 150, 0.5, 'gear');
+          sfx('chomp');
+        }
+        if (f.x < GRID_X - 10) f.dir = 1;
+      } else if (f.x >= f.x0) { bossFx.splice(i, 1); }
+      continue;
+    }
+    if (f.kind === 'quake' || f.kind === 'torp') {
+      f.x -= f.spd * dt;
+      for (let c = COLS - 1; c >= 0; c--) {
+        const m = grid[f.row][c];
+        if (!m || m.type === 'box' || Math.abs(cellCx(c) - f.x) > 24) continue;
+        if (f.kind === 'quake') {
+          if (f.hit.has(m)) continue;
+          f.hit.add(m);
+          damageMachine(m, f.dmg);
+          if (!(m.invT > 0)) m.stunT = Math.max(m.stunT || 0, 1.5);
+          spawnParts(cellCx(c), cellCy(f.row) + 20, '#8a7a66', 10, 120, 0.6, 'smoke');
+        } else {
+          // 鱼雷：撞上第一台机器就炸，旁边两格也被波及
+          damageMachine(m, f.dmg);
+          for (const dc of [-1, 1]) { const o = grid[f.row][c + dc]; if (o && o.type !== 'box') damageMachine(o, f.dmg * 0.35); }
+          shocks.push({ x: cellCx(c), y: cellCy(f.row), t: 0.35, max: 0.35, reach: CELL_W * 0.9, color: '#6fd8ff' });
+          spawnParts(cellCx(c), cellCy(f.row), '#9fe8ff', 18, 170, 0.6, 'spark');
+          sfx('boom');
+          f.x = -999;
+        }
+      }
+      if (f.x < GRID_X - 30) bossFx.splice(i, 1);
+      continue;
+    }
+    if (f.kind === 'meteor' || f.kind === 'icicle' || f.kind === 'bomb') {
+      f.t += dt;
+      if (!f.done && f.t >= f.dur) {
+        f.done = true;
+        const x = cellCx(f.c), y = cellCy(f.r);
+        const m = grid[f.r][f.c];
+        if (f.kind === 'meteor') {
+          if (m && m.type !== 'box') damageMachine(m, f.dmg);
+          pools.push({ x, row: f.r, t: 5, max: 5, dps: 28 });
+          shocks.push({ x, y, t: 0.4, max: 0.4, reach: CELL_W * 0.8, color: '#ff7a2e' });
+          spawnParts(x, y, '#ff7a2e', 20, 180, 0.6, 'spark');
+          shake(0.2, 4); sfx('boom');
+        } else if (f.kind === 'icicle') {
+          if (m && m.type !== 'box') { damageMachine(m, f.dmg); if (!(m.invT > 0)) m.stunT = Math.max(m.stunT || 0, 2.5); }
+          spawnParts(x, y, '#bfe9ff', 12, 140, 0.5, 'spark');
+          sfx('ice');
+        } else {
+          if (m && m.type !== 'box') damageMachine(m, f.dmg);
+          shocks.push({ x, y, t: 0.35, max: 0.35, reach: CELL_W * 0.7, color: '#ff9d2e' });
+          spawnParts(x, y, '#ff9d2e', 14, 160, 0.5, 'spark');
+          sfx('boom');
+        }
+      }
+      if (f.t >= f.dur + 0.4) bossFx.splice(i, 1);
+      continue;
+    }
+    // 纯画面的：夹子合拢、沙暴、触手
+    f.t -= dt;
+    if (f.t <= 0) bossFx.splice(i, 1);
   }
 }
 function updateBossSkill(e, dt) {
@@ -4924,6 +5514,8 @@ function update(dt) {
   updateOrbs(dt);
   updatePharaohPull(dt);
   updateUltFx(dt);
+  updateTiles(dt);
+  updateBossFx(dt);
   updateFx(dt);
 }
 // 创造模式可以关掉敌潮，安心搭配机器
@@ -4991,8 +5583,9 @@ function updateHud() {
   }
   $('scoreVal').textContent = score;
   let wtxt;
-  if (campaign() && campEndless) wtxt = mapDef().icon + ' ♾️ 无尽 · 第' + Math.max(wave, 1) + '波';
-  else if (campaign()) wtxt = mapDef().icon + ' 第' + curStage + '关 · ' + Math.max(wave, 1) + '/' + STAGE_WAVES + '波';
+  if (campaign() && customCfg) wtxt = '🧩 ' + mapDef().icon + ' ' + Math.max(wave, 1) + '/' + stageWaves() + '波';
+  else if (campaign() && campEndless) wtxt = mapDef().icon + ' ♾️ 无尽 · 第' + Math.max(wave, 1) + '波';
+  else if (campaign()) wtxt = mapDef().icon + ' 第' + curStage + '关 · ' + Math.max(wave, 1) + '/' + stageWaves() + '波';
   else if (creativeNoWaves()) wtxt = '敌潮已暂停';
   else if (wave === 0) wtxt = '准备中';
   else if (endless || wave > TOTAL_WAVES) wtxt = '无尽 · 第' + wave + '波';
@@ -5016,7 +5609,7 @@ function startGame(m) {
   closeLevelPanel();
   closeDeck();
   if (m === 'box' || m === 'classic' || m === 'creative' || m === 'campaign') mode = m;
-  if (mode !== 'campaign') { campEndless = false; pickedCards = null; }
+  if (mode !== 'campaign') { campEndless = false; pickedCards = null; customCfg = null; }
   if (mode !== 'campaign' && curMap !== 'scrapyard') { curMap = 'scrapyard'; bgCanvas = null; }
   wavesOn = true;
   $('wavesBtn').textContent = '🌊 敌潮：开';
@@ -5027,7 +5620,7 @@ function startGame(m) {
   if (campaign()) {
     const M = mapDef();
     banner(M.icon + ' ' + M.name + ' · 第 ' + curStage + ' 关',
-      isBossStage() ? '守住 ' + STAGE_WAVES + ' 波 —— 最后一波是 ' + ENEMIES[M.boss].name : M.tip);
+      isBossStage() ? '守住 ' + stageWaves() + ' 波 —— 最后一波是 ' + ENEMIES[M.boss].name : M.tip);
   } else if (creative()) {
     banner('🛠️ 创造模式', '能量无限、随便放、随便杂交 —— 敌潮可随时开关');
   } else if (mode === 'classic') {
@@ -5056,13 +5649,15 @@ function endGame(win) {
   $('endTitle').innerHTML = win
     ? '🎉 <span class="gold">防线守住了！</span>'
     : '💥 防线失守…';
-  const modeTag = campaign()
+  const modeTag = campaign() && customCfg
+      ? '（🧩 自定义 · ' + mapDef().icon + mapDef().name + ' · ' + customCfg.waves + ' 波 · ' + diff().name + '）'
+    : campaign()
       ? '（🗺️ ' + STYLE_NAME[campStyle] + ' · ' + diff().name + ' · ' + mapDef().icon + mapDef().name
         + (campEndless ? ' ♾️ 无尽 · 撑到第 ' + wave + ' 波）' : ' 第 ' + curStage + ' 关）')
     : creative() ? '（🛠️ 创造模式）'
     : mode === 'classic' ? '（🃏 普通模式）' : '（🎁 盲盒模式）';
-  const totalW = campaign() ? (campEndless ? wave : STAGE_WAVES) : TOTAL_WAVES;
-  const nextTip = campaign() && curStage < STAGES_PER_MAP ? '下一关已解锁。'
+  const totalW = campaign() ? (campEndless ? wave : stageWaves()) : TOTAL_WAVES;
+  const nextTip = customCfg ? '' : campaign() && curStage < STAGES_PER_MAP ? '下一关已解锁。'
     : campaign() && MAP_ORDER.indexOf(curMap) < MAP_ORDER.length - 1
       ? '下一张地图 ' + MAPS[MAP_ORDER[MAP_ORDER.indexOf(curMap) + 1]].name + ' 已解锁。' : '';
   $('endSub').textContent = (win
@@ -5074,7 +5669,7 @@ function endGame(win) {
   $('endKills').textContent = kills;
   $('endlessBtn').style.display = win ? '' : 'none';
   // 创造模式不计入排行榜
-  $('submitRow').style.display = creative() ? 'none' : '';   // 创造玩法不计成绩
+  $('submitRow').style.display = (creative() || customCfg) ? 'none' : '';   // 创造玩法、自定义关卡不计成绩
   $('board').style.display = 'none';
   $('nameInput').value = localStorage.getItem('mg_playerName') || '';
   submitted = false;
@@ -5901,20 +6496,27 @@ function renderStageSel() {
     box.appendChild(row);
   }
 }
-function enterStage(map, st, endlessMode) {
+function enterStage(map, st, endlessMode, custom) {
   curMap = map; curStage = st;
   campEndless = !!endlessMode;
+  customCfg = custom || null;
   bgCanvas = null;                 // 换图要重画背景
   ensureAc();
+  // 选卡这一屏就按战役的规矩算卡池（不然会沿用上一局的模式，把别的图的机器也放出来）
+  mode = 'campaign';
+  pickedCards = null;
   // 创造模式是沙盒，不编组；其余玩法先挑一排机器再进场
-  if (campStyle === 'creative') { pickedCards = null; startGame('campaign'); return; }
+  if (campStyle === 'creative') { startGame('campaign'); return; }
   pendingStage = { map, st, endless: !!endlessMode };
   openPick();
 }
 
-/* ===== 出战编组 ===== */
+/* ===== 出战图鉴 =====
+   进关前的这一屏是一本图鉴：所有机器都在里面，能带的亮着、带不了的灰着并写明原因；
+   点一下看详情，再点一下放进编组。顶上一排是这一关会来的敌人，下面是这关的特殊地板。 */
 function openPick() {
   pickDraft = [];
+  pickFocus = null;
   const pool = pickPool();
   // 上一局带过的那套还在就直接摆上，连着打几关不用每次重挑
   const last = (localStorage.getItem('mg_pick_' + curMap) || '').split(',').filter(Boolean);
@@ -5923,6 +6525,7 @@ function openPick() {
   show('pickOv', true);
   renderPick();
 }
+let pickFocus = null;
 function autoPick() {
   const pool = pickPool();
   // 自动配一套：先把必须有的骨架塞进去，剩下的随机补
@@ -5931,15 +6534,114 @@ function autoPick() {
   pickDraft = must.concat(rest).slice(0, PICK_SLOTS);
   renderPick();
 }
+// 这台机器这一关为什么带不了（能带就返回空串）
+function cardLockReason(type) {
+  if (pickPool().indexOf(type) >= 0) return '';
+  if (WATER_KIT.indexOf(type) >= 0) return '只有带水的地图用得上';
+  if (MAP_ONLY.indexOf(type) >= 0 && !customCfg) {
+    const mk = Object.keys(MAP_CARDS).find(k => MAP_CARDS[k].indexOf(type) >= 0);
+    return MAPS[mk].icon + ' ' + MAPS[mk].name + ' 专属';
+  }
+  if (!cardUnlocked(type) || (MAP_ONLY.indexOf(type) >= 0 && !allCardsUnlocked())) {
+    return '打通 ' + MAPS[STARTER_MAP].name + ' 第 ' + STAGES_PER_MAP + ' 关解锁';
+  }
+  const where = Object.keys(MAP_KIT).filter(k => MAP_KIT[k].indexOf(type) >= 0).map(k => MAPS[k].name);
+  return where.length ? '这张图带不了（' + where.join('、') + ' 能带）' : '这张图带不了';
+}
+// 敌人小图：借战场那套 drawEnemy，临时把画笔换成一块离屏画布
+const _foeIcon = new Map();
+function enemyIconURL(type) {
+  if (_foeIcon.has(type)) return _foeIcon.get(type);
+  const S = 128;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const ctx = c.getContext('2d');
+  const keep = enemies.length;
+  spawnEnemy(type, 0, null);
+  const e = enemies.pop();
+  enemies.length = keep;
+  e.sbat = false; e.affix = null; e.fly = !!ENEMIES[type].fly; e.anim = 0.4;
+  const k = e.king ? 0.42 : e.boss ? 0.62 : ENEMIES[type].heavy ? 0.78 : 0.95;
+  ctx.translate(S / 2, S * 0.56);
+  ctx.scale(k, k);
+  ctx.translate(-e.x, -cellCy(0));
+  const saved = g;
+  g = ctx;
+  try { drawEnemy(e); } catch (err) { /* 画不出来就留空，别把整个界面带崩 */ }
+  g = saved;
+  const url = c.toDataURL();
+  _foeIcon.set(type, url);
+  return url;
+}
+function renderPickFoes() {
+  const box = $('pickFoes');
+  box.innerHTML = '<span class="lbl">本关敌人</span>';
+  const roster = curRoster().slice();
+  // 这时候还没开局，不能靠 isBossStage()（它要求已经在战役里）
+  const bossStage = customCfg ? !!customCfg.boss : curStage >= STAGES_PER_MAP;
+  const bossT = bossStage || campEndless ? mapDef().boss : null;
+  if (bossT) roster.push(bossT);
+  for (const t of roster) {
+    const d = document.createElement('div');
+    d.className = 'foe' + (t === bossT ? ' boss' : '');
+    const info = ENEMIES[t];
+    const tags = [];
+    if (info.fly) tags.push('飞行');
+    if (info.range) tags.push('远程');
+    if (info.heavy) tags.push('重甲');
+    if (info.holo) tags.push('全息');
+    if (info.crush) tags.push('碾压');
+    d.title = info.name + (tags.length ? '（' + tags.join(' / ') + '）' : '')
+      + ' · 血 ' + info.hp + (info.summons ? ' · 会召唤 ' + ENEMIES[info.summons].name : '');
+    d.innerHTML = '<img alt="" src="' + enemyIconURL(t) + '">' + (t === bossT ? '☠ ' : '') + info.name;
+    box.appendChild(d);
+  }
+}
+function machineInfoHTML(t) {
+  const info = MACHINES[t] || { name: t, desc: '' };
+  const mods = modulesOfType(t) || [];
+  const reason = cardLockReason(t);
+  let h = '<h3>' + info.name + '</h3>';
+  h += '<div class="meta">' + (CLASSIC_COST[t] || 0) + '⚡ · 冷却 ' + (CLASSIC_CD[t] || 0) + ' 秒'
+    + (mods.length ? ' · 射程 ' + reachText({ modules: mods }) : '') + '</div>';
+  h += '<div>' + info.desc + '</div>';
+  if (mods.length) {
+    const U = ULTS[mods[0].kind];
+    if (U) h += '<div class="ult">★ 大招「' + U.name + '」：' + U.desc + '</div>';
+  }
+  if (reason) h += '<div class="lock">🔒 ' + reason + '</div>';
+  return h;
+}
+function renderPickInfo() {
+  const box = $('pickInfo');
+  const t = pickFocus;
+  if (!t) {
+    box.innerHTML = '<h3>点一台机器</h3><div>亮着的能带：点一下就放进编组，这里会显示它的详情；'
+      + '已经放进去的再点一下拿出来。灰着的这一关带不了，点开能看到原因。</div>';
+    return;
+  }
+  box.innerHTML = '';
+  const cv2 = document.createElement('canvas');
+  cv2.width = 140; cv2.height = 140;
+  const cg = cv2.getContext('2d');
+  cg.scale(1.3, 1.3);
+  drawMachine(cg, t, 54, 60, 1.0, {});
+  box.appendChild(cv2);
+  const d = document.createElement('div');
+  d.innerHTML = machineInfoHTML(t);
+  box.appendChild(d);
+}
 function renderPick() {
   const M = mapDef();
   const pool = pickPool();
   $('pickSub').innerHTML = M.icon + ' <b>' + M.name + '</b> · '
-    + (pendingStage && pendingStage.endless ? '♾️ 无尽' : '第 ' + curStage + ' 关')
+    + (customCfg ? '🧩 自定义 · ' + stageWaves() + ' 波' : pendingStage && pendingStage.endless ? '♾️ 无尽' : '第 ' + curStage + ' 关')
     + ' · ' + STYLE_NAME[campStyle] + ' · ' + diff().name
     + '<br>挑满 ' + PICK_SLOTS + ' 格带上场，这一局就只能用这几台'
     + (campStyle === 'box' ? '（盲盒也只会开出编组里的机器）' : '')
     + (mapHasWater() ? '；水上平台白送，不占格子' : '');
+  renderPickFoes();
+  if (typeof renderPickTiles === 'function') renderPickTiles();
   const slots = $('pickSlots');
   slots.innerHTML = '';
   for (let i = 0; i < PICK_SLOTS; i++) {
@@ -5947,12 +6649,12 @@ function renderPick() {
     const el = document.createElement('div');
     el.className = 'slot' + (t ? ' on' : '');
     if (t) {
-      const cv = document.createElement('canvas');
-      cv.width = 100; cv.height = 100;
-      const cg = cv.getContext('2d');
+      const cv3 = document.createElement('canvas');
+      cv3.width = 100; cv3.height = 100;
+      const cg = cv3.getContext('2d');
       cg.scale(0.95, 0.95);
       drawMachine(cg, t, 53, 60, 1.0, {});
-      el.appendChild(cv);
+      el.appendChild(cv3);
       const nm = document.createElement('b');
       nm.textContent = MACHINES[t] ? MACHINES[t].name : t;
       el.appendChild(nm);
@@ -5963,36 +6665,44 @@ function renderPick() {
     }
     slots.appendChild(el);
   }
+  // 图鉴：所有机器都列出来，能带的在前（按价格），带不了的灰着排在后面
+  const all = CLASSIC_ORDER.filter((t, i) => t !== 'lilypad' && CLASSIC_ORDER.indexOf(t) === i && MACHINES[t]);
+  const open = all.filter(t => pool.indexOf(t) >= 0).sort((a2, b2) => (CLASSIC_COST[a2] || 0) - (CLASSIC_COST[b2] || 0));
+  const shut = all.filter(t => pool.indexOf(t) < 0);
   const box = $('pickPool');
   box.innerHTML = '';
-  for (const t of pool) {
+  for (const t of open.concat(shut)) {
     const info = MACHINES[t];
+    const locked = pool.indexOf(t) < 0;
     const taken = pickDraft.indexOf(t) >= 0;
     const el = document.createElement('div');
-    el.className = 'pc' + (taken ? ' taken' : '');
-    el.title = info ? info.name + '：' + info.desc : t;
-    const cv = document.createElement('canvas');
-    cv.width = 104; cv.height = 104;
-    const cg = cv.getContext('2d');
+    el.className = 'pc' + (locked ? ' locked' : '') + (taken ? ' taken' : '') + (pickFocus === t ? ' sel' : '');
+    el.title = info.name + '：' + info.desc;
+    const cv4 = document.createElement('canvas');
+    cv4.width = 104; cv4.height = 104;
+    const cg = cv4.getContext('2d');
     cg.scale(0.95, 0.95);
     drawMachine(cg, t, 55, 62, 1.0, {});
-    el.appendChild(cv);
+    el.appendChild(cv4);
     const nm = document.createElement('b');
-    nm.textContent = info ? info.name : t;
+    nm.textContent = info.name;
     el.appendChild(nm);
-    const cost = document.createElement('i');
-    cost.textContent = (CLASSIC_COST[t] || 0) + '⚡';
+    const cost = document.createElement(locked ? 'em' : 'i');
+    cost.textContent = locked ? '🔒 带不了' : (CLASSIC_COST[t] || 0) + '⚡';
     el.appendChild(cost);
-    if (!taken) {
-      el.addEventListener('click', () => {
-        if (pickDraft.length >= PICK_SLOTS) { sfx('error'); return; }
-        pickDraft.push(t);
-        sfx('place');
-        renderPick();
-      });
-    }
+    el.addEventListener('click', () => {
+      if (locked) { pickFocus = t; sfx('error'); renderPick(); return; }
+      if (taken) { pickDraft.splice(pickDraft.indexOf(t), 1); pickFocus = t; sfx('place'); renderPick(); return; }
+      // 点一下就放进编组，右边同时显示它的详情
+      pickFocus = t;
+      if (pickDraft.length >= PICK_SLOTS) { sfx('error'); renderPick(); return; }
+      pickDraft.push(t);
+      sfx('place');
+      renderPick();
+    });
     box.appendChild(el);
   }
+  renderPickInfo();
   $('pickGoBtn').disabled = pickDraft.length === 0;
   $('pickGoBtn').textContent = pickDraft.length >= PICK_SLOTS
     ? '▶ 带这些上场'
@@ -6011,12 +6721,111 @@ $('startCampaignBtn').addEventListener('click', () => {
   box.style.display = show ? '' : 'none';
   $('menuBoard').style.display = 'none';
   $('miniSel').style.display = 'none';
+  $('customSel').style.display = 'none';
+  $('startCustomBtn').textContent = '🧩 自定义关卡';
   $('startMiniBtn').textContent = '🔨 小游戏';
   // 规则说明和八张地图挤不进一屏，展开关卡表就先把说明收起来
   $('menu').classList.toggle('picking', show);
   $('startCampaignBtn').textContent = show ? '🗺️ 收起关卡' : '🗺️ 战役';
   if (show) renderStageSel();
 });
+/* ===== 自定义关卡 =====
+   地图、波数、难度、玩法、有没有 Boss、有没有特殊地板，再从全部敌人里勾这一关出哪些。
+   配置记在本地，下次打开还是上次那套。 */
+const CUSTOM_WAVES = [3, 5, 8, 10, 15, 20];
+function customFoeList() {
+  return Object.keys(ENEMIES).filter(t => !ENEMIES[t].king && !ENEMIES[t].friendly && t !== 'mechhound' && t !== 'mechtitan');
+}
+let customDraft = null;
+function loadCustom() {
+  let c = null;
+  try { c = JSON.parse(localStorage.getItem('mg_custom') || 'null'); } catch (e) {}
+  if (!c || !MAPS[c.map]) c = { map: 'scrapyard', waves: 5, boss: false, tiles: true, roster: ['scrap', 'runner', 'armored', 'gunner', 'drone', 'shieldbot'] };
+  c.roster = (c.roster || []).filter(t => ENEMIES[t]);
+  return c;
+}
+function saveCustom() { try { localStorage.setItem('mg_custom', JSON.stringify(customDraft)); } catch (e) {} }
+function renderCustomSel() {
+  if (!customDraft) customDraft = loadCustom();
+  const C = customDraft;
+  const box = $('customSel');
+  box.innerHTML = '';
+  const row = (title, items) => {
+    const h = document.createElement('h4'); h.innerHTML = title; box.appendChild(h);
+    const d = document.createElement('div'); d.className = 'opts';
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.className = 'opt' + (it.on ? ' on' : '');
+      b.innerHTML = it.label;
+      b.addEventListener('click', () => { it.pick(); saveCustom(); renderCustomSel(); });
+      d.appendChild(b);
+    }
+    box.appendChild(d);
+  };
+  row('① 地图', MAP_ORDER.map(k => ({ label: MAPS[k].icon + ' ' + MAPS[k].name, on: C.map === k, pick: () => { C.map = k; } })));
+  row('② 波数', CUSTOM_WAVES.map(n => ({ label: n + ' 波', on: C.waves === n, pick: () => { C.waves = n; } })));
+  row('③ 玩法与难度',
+    ['box', 'classic', 'creative'].map(k => ({ label: STYLE_NAME[k], on: campStyle === k, pick: () => { campStyle = k; saveStyle(); } }))
+      .concat(['easy', 'normal', 'hard'].map(k => ({ label: DIFFS[k].name, on: campDiff === k, pick: () => { campDiff = k; saveDiff(); } }))));
+  row('④ 规则', [
+    { label: '☠ 关底 Boss（' + ENEMIES[MAPS[C.map].boss].name + '）', on: C.boss, pick: () => { C.boss = !C.boss; } },
+    { label: '🟨 特殊地板', on: C.tiles, pick: () => { C.tiles = !C.tiles; } },
+  ]);
+  const h = document.createElement('h4');
+  h.innerHTML = '⑤ 这一关出哪些敌人<span class="count">已选 ' + C.roster.length + ' 种</span>'
+    + ' <small style="color:var(--dim)">（建议 6~7 种；点一下勾上 / 取消）</small>';
+  box.appendChild(h);
+  const quick = document.createElement('div'); quick.className = 'opts'; quick.style.marginBottom = '6px';
+  const qb = (label, fn) => { const b = document.createElement('button'); b.className = 'opt'; b.textContent = label;
+    b.addEventListener('click', () => { fn(); saveCustom(); renderCustomSel(); }); quick.appendChild(b); };
+  qb('🎲 随机 7 种', () => { C.roster = customFoeList().sort(() => Math.random() - 0.5).slice(0, 7); if (C.roster.indexOf('scrap') < 0) C.roster[0] = 'scrap'; });
+  qb('🗺️ 用这张图第 1 关的名单', () => { const k = customCfg; customCfg = null; C.roster = stageRoster(C.map, 1); customCfg = k; });
+  qb('清空', () => { C.roster = []; });
+  box.appendChild(quick);
+  const foes = document.createElement('div'); foes.className = 'foes';
+  for (const t of customFoeList()) {
+    const d = document.createElement('div');
+    const on = C.roster.indexOf(t) >= 0;
+    d.className = 'cf' + (on ? ' on' : '');
+    d.title = ENEMIES[t].name + ' · 血 ' + ENEMIES[t].hp + (ENEMIES[t].fly ? ' · 飞行' : '') + (ENEMIES[t].range ? ' · 远程' : '');
+    d.innerHTML = '<img alt="" src="' + enemyIconURL(t) + '">' + ENEMIES[t].name;
+    d.addEventListener('click', () => {
+      const i = C.roster.indexOf(t);
+      if (i >= 0) C.roster.splice(i, 1); else C.roster.push(t);
+      saveCustom(); renderCustomSel();
+    });
+    foes.appendChild(d);
+  }
+  box.appendChild(foes);
+  const go = document.createElement('div'); go.className = 'go';
+  const gb = document.createElement('button');
+  gb.className = 'bigBtn custom';
+  gb.id = 'customGoBtn';
+  gb.textContent = C.roster.length ? '▶ 开打（' + MAPS[C.map].name + ' · ' + C.waves + ' 波）' : '先勾至少一种敌人';
+  gb.disabled = !C.roster.length;
+  gb.addEventListener('click', () => startCustom());
+  go.appendChild(gb);
+  box.appendChild(go);
+}
+function startCustom() {
+  const C = customDraft || loadCustom();
+  if (!C.roster.length) return;
+  enterStage(C.map, 1, false, { map: C.map, waves: C.waves, boss: !!C.boss, tiles: !!C.tiles, roster: C.roster.slice() });
+}
+$('startCustomBtn').addEventListener('click', () => {
+  const box = $('customSel');
+  const show = box.style.display === 'none';
+  box.style.display = show ? '' : 'none';
+  $('stageSel').style.display = 'none';
+  $('miniSel').style.display = 'none';
+  $('menuBoard').style.display = 'none';
+  $('startCampaignBtn').textContent = '🗺️ 战役';
+  $('startMiniBtn').textContent = '🔨 小游戏';
+  $('menu').classList.toggle('picking', show);
+  $('startCustomBtn').textContent = show ? '🧩 收起自定义' : '🧩 自定义关卡';
+  if (show) renderCustomSel();
+});
+
 /* 小游戏列表：每个小游戏一套 start / update / draw / hit / move，
    共用画布、指针和结算面板，加新的只要往这里塞一项 */
 const MINI_GAMES = [
@@ -6046,9 +6855,11 @@ $('startMiniBtn').addEventListener('click', () => {
   const show = box.style.display === 'none';
   box.style.display = show ? '' : 'none';
   $('stageSel').style.display = 'none';
+  $('customSel').style.display = 'none';
   $('menuBoard').style.display = 'none';
   $('menu').classList.remove('picking');
   $('startCampaignBtn').textContent = '🗺️ 战役';
+  $('startCustomBtn').textContent = '🧩 自定义关卡';
   $('startMiniBtn').textContent = show ? '🔨 收起小游戏' : '🔨 小游戏';
   if (show) renderMiniSel();
 });
@@ -6167,6 +6978,7 @@ function draw() {
     fxQuality = Math.min(units > 58 ? 0.35 : units > 38 ? 0.65 : 1, fxLoad);
   }
   g.drawImage(bgCanvas, 0, 0, W, H);
+  drawTiles();
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       if (hasPad(r, c)) drawPad(g, cellCx(c), cellCy(r) + 6, r, c);
@@ -6183,6 +6995,7 @@ function draw() {
   drawMines();
   drawShip(_frameDt);
   drawBossAim();
+  drawBossFx();
   drawBeams();
   drawUltFx();
   drawBullets();
@@ -7618,6 +8431,13 @@ function drawMachine(ctx, type, x, y, s, m) {
     return;
   }
   const mods = (m && m.modules) ? m.modules : (modulesOfType(type) || []);
+  // 全息机器被打坏：只剩一座投影底座，上面一圈倒数
+  if (m && m.down > 0) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    drawHoloBase(ctx, m.down / (m.downMax || HOLO_DOWN));
+    ctx.restore();
+    return;
+  }
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(s, s);
@@ -7679,7 +8499,8 @@ function drawMachine(ctx, type, x, y, s, m) {
   curTheme = null;
   // 金属高光只给场上的机器（卡面小图上那道反光会变成一条灰杠）；挤的时候先省掉
   if (fxQuality >= 0.65 && m && m.row !== undefined) drawMetalSheen(ctx, m);
-  if (mods.length) drawLevelRig(ctx, totalLv(mods), m);
+  if (mods.length) drawLevelRig(ctx, upLv(mods), m);
+  if (m && m.row !== undefined && m.maxHp) drawHurt(ctx, m.hp / m.maxHp, 56, -26, m.row * 0.7 + m.col * 0.23);
   // 绝对领域：罩一层会闪的蓝色力场罩
   if (m && m.invT > 0) {
     const a = Math.min(1, m.invT / 0.6) * (0.55 + Math.sin(time * 6) * 0.15);
@@ -7822,9 +8643,10 @@ function soloLv(m, k) { return (m && m.modules) ? Math.max(1, kindLv(m, k)) : 1;
 /* 升级就要看得出来：不管是哪台机器，每多一级机体都整体长大一点，
    再配上 drawLevelRig 的装甲板 / 散热鳍 / 军阶牌和脚下的光环 ——
    Lv1 和 Lv9 摆在一起绝不会认错，但它还是原来那台机器。 */
+function upLv(mods) { return totalLv(mods) - mods.length + 1; }   // 出厂是 1，每升一级 +1
 function chassisScale(m) {
   if (!m || !m.modules) return 1;
-  return 1 + Math.min(Math.max(totalLv(m.modules) - 1, 0), 9) * 0.026;
+  return 1 + Math.min(Math.max(upLv(m.modules) - 1, 0), 9) * 0.026;
 }
 function drawChassis(ctx, type, pri, m) {
   const k = chassisScale(m);
@@ -7867,7 +8689,7 @@ function drawChassisInner(ctx, type, pri, m) {
     case 'zap': return drawTesla(ctx, m, lv);
     case 'laser': return drawRailgun(ctx, m, lv);
     case 'rocket': return drawRocket(ctx, m, lv);
-    case 'mine': return drawMineLayer(ctx, m, lv);
+    case 'mine': return drawLandMine(ctx, m, lv);
     case 'flame': return drawFlamer(ctx, m, lv);
     case 'poison': return drawPoison(ctx, m, lv);
     case 'mortar': return drawMortar(ctx, m, lv);
@@ -7900,6 +8722,9 @@ function drawChassisInner(ctx, type, pri, m) {
     case 'summon': return drawBeacon(ctx, m, lv);
     case 'hack': return drawHacker(ctx, m, lv);
     case 'tri': return drawThreepeater(ctx, m, lv);
+    case 'column': return drawThunderPillar(ctx, m, lv);
+    case 'blast9': return drawGridBomb(ctx, m, lv);
+    case 'holo': return drawHoloTurret(ctx, m, lv);
     case 'blackhole': return drawBlackhole(ctx, m, lv);
     case 'obsidian': return drawObsidian(ctx, m, lv);
     case 'plasma': return drawPlasma(ctx, m, lv);
@@ -8923,6 +9748,227 @@ function drawBeacon(ctx, m, lv) {
 // 程序改写器：一台架着天线的终端，屏上滚着改写中的代码
 /* 三线射手：一个转鼓炮塔头，三根炮管扇形排开 —— 中间平射，上下两根
    斜指旁边两行。炮管口亮着绿色的能量环，开火时三根一起往后一坐。 */
+/* 地雷：就是一颗埋在土里的雷，不是什么布雷车。
+   刚种下时整颗埋在土包里，只露一盏慢闪的黄灯（在装药）；
+   装好药就从土里顶出来，压板露出地面，红灯快闪。 */
+function drawLandMine(ctx, m, lv) {
+  const placed = m && m.row !== undefined;
+  const arming = placed && m.armT > 0 ? clamp(m.armT / MINE_ARM, 0, 1) : 0;
+  const rise = (1 - arming) * 12;
+  // 翻开的土
+  ctx.fillStyle = '#4a3a28';
+  ctx.beginPath(); ctx.ellipse(0, 28, 34, 10, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#6b563a';
+  ctx.beginPath(); ctx.ellipse(0, 26, 30, 7.5, 0, 0, TAU); ctx.fill();
+  for (let i = 0; i < 6; i++) {
+    ctx.fillStyle = i % 2 ? '#7d6646' : '#57452f';
+    ctx.beginPath(); ctx.arc(-26 + i * 10, 22 + (i % 3), 3.2, 0, TAU); ctx.fill();
+  }
+  ctx.save();
+  // 只画露出地面的那一截
+  ctx.beginPath(); ctx.rect(-40, -60, 80, 86); ctx.clip();
+  ctx.translate(0, 18 - rise);
+  // 雷壳：扁圆的钢壳 + 一圈螺栓
+  const bodyC = lv >= 3 ? ['#6a5a8a', '#2b2240'] : lv >= 2 ? ['#7f8c6a', '#33402a'] : ['#7d8a96', '#2e3842'];
+  const gd = ctx.createLinearGradient(0, -14, 0, 10);
+  gd.addColorStop(0, bodyC[0]); gd.addColorStop(1, bodyC[1]);
+  ctx.fillStyle = gd;
+  ctx.beginPath(); ctx.ellipse(0, 0, 24, 11, 0, 0, TAU); ctx.fill();
+  ctx.fillRect(-24, 0, 48, 8);
+  ctx.beginPath(); ctx.ellipse(0, 8, 24, 9, 0, 0, Math.PI); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.beginPath(); ctx.ellipse(-6, -4, 12, 4, -0.2, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#1e252d';
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * TAU;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * 19, Math.sin(a) * 8, 1.6, 0, TAU); ctx.fill();
+  }
+  // 警示环（高爆起才有）
+  if (lv >= 2) {
+    ctx.strokeStyle = '#ffc531'; ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.ellipse(0, 0, 22, 9.5, 0, 0, TAU); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // 压板
+  ctx.fillStyle = '#3a444e';
+  ctx.beginPath(); ctx.ellipse(0, -5, 10, 4.5, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#5c6d80';
+  ctx.beginPath(); ctx.ellipse(0, -7, 8, 3.4, 0, 0, TAU); ctx.fill();
+  // 引信灯：装药时黄灯慢闪，装好红灯快闪
+  const on = arming > 0 ? Math.sin(time * 4) > 0 : Math.sin(time * 12) > -0.2;
+  const lc = arming > 0 ? '#ffc531' : '#ff5d5d';
+  emissive(ctx, lc, on ? 12 : 3, () => {
+    ctx.fillStyle = on ? lc : '#5a2a2a';
+    ctx.beginPath(); ctx.arc(0, -11, 3, 0, TAU); ctx.fill();
+  });
+  if (lv >= 3) {
+    ctx.strokeStyle = 'rgba(201,138,255,' + (0.4 + Math.sin(time * 5) * 0.2).toFixed(2) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 2, 28, 13, 0, 0, TAU); ctx.stroke();
+  }
+  ctx.restore();
+  // 装药进度
+  if (arming > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    rr(ctx, -16, -26, 32, 4, 2); ctx.fill();
+    ctx.fillStyle = '#ffc531';
+    rr(ctx, -16, -26, 32 * (1 - arming), 4, 2); ctx.fill();
+  }
+}
+
+/* 天雷柱：一根细高的避雷塔，顶上悬着一颗电球，四根导轨往上攒，
+   劈雷时电球炸亮、导轨上的电光往上窜 */
+function drawThunderPillar(ctx, m, lv) {
+  const P = themed(pal(lv));
+  const busy = m && m.flash > 0;
+  pedestal(ctx, P, 44, lv);
+  panel(ctx, -12, 4, 24, 16, 5, P);
+  // 塔身
+  ctx.fillStyle = P.dark;
+  ctx.beginPath(); ctx.moveTo(-10, 6); ctx.lineTo(-5, -40); ctx.lineTo(5, -40); ctx.lineTo(10, 6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = P.base;
+  ctx.beginPath(); ctx.moveTo(-7, 4); ctx.lineTo(-3, -38); ctx.lineTo(1, -38); ctx.lineTo(-1, 4); ctx.closePath(); ctx.fill();
+  // 绝缘环
+  for (let k = 0; k < 4; k++) {
+    ctx.fillStyle = k % 2 ? '#cfe3ff' : '#8fa8c8';
+    rr(ctx, -9 + k * 0.9, -4 - k * 9, 18 - k * 1.8, 4, 2); ctx.fill();
+  }
+  // 两侧导轨
+  ctx.strokeStyle = P.trim; ctx.lineWidth = 2;
+  for (const sx of [-1, 1]) {
+    ctx.beginPath(); ctx.moveTo(sx * 16, 10); ctx.quadraticCurveTo(sx * 18, -24, sx * 6, -46); ctx.stroke();
+  }
+  // 往上窜的电光
+  const ph = (time * (busy ? 4 : 1.5)) % 1;
+  ctx.fillStyle = 'rgba(207,227,255,' + (0.8 * (1 - ph)).toFixed(2) + ')';
+  for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(sx * (16 - ph * 10), 10 - ph * 54, 2.4, 0, TAU); ctx.fill(); }
+  // 顶上的电球
+  const r0 = 8 + (busy ? 4 : 0) + Math.sin(time * 5) * 1;
+  emissive(ctx, 'rgba(160,200,255,0.95)', busy ? 22 : 12, () => {
+    const og = ctx.createRadialGradient(-2, -54, 1, 0, -52, r0);
+    og.addColorStop(0, '#ffffff'); og.addColorStop(0.5, '#cfe3ff'); og.addColorStop(1, '#5a8ad8');
+    ctx.fillStyle = og;
+    ctx.beginPath(); ctx.arc(0, -52, r0, 0, TAU); ctx.fill();
+  });
+  ctx.strokeStyle = 'rgba(230,242,255,0.85)'; ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  for (let k = 0; k < 3; k++) {
+    const a = time * 6 + k * 2.1;
+    ctx.moveTo(0, -52); ctx.lineTo(Math.cos(a) * (r0 + 6), -52 + Math.sin(a) * (r0 + 6));
+  }
+  ctx.stroke();
+}
+
+/* 九宫爆弹：两颗挨在一起的圆炸弹（樱桃炸弹的机械版），
+   引信滋滋冒火星，快炸的时候整颗涨红、抖起来 */
+function drawGridBomb(ctx, m, lv) {
+  const placed = m && m.row !== undefined;
+  const pure = !m || !m.modules || m.modules.length === 1;
+  const fuse = placed && pure && m.fuseT !== undefined ? clamp(1 - m.fuseT / 1.0, 0, 1) : 0;
+  const shk = fuse > 0.4 ? (fuse - 0.4) * 6 : 0;
+  ctx.save();
+  ctx.translate(rand(-shk, shk), rand(-shk, shk));
+  const sc = 1 + fuse * 0.18;
+  ctx.scale(sc, sc);
+  // 底座支架
+  ctx.fillStyle = '#2b3542';
+  rr(ctx, -22, 20, 44, 10, 4); ctx.fill();
+  ctx.fillStyle = '#ffc531';
+  rr(ctx, -20, 22, 40, 3, 1.5); ctx.fill();
+  const shell = lv >= 3 ? ['#9a6ad8', '#3a1f60'] : lv >= 2 ? ['#ff8a5a', '#7a2210'] : ['#e04848', '#6a1414'];
+  for (const [bx, by, br] of [[-11, 4, 15], [12, 0, 16]]) {
+    const gd = ctx.createRadialGradient(bx - 5, by - 6, 2, bx, by, br);
+    gd.addColorStop(0, '#ffd0c0');
+    gd.addColorStop(0.35, fuse > 0.6 ? '#ffb070' : shell[0]);
+    gd.addColorStop(1, shell[1]);
+    ctx.fillStyle = gd;
+    ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(bx, by, br, 0, TAU); ctx.stroke();
+    // 铆接的腰带
+    ctx.fillStyle = 'rgba(30,30,40,0.55)';
+    ctx.fillRect(bx - br + 2, by - 2, (br - 2) * 2, 4);
+    ctx.fillStyle = '#ffd764';
+    for (let k = -1; k <= 1; k++) { ctx.beginPath(); ctx.arc(bx + k * br * 0.5, by, 1.4, 0, TAU); ctx.fill(); }
+    // 引信
+    ctx.strokeStyle = '#6b5233'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.moveTo(bx, by - br); ctx.quadraticCurveTo(bx + 6, by - br - 10, bx + 2, by - br - 16); ctx.stroke();
+    const spark = (time * 20 + bx) % 1;
+    emissive(ctx, '#ffd764', 10, () => {
+      ctx.fillStyle = spark > 0.5 ? '#fff4c0' : '#ff9d2e';
+      ctx.beginPath(); ctx.arc(bx + 2, by - br - 17, 3 + spark * 2, 0, TAU); ctx.fill();
+    });
+  }
+  // 九宫格标记：告诉玩家炸多大
+  ctx.strokeStyle = 'rgba(255,215,120,0.6)'; ctx.lineWidth = 1.2;
+  for (let k = 0; k < 3; k++) for (let j = 0; j < 3; j++) ctx.strokeRect(-9 + k * 6, 22 + j * 0, 5, 5);
+  ctx.restore();
+  if (placed && pure && Math.random() < 0.3) spawnParts(cellCx(m.col) + rand(-14, 16), cellCy(m.row) - 22, '#ffd764', 1, 60, 0.3, 'spark');
+}
+
+/* 全息投影底座：一块扁的投影盘，四个发射口，中间一圈倒数环 */
+function drawHoloBase(ctx, left) {
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath(); ctx.ellipse(0, 32, 30, 8, 0, 0, TAU); ctx.fill();
+  const bg = ctx.createLinearGradient(0, 14, 0, 34);
+  bg.addColorStop(0, '#5c6d80'); bg.addColorStop(1, '#232c38');
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.ellipse(0, 26, 28, 9, 0, 0, TAU); ctx.fill();
+  ctx.fillRect(-28, 26, 56, 6);
+  ctx.beginPath(); ctx.ellipse(0, 32, 28, 9, 0, 0, Math.PI); ctx.fill();
+  ctx.fillStyle = '#1a2230';
+  ctx.beginPath(); ctx.ellipse(0, 24, 20, 6, 0, 0, TAU); ctx.fill();
+  for (let k = 0; k < 4; k++) {
+    const a = k / 4 * TAU + time * 0.8;
+    const on = Math.sin(time * 6 + k) > 0;
+    ctx.fillStyle = on ? '#6fe8ff' : '#2a5060';
+    ctx.beginPath(); ctx.arc(Math.cos(a) * 16, 24 + Math.sin(a) * 4.5, 2.2, 0, TAU); ctx.fill();
+  }
+  if (left !== undefined) {
+    ctx.strokeStyle = 'rgba(111,232,255,0.85)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, -4, 14, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - left)); ctx.stroke();
+    ctx.strokeStyle = 'rgba(111,232,255,0.2)';
+    ctx.beginPath(); ctx.arc(0, -4, 14, 0, TAU); ctx.stroke();
+    // 一缕快要回来的残影
+    ctx.globalAlpha = 0.15 + (1 - left) * 0.3;
+    ctx.fillStyle = '#6fe8ff';
+    ctx.beginPath(); ctx.moveTo(-14, 22); ctx.lineTo(-6, -24); ctx.lineTo(6, -24); ctx.lineTo(14, 22); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+/* 全息炮台：底座上投出一台半透明的青色炮台，带扫描线、偶尔闪一下 */
+function drawHoloTurret(ctx, m, lv) {
+  drawHoloBase(ctx);
+  const flick = Math.sin(time * 37 + (m && m.col || 0)) > 0.96 ? 0.35 : 1;
+  const rec = m && m.recoil > 0 ? m.recoil * 40 : 0;
+  ctx.save();
+  ctx.globalAlpha = 0.78 * flick;
+  // 投影光锥
+  const cone = ctx.createLinearGradient(0, 24, 0, -40);
+  cone.addColorStop(0, 'rgba(111,232,255,0.35)'); cone.addColorStop(1, 'rgba(111,232,255,0)');
+  ctx.fillStyle = cone;
+  ctx.beginPath(); ctx.moveTo(-20, 24); ctx.lineTo(-30, -40); ctx.lineTo(30, -40); ctx.lineTo(20, 24); ctx.closePath(); ctx.fill();
+  // 炮台身
+  ctx.fillStyle = 'rgba(150,240,255,0.55)';
+  ctx.strokeStyle = '#bff6ff'; ctx.lineWidth = 1.6;
+  rr(ctx, -16, -12, 30, 26, 6); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(-1, -16, 13, 0, TAU); ctx.fill(); ctx.stroke();
+  const L = Math.min(Math.max(1, lv || 1), 4);
+  for (let k = 0; k < Math.min(L, 3); k++) {
+    rr(ctx, 6 - rec, -22 + k * 7 - (Math.min(L, 3) - 1) * 3.5, 30, 5, 2); ctx.fill(); ctx.stroke();
+  }
+  // 扫描线
+  ctx.globalAlpha = 0.35 * flick;
+  ctx.fillStyle = '#e6fdff';
+  for (let yy = -30; yy < 16; yy += 4) ctx.fillRect(-18, yy + ((time * 30) % 4), 52, 1);
+  ctx.restore();
+  emissive(ctx, 'rgba(111,232,255,0.9)', 8, () => {
+    ctx.fillStyle = '#e6fdff';
+    ctx.beginPath(); ctx.arc(-1, -16, 3.4, 0, TAU); ctx.fill();
+  });
+}
+
 function drawThreepeater(ctx, m, lv) {
   const P = themed(pal(lv));
   const L = m && m.modules ? Math.max(1, kindLv(m, 'tri')) : 1;
@@ -12025,7 +13071,10 @@ function drawEnemy(e) {
       g.beginPath(); g.ellipse(px, 15, 5, 2.2, 0, 0, TAU); g.fill();
     }
   }
-  switch (e.type) {
+  if (e.holoBase) drawHoloEnemyBase(e);
+  else switch (e.type) {
+    case 'holobot': drawHoloBot(e, bob); break;
+    case 'holodrone': drawHoloDrone(e); break;
     case 'scrap': drawScrap(e, bob); break;
     case 'armored': drawArmored(e, bob); break;
     case 'drone': drawDrone(e); break;
@@ -12082,6 +13131,16 @@ function drawEnemy(e) {
     case 'sentinel': drawSentinel(e, bob); break;
     case 'pharaoh': drawPharaoh(e); break;
     case 'voidsovereign': drawVoidSovereign(e); break;
+  }
+  if (!e.holoBase && !e.holo && e.maxHp) {
+    const tk = e.king ? 1.6 : e.boss ? 1.2 : 1;
+    drawHurt(g, e.hp / e.maxHp, e.w, -30 * tk, e.row * 0.31 + (e.x % 7) * 0.1);
+  }
+  if (e.king && e.beamAim > 0) {
+    const ph = (time * 2.5) % 1;
+    g.strokeStyle = 'rgba(255,93,93,' + (0.6 * (1 - ph)).toFixed(3) + ')';
+    g.lineWidth = 3;
+    g.beginPath(); g.ellipse(0, 0, 60 + ph * 30, 44 + ph * 20, 0, 0, TAU); g.stroke();
   }
   // 敌人也走一遍金属质感：左上一束光 + 一道慢慢扫过的镜面反光，
   // 和我方机器用的是同一套，整场的质感才统一
@@ -12277,7 +13336,7 @@ function drawEnemy(e) {
   if (e.hp < e.maxHp || (e.maxShield && e.shield < e.maxShield)) {
     const bw = e.king ? 120 : e.boss ? 84 : e.heavy ? 64 : 40;
     const by = rowCy(e) - (e.king ? 96 : e.boss ? 74 : e.heavy ? 52 : 46);
-    drawBar(g, e.x, by, bw, e.king ? 6.5 : 4.5, clamp(e.hp / e.maxHp, 0, 1));
+    drawBar(g, e.x, by, bw, e.king ? 6.5 : 4.5, clamp(e.hp / (e.holoBase ? e.baseMax : e.maxHp), 0, 1), e.holoBase ? '#ff9ae6' : undefined);
     if (e.maxShield && e.shield > 0) {
       drawBar(g, e.x, by - (e.king ? 9 : 6.5), bw, e.king ? 4.5 : 3.5, clamp(e.shield / e.maxShield, 0, 1), '#4cc2ff');
     }
@@ -13201,42 +14260,134 @@ function drawSharkLord(e) {
 
 // 巨钳蟹将：一对不对称巨钳 + 厚甲背壳
 function drawCrabKing(e) {
-  const t = time, cl = Math.sin(t * 2.2) * 0.22;
-  g.strokeStyle = '#7a3c26'; g.lineWidth = 5; g.lineCap = 'round';
-  for (let i = -1; i <= 1; i++) for (const sgn of [-1, 1]) {
-    g.beginPath();
-    g.moveTo(sgn * 24, 16); g.lineTo(sgn * (46 + i * 6), 26 + Math.sin(t * 5 + i * 2) * 3);
-    g.lineTo(sgn * (54 + i * 6), 46);
-    g.stroke();
+  const t = time;
+  const aiming = e.beamAim > 0 && e.moveData ? e.moveData.kind : null;
+  const clawOut = bossFx.some(f => f.kind === 'claw' && f.boss === e);
+  const open = aiming === 'pinch' || aiming === 'claw' ? 0.55 + Math.sin(t * 20) * 0.08 : 0.12 + Math.sin(t * 2.2) * 0.1;
+  const rage = e.raging;
+  // ---- 六条机械腿：两节、膝盖上有液压杆，左右交替迈步 ----
+  for (let i = 0; i < 3; i++) for (const sgn of [-1, 1]) {
+    const ph = e.anim * 6 + i * 2.1 + (sgn > 0 ? Math.PI : 0);
+    const lift = Math.max(0, Math.sin(ph)) * 6;
+    const hx = sgn * (22 + i * 8), hy = 14;
+    const kx = sgn * (48 + i * 10), ky = 4 - lift;
+    const fx = sgn * (58 + i * 9 + Math.cos(ph) * 4), fy = 44 - lift * 0.4;
+    g.lineCap = 'round';
+    g.strokeStyle = '#4a2416'; g.lineWidth = 9;
+    g.beginPath(); g.moveTo(hx, hy); g.lineTo(kx, ky); g.lineTo(fx, fy); g.stroke();
+    g.strokeStyle = '#c4582c'; g.lineWidth = 5.5;
+    g.beginPath(); g.moveTo(hx, hy); g.lineTo(kx, ky); g.lineTo(fx, fy); g.stroke();
+    g.strokeStyle = '#8fa1b8'; g.lineWidth = 2;        // 液压杆
+    g.beginPath(); g.moveTo(hx + sgn * 6, hy + 6); g.lineTo(kx - sgn * 4, ky + 8); g.stroke();
+    g.fillStyle = '#2a323c';
+    g.beginPath(); g.arc(kx, ky, 4, 0, TAU); g.fill();
+    g.fillStyle = '#ffc531';
+    g.beginPath(); g.arc(kx, ky, 1.6, 0, TAU); g.fill();
+    g.fillStyle = '#3a2016';
+    g.beginPath(); g.moveTo(fx - 4, fy); g.lineTo(fx, fy + 7); g.lineTo(fx + 4, fy); g.closePath(); g.fill();
   }
   g.lineCap = 'butt';
-  eBody(-52, -30 + 0, 104, 58, 26, '#f08a4a', '#b0502a', '#6b2c18');
-  hazardE(-40, -22, 80, 9);
-  // 甲壳上的裂纹
-  g.strokeStyle = 'rgba(120,50,26,0.8)'; g.lineWidth = 2;
-  g.beginPath(); g.moveTo(-26, -20); g.lineTo(-10, 4); g.lineTo(-22, 20); g.stroke();
-  g.beginPath(); g.moveTo(24, -22); g.lineTo(12, 2); g.lineTo(26, 18); g.stroke();
-  eEye(-16, -30, 4.4, '#ffe08a');
-  eEye(16, -30, 4.4, '#ffe08a');
-  // 眼柄
-  g.strokeStyle = '#b0502a'; g.lineWidth = 3.4;
-  g.beginPath(); g.moveTo(-16, -30); g.lineTo(-20, -46); g.stroke();
-  g.beginPath(); g.moveTo(16, -30); g.lineTo(20, -46); g.stroke();
-  eEye(-20, -48, 4, '#ffe08a');
-  eEye(20, -48, 4, '#ffe08a');
-  // 一大一小两只钳
-  for (const [sgn, sc] of [[-1, 1.5], [1, 0.95]]) {
+  // ---- 甲壳：三层叠甲 + 铆钉 + 中间的反应炉 ----
+  eBody(-56, -30, 112, 62, 28, '#f39a5a', '#b8552c', '#5e2414');
+  const sh = g.createLinearGradient(0, -30, 0, 10);
+  sh.addColorStop(0, 'rgba(255,220,180,0.35)'); sh.addColorStop(1, 'rgba(255,220,180,0)');
+  g.fillStyle = sh;
+  g.beginPath(); g.ellipse(0, -16, 46, 14, 0, Math.PI, 0); g.fill();
+  // 甲片接缝
+  g.strokeStyle = 'rgba(80,30,14,0.75)'; g.lineWidth = 2;
+  for (const sx of [-1, 1]) {
+    g.beginPath(); g.moveTo(sx * 18, -28); g.quadraticCurveTo(sx * 30, -4, sx * 20, 24); g.stroke();
+    g.beginPath(); g.moveTo(sx * 40, -18); g.quadraticCurveTo(sx * 50, 0, sx * 42, 18); g.stroke();
+  }
+  g.fillStyle = '#ffd7b0';
+  for (const [rx, ry] of [[-44, -6], [-32, 14], [32, 14], [44, -6], [-24, -24], [24, -24]]) {
+    g.beginPath(); g.arc(rx, ry, 2, 0, TAU); g.fill();
+  }
+  hazardE(-30, 16, 60, 7);
+  // 反应炉：一圈格栅里透出的光，狂暴时转红
+  const core = rage ? '#ff4a3a' : '#ffb347';
+  g.fillStyle = '#2a1410';
+  g.beginPath(); g.arc(0, -4, 15, 0, TAU); g.fill();
+  emissive(g, core, 14 + Math.sin(t * 6) * 4, () => {
+    const cg = g.createRadialGradient(0, -4, 2, 0, -4, 12);
+    cg.addColorStop(0, '#fff2d8'); cg.addColorStop(0.5, core); cg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = cg;
+    g.beginPath(); g.arc(0, -4, 12, 0, TAU); g.fill();
+  });
+  g.strokeStyle = '#5e2414'; g.lineWidth = 2;
+  for (let k = 0; k < 6; k++) {
+    const a = k / 6 * TAU + t * 0.6;
+    g.beginPath(); g.moveTo(Math.cos(a) * 6, -4 + Math.sin(a) * 6); g.lineTo(Math.cos(a) * 14, -4 + Math.sin(a) * 14); g.stroke();
+  }
+  // 背上的排气口：冒蒸汽
+  for (const sx of [-1, 1]) {
+    g.fillStyle = '#3a2016';
+    rr(g, sx * 36 - 5, -34, 10, 8, 3); g.fill();
+    const ph = (t * 1.2 + (sx > 0 ? 0.5 : 0)) % 1;
+    g.fillStyle = 'rgba(230,230,230,' + (0.35 * (1 - ph)).toFixed(2) + ')';
+    g.beginPath(); g.arc(sx * 36 + Math.sin(ph * 5) * 3, -38 - ph * 22, 4 + ph * 8, 0, TAU); g.fill();
+  }
+  // ---- 眼柄：两根伸出来的摄像头，会左右扫 ----
+  const look = Math.sin(t * 1.3) * 3;
+  for (const sx of [-1, 1]) {
+    g.strokeStyle = '#8a3c1e'; g.lineWidth = 4;
+    g.beginPath(); g.moveTo(sx * 14, -28); g.lineTo(sx * 18 + look, -50); g.stroke();
+    g.fillStyle = '#2a323c';
+    rr(g, sx * 18 + look - 7, -60, 14, 12, 4); g.fill();
+    emissive(g, aiming ? '#ff5d5d' : '#ffe08a', aiming ? 12 : 7, () => {
+      g.fillStyle = aiming ? '#ff8a7a' : '#ffe08a';
+      g.beginPath(); g.arc(sx * 18 + look - 2, -54, 3.6, 0, TAU); g.fill();
+    });
+  }
+  // 天线
+  g.strokeStyle = '#c4582c'; g.lineWidth = 1.6;
+  g.beginPath(); g.moveTo(-6, -30); g.quadraticCurveTo(-14, -60, -30 + Math.sin(t * 3) * 4, -70); g.stroke();
+  g.beginPath(); g.moveTo(6, -30); g.quadraticCurveTo(14, -60, 30 + Math.cos(t * 3) * 4, -70); g.stroke();
+  // ---- 两只钳：大的那只是主钳（会被发射出去），钳口有锯齿，蓄力时张大 ----
+  for (const [sgn, sc, main] of [[-1, 1.55, true], [1, 1.0, false]]) {
     g.save();
-    g.translate(sgn * 54, -6);
-    g.rotate(sgn * cl);
+    g.translate(sgn * 58, -2);
+    if (main && clawOut) {
+      // 主钳飞出去了：只剩一截带链子的断口
+      g.fillStyle = '#5e2414';
+      rr(g, -10, -7, 18, 14, 5); g.fill();
+      g.strokeStyle = '#8fa1b8'; g.lineWidth = 3;
+      g.beginPath(); g.moveTo(-10, 0); g.lineTo(-30, 2); g.stroke();
+      g.restore();
+      continue;
+    }
     g.scale(sc, sc);
-    g.fillStyle = '#d4602f';
-    g.beginPath(); g.moveTo(0, -8); g.lineTo(sgn * 26, -16); g.lineTo(sgn * 18, 1);
-    g.closePath(); g.fill();
-    g.beginPath(); g.moveTo(0, 8); g.lineTo(sgn * 26, 17); g.lineTo(sgn * 18, 2);
-    g.closePath(); g.fill();
-    g.strokeStyle = '#7a3c26'; g.lineWidth = 1.6;
-    g.beginPath(); g.moveTo(0, -8); g.lineTo(sgn * 26, -16); g.stroke();
+    // 臂
+    g.fillStyle = '#b8552c';
+    rr(g, -6, -8, 16, 16, 6); g.fill();
+    g.strokeStyle = '#8fa1b8'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(-4, 6); g.lineTo(sgn * 14, 4); g.stroke();
+    for (const up of [-1, 1]) {
+      g.save();
+      g.rotate(up * open * (up < 0 ? 1 : 0.7));
+      const cg2 = g.createLinearGradient(0, -14 * up, 0, 0);
+      cg2.addColorStop(0, '#f39a5a'); cg2.addColorStop(1, '#a84a24');
+      g.fillStyle = cg2;
+      g.beginPath();
+      g.moveTo(0, -2 * up);
+      g.quadraticCurveTo(sgn * 14, -22 * up, sgn * 34, -6 * up);
+      g.lineTo(sgn * 26, 0);
+      g.quadraticCurveTo(sgn * 12, -6 * up, 0, 0);
+      g.closePath(); g.fill();
+      g.strokeStyle = '#5e2414'; g.lineWidth = 1.4; g.stroke();
+      // 锯齿
+      g.fillStyle = '#ffe6d0';
+      for (let k = 0; k < 4; k++) {
+        const tx = sgn * (8 + k * 5);
+        g.beginPath(); g.moveTo(tx, -1 * up); g.lineTo(tx + sgn * 2.5, -5 * up); g.lineTo(tx + sgn * 5, -1 * up); g.closePath(); g.fill();
+      }
+      g.restore();
+    }
+    if (main && (aiming === 'pinch' || aiming === 'claw')) {
+      g.strokeStyle = 'rgba(255,157,93,' + (0.5 + Math.sin(t * 20) * 0.3).toFixed(2) + ')';
+      g.lineWidth = 2.5;
+      g.beginPath(); g.arc(sgn * 18, 0, 26, 0, TAU); g.stroke();
+    }
     g.restore();
   }
 }
@@ -13244,37 +14395,91 @@ function drawCrabKing(e) {
 // 雷霆母舰王：巨型飞行甲板，四组旋翼 + 侧舷炮
 function drawSkyMother(e) {
   const t = time, spin = e.anim * 18;
-  for (const [rx2, ry2, ph] of [[-56, -30, 0], [56, -30, 1.1], [-56, 10, 2.0], [56, 10, 3.0]]) {
-    g.strokeStyle = '#39434f'; g.lineWidth = 5; g.lineCap = 'round';
-    g.beginPath(); g.moveTo(0, -10); g.lineTo(rx2, ry2); g.stroke();
+  const aiming = e.beamAim > 0 && e.moveData ? e.moveData.kind : null;
+  const rage = e.raging;
+  // 四组涵道旋翼，挂在折臂上
+  for (const [rx2, ry2, ph] of [[-62, -34, 0], [62, -34, 1.1], [-62, 14, 2.0], [62, 14, 3.0]]) {
+    g.strokeStyle = '#2a343f'; g.lineWidth = 7; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(Math.sign(rx2) * 30, -10); g.lineTo(rx2 * 0.8, ry2 + 6); g.lineTo(rx2, ry2); g.stroke();
+    g.strokeStyle = '#5c6e80'; g.lineWidth = 3.5;
+    g.beginPath(); g.moveTo(Math.sign(rx2) * 30, -10); g.lineTo(rx2 * 0.8, ry2 + 6); g.lineTo(rx2, ry2); g.stroke();
     g.lineCap = 'butt';
-    eRotor(rx2, ry2 - 3, 17, spin + ph, 'rgba(200,225,245,0.26)');
+    g.fillStyle = '#39434f';
+    g.beginPath(); g.ellipse(rx2, ry2 - 3, 21, 6, 0, 0, TAU); g.fill();
+    eRotor(rx2, ry2 - 4, 18, spin + ph, 'rgba(200,225,245,0.3)');
+    g.strokeStyle = '#8fa1b8'; g.lineWidth = 2;
+    g.beginPath(); g.ellipse(rx2, ry2 - 3, 21, 6, 0, 0, TAU); g.stroke();
   }
-  eBody(-52, -28, 104, 44, 12, '#b0c2d2', '#5c6e80', '#2a343f');
-  hazardE(-44, 2, 88, 9);
-  // 舰桥
-  eBody(12, -46, 30, 22, 7, '#c2d2e0', '#68788a');
-  eEye(30, -36, 4, '#ff8f8f');
-  // 侧舷炮
+  // 船体：上甲板 + 下船腹，侧面一排舷窗
+  eBody(-58, -30, 116, 30, 12, '#c2d2e0', '#6a7c8e', '#2a343f');
+  eBody(-48, -4, 96, 24, 10, '#8fa1b8', '#4a5a6c', '#1f2833');
+  hazardE(-44, 12, 88, 6);
+  for (let k = 0; k < 7; k++) {
+    const on = Math.sin(t * 2 + k) > -0.3;
+    g.fillStyle = on ? (rage ? '#ff8a7a' : '#bfe9ff') : '#2a3a4a';
+    rr(g, -42 + k * 12, -20, 7, 5, 2); g.fill();
+  }
+  // 腹部弹舱：空袭蓄力时打开，里面一排炸弹
+  const bay = aiming === 'airstrike' ? 1 : 0;
+  g.fillStyle = '#1a2230';
+  rr(g, -22, 6, 44, 10, 3); g.fill();
+  if (bay) {
+    for (let k = 0; k < 5; k++) {
+      g.fillStyle = '#3a4250'; rr(g, -18 + k * 8, 8, 6, 12, 3); g.fill();
+      g.fillStyle = '#ffc531'; g.fillRect(-18 + k * 8, 8, 6, 2);
+    }
+    g.fillStyle = 'rgba(255,93,93,' + (0.4 + Math.sin(t * 18) * 0.3).toFixed(2) + ')';
+    g.fillRect(-22, 16, 44, 2);
+  } else {
+    g.fillStyle = '#5c6e80';
+    rr(g, -21, 7, 21, 8, 2); g.fill(); rr(g, 0, 7, 21, 8, 2); g.fill();
+  }
+  // 舰桥：一块倾斜的大玻璃
+  eBody(10, -50, 34, 22, 8, '#d0dde8', '#6a7c8e');
+  const glass = g.createLinearGradient(14, -46, 40, -34);
+  glass.addColorStop(0, '#bfe9ff'); glass.addColorStop(1, '#3f7a9c');
+  g.fillStyle = glass;
+  g.beginPath(); g.moveTo(16, -46); g.lineTo(40, -46); g.lineTo(38, -34); g.lineTo(16, -34); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.5)';
+  g.beginPath(); g.moveTo(18, -45); g.lineTo(26, -45); g.lineTo(22, -36); g.lineTo(18, -36); g.closePath(); g.fill();
+  // 雷达桅杆
+  g.strokeStyle = '#4a5a6c'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(30, -50); g.lineTo(30, -64); g.stroke();
+  g.save(); g.translate(30, -64); g.rotate(t * 2);
+  g.fillStyle = '#8fa1b8'; g.fillRect(-9, -1.5, 18, 3);
+  g.restore();
+  emissive(g, '#ff5d5d', 6, () => { g.fillStyle = Math.sin(t * 6) > 0 ? '#ff5d5d' : '#5a2a2a'; g.beginPath(); g.arc(30, -66, 2.4, 0, TAU); g.fill(); });
+  // 两侧炮塔：炮口跟着要打的行抬
   for (const sgn of [-1, 1]) {
+    g.save();
+    g.translate(sgn * 42, -6);
     g.fillStyle = '#48586b';
-    rr(g, sgn * 40 - 8, -12, 16, 10, 4); g.fill();
+    g.beginPath(); g.arc(0, 0, 8, 0, TAU); g.fill();
+    g.rotate(Math.PI + Math.sin(t * 1.4 + sgn) * 0.25);
     g.fillStyle = '#202934';
-    rr(g, sgn * 48 - 4, -9, 10, 4, 2); g.fill();
+    rr(g, 0, -2.5, 16, 5, 2); g.fill();
+    g.restore();
   }
   // 机库门：召唤前会亮
   const ready = e.summonT < 1.2;
   emissive(g, 'rgba(199,123,255,' + (ready ? 0.95 : 0.4) + ')', ready ? 16 : 8, () => {
     g.fillStyle = ready ? '#e8d5ff' : 'rgba(199,123,255,0.7)';
-    rr(g, -48, -12, 14, 14, 4); g.fill();
+    rr(g, -54, -24, 12, 14, 3); g.fill();
   });
-  // 雷云
+  // 尾部推进器
+  for (const sx of [-1, 1]) {
+    emissive(g, rage ? '#ff5d5d' : '#7fd7ff', 10, () => {
+      g.fillStyle = rage ? '#ff9a8a' : '#bfe9ff';
+      g.beginPath(); g.ellipse(sx * 58, -16, 3, 6 + Math.sin(t * 20 + sx) * 1.5, 0, 0, TAU); g.fill();
+    });
+  }
+  // 船底的雷云
   g.strokeStyle = 'rgba(217,184,255,0.7)'; g.lineWidth = 1.8;
   for (let i = 0; i < 3; i++) {
     const a = t * 3 + i * 2.1;
     g.beginPath();
-    g.moveTo(Math.cos(a) * 30, 18 + Math.sin(a) * 6);
-    g.lineTo(Math.cos(a + 0.7) * 44, 26 + Math.sin(a + 0.7) * 8);
+    g.moveTo(Math.cos(a) * 30, 24 + Math.sin(a) * 6);
+    g.lineTo(Math.cos(a + 0.7) * 44, 32 + Math.sin(a + 0.7) * 8);
     g.stroke();
   }
 }
@@ -13835,6 +15040,97 @@ function drawScrap(e, bob) {
     g.fillStyle = '#ff9d2e';
     g.beginPath(); g.arc(9 + Math.sin(e.anim * 4) * 2, -43, 2.6, 0, TAU); g.fill();
   });
+}
+
+/* ===== 全息单位（敌方）=====
+   影像是半透明的洋红色线框人，带扫描线、偶尔整个闪一下；
+   打散之后地上剩一座投影底座，上面一圈倒数——倒数走完影像就回来。 */
+/* 受伤状态：血掉一半开始冒烟，掉到四分之一冒火星带火苗。
+   纯程序绘制，不生成粒子 —— 场上几十个单位一起冒烟也不掉帧。 */
+function drawHurt(ctx, pct, w, top, seed) {
+  if (pct >= 0.5 || fxQuality < 0.35) return;
+  const heavy = pct < 0.25;
+  for (let k = 0; k < (heavy ? 3 : 2); k++) {
+    const ph = (time * 0.8 + k * 0.37 + seed) % 1;
+    const x = (k - 1) * w * 0.18 + Math.sin(ph * 6 + seed) * 4;
+    ctx.fillStyle = 'rgba(70,70,78,' + (0.42 * (1 - ph)).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(x, top - ph * 30, 4 + ph * 9, 0, TAU); ctx.fill();
+  }
+  if (heavy) {
+    for (let k = 0; k < 2; k++) {
+      const ph = (time * 2.4 + k * 0.5 + seed) % 1;
+      ctx.fillStyle = 'rgba(255,' + (150 + k * 60) + ',60,' + (0.8 * (1 - ph)).toFixed(3) + ')';
+      ctx.beginPath(); ctx.ellipse((k ? 8 : -6), top + 6 - ph * 14, 4 - ph * 2, 8 - ph * 5, 0, 0, TAU); ctx.fill();
+    }
+    if (Math.sin(time * 23 + seed * 7) > 0.85) {
+      ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(-4, top + 10); ctx.lineTo(4, top + 4); ctx.lineTo(0, top + 14); ctx.stroke();
+    }
+  }
+}
+function holoGlass(draw) {
+  const flick = Math.sin(time * 41) > 0.95 ? 0.3 : 1;
+  g.save();
+  g.globalAlpha = 0.72 * flick;
+  draw();
+  g.globalAlpha = 0.3 * flick;
+  g.fillStyle = '#ffd6f4';
+  for (let yy = -46; yy < 34; yy += 4) g.fillRect(-26, yy + ((time * 24) % 4), 52, 1);
+  g.restore();
+}
+function drawHoloBot(e, bob) {
+  const step = Math.sin(e.anim * 8) * 4;
+  holoGlass(() => {
+    g.fillStyle = 'rgba(255,120,220,0.35)';
+    g.strokeStyle = '#ff9ae6'; g.lineWidth = 1.8;
+    // 腿
+    for (const [lx, s2] of [[-8, 1], [6, -1]]) { rr(g, lx - 4, 14, 8, 20 + step * s2 * 0.4, 3); g.fill(); g.stroke(); }
+    // 躯干：菱形胸甲
+    g.beginPath(); g.moveTo(0, -14); g.lineTo(16, -2); g.lineTo(12, 18); g.lineTo(-12, 18); g.lineTo(-16, -2); g.closePath(); g.fill(); g.stroke();
+    // 臂 + 投影刃
+    g.beginPath(); g.moveTo(-16, -2); g.lineTo(-26, 12 + step * 0.3); g.stroke();
+    g.fillStyle = 'rgba(255,200,240,0.7)';
+    g.beginPath(); g.moveTo(-26, 12); g.lineTo(-36, 4); g.lineTo(-24, 16); g.closePath(); g.fill();
+    // 头
+    g.fillStyle = 'rgba(255,120,220,0.35)';
+    g.beginPath(); g.arc(0, -24, 10, 0, TAU); g.fill(); g.stroke();
+    g.fillStyle = '#fff0fb'; g.fillRect(-8, -26, 10, 3);
+  });
+}
+function drawHoloDrone(e) {
+  holoGlass(() => {
+    g.strokeStyle = '#ff9ae6'; g.lineWidth = 1.8;
+    g.fillStyle = 'rgba(255,120,220,0.35)';
+    g.beginPath(); g.moveTo(-20, 0); g.lineTo(0, -12); g.lineTo(20, 0); g.lineTo(0, 12); g.closePath(); g.fill(); g.stroke();
+    for (const sx of [-18, 18]) {
+      const w2 = Math.abs(Math.cos(e.anim * 40 + sx)) * 14 + 3;
+      g.beginPath(); g.ellipse(sx, -12, w2, 2.4, 0, 0, TAU); g.stroke();
+    }
+    g.fillStyle = '#fff0fb'; g.beginPath(); g.arc(-6, 0, 3, 0, TAU); g.fill();
+  });
+}
+function drawHoloEnemyBase(e) {
+  const left = clamp(e.holoT / HOLO_RESPAWN, 0, 1);
+  g.save();
+  g.translate(0, e.wasFly ? 12 : 0);
+  g.fillStyle = '#3a2a40';
+  g.beginPath(); g.ellipse(0, 26, 24, 8, 0, 0, TAU); g.fill();
+  g.fillRect(-24, 22, 48, 5);
+  g.fillStyle = '#5a4060';
+  g.beginPath(); g.ellipse(0, 22, 24, 8, 0, 0, TAU); g.fill();
+  g.fillStyle = '#1a1020';
+  g.beginPath(); g.ellipse(0, 21, 16, 5, 0, 0, TAU); g.fill();
+  for (let k = 0; k < 4; k++) {
+    const a = k / 4 * TAU + time;
+    g.fillStyle = Math.sin(time * 8 + k) > 0 ? '#ff9ae6' : '#5a2a50';
+    g.beginPath(); g.arc(Math.cos(a) * 13, 21 + Math.sin(a) * 4, 2, 0, TAU); g.fill();
+  }
+  g.strokeStyle = 'rgba(255,154,230,0.9)'; g.lineWidth = 3;
+  g.beginPath(); g.arc(0, -6, 13, -Math.PI / 2, -Math.PI / 2 + TAU * (1 - left)); g.stroke();
+  g.globalAlpha = 0.2 + (1 - left) * 0.35;
+  g.fillStyle = '#ff9ae6';
+  g.beginPath(); g.moveTo(-12, 20); g.lineTo(-5, -30); g.lineTo(5, -30); g.lineTo(12, 20); g.closePath(); g.fill();
+  g.restore();
 }
 
 /* ===== 装甲机器人 ===== */
@@ -16104,6 +17400,40 @@ const ULTS = {
         dy: (i % 3 - 1) * 6, bt: 5, pierce: 9, hit: new Set(), spin: 0 });
     }
   } },
+  holo: { name: '全息军团', color: '#6fe8ff', desc: '在每一行最前面投影出一台全息炮台，打满 15 秒自己消散', fire(m, X) {
+    for (let r = 0; r < ROWS; r++) {
+      let c = -1;
+      for (let cc = 0; cc < COLS - 3; cc++) if (!grid[r][cc] && terrainAt(r, cc) !== 'A' && waterOk('holoturret', r, cc)) c = cc;
+      if (c < 0) continue;
+      if (place('holoturret', r, c)) {
+        const o = grid[r][c];
+        o.fade = 15;
+        spawnParts(cellCx(c), cellCy(r), '#6fe8ff', 14, 130, 0.6, 'spark');
+      }
+    }
+  } },
+  column: { name: '天雷阵', color: '#cfe3ff', desc: '有敌人的每一列都同时劈下一道天雷', fire(m, X) {
+    const cols = new Set();
+    for (const e of liveFoes()) cols.add(colAtX(e.x));
+    for (const col of cols) ultFx.push({ kind: 'colstrike', col, t: 0.6, max: 0.6 });
+    for (const e of liveFoes()) { ultHurt(e, 780 * X.P); e.stunT = Math.max(e.stunT || 0, e.king ? 0.5 : 1.5); }
+  } },
+  blast9: { name: '九宫连爆', color: '#ff7a2e', desc: '在敌人最扎堆的五处各炸一个九宫格', fire(m, X) {
+    const list = liveFoes();
+    const spots = [];
+    for (let k = 0; k < 5 && list.length; k++) {
+      let best = null, bn = -1;
+      for (const a of list) {
+        const r0 = a.row, c0 = colAtX(a.x);
+        if (spots.some(p2 => Math.abs(p2[0] - r0) <= 1 && Math.abs(p2[1] - c0) <= 1)) continue;
+        const n = list.filter(b2 => Math.abs(b2.row - r0) <= 1 && Math.abs(colAtX(b2.x) - c0) <= 1).length;
+        if (n > bn) { bn = n; best = [r0, c0]; }
+      }
+      if (!best) break;
+      spots.push(best);
+    }
+    spots.forEach((p2, i) => ultFx.push({ kind: 'blast', x: cellCx(p2[1]), y: cellCy(p2[0]), delay: 0.15 + i * 0.22, dmg: 0, rad: 0, color: '#ff7a2e', done: false, t: 0, max: 0.35, grid9: p2, gdmg: 2200 * X.P }));
+  } },
   tri: { name: '三线风暴', color: '#7ff07f', desc: '六行同时连射五轮穿透弹，整张图来回扫五遍', fire(m, X) {
     for (let k = 0; k < 5; k++) for (let r = 0; r < ROWS; r++) {
       bullets.push({ kind: 'tri', row: r, x: X.cx + 30 - k * 46, x0: X.cx + 30 - k * 46, dmg: 220 * X.P, speed: 620,
@@ -16525,6 +17855,7 @@ function updateUltFx(dt) {
       f.delay -= dt;
       if (f.delay > 0) continue;
       f.done = true;
+      if (f.grid9) { blast9At(f.grid9[0], f.grid9[1], f.gdmg); f.t = f.max; continue; }
       if (f.target) {
         const e = f.target;
         if (!e.dead) {
@@ -16637,7 +17968,31 @@ function drawUltFx() {
   for (const f of ultFx) {
     if (f.kind === 'blast') continue;
     g.save();
-    if (f.kind === 'beast') {
+    if (f.kind === 'colstrike') {
+      const a = f.t / f.max, x = cellCx(f.col);
+      g.fillStyle = 'rgba(160,200,255,' + (0.22 * a).toFixed(3) + ')';
+      g.fillRect(x - CELL_W / 2, GRID_Y, CELL_W, ROWS * CELL_H);
+      g.strokeStyle = 'rgba(230,242,255,' + (0.95 * a).toFixed(3) + ')';
+      g.lineWidth = 3 + a * 5;
+      g.beginPath();
+      let yy = GRID_Y - 10;
+      g.moveTo(x, yy);
+      while (yy < GRID_Y + ROWS * CELL_H) { yy += 26; g.lineTo(x + rand(-12, 12), yy); }
+      g.stroke();
+      g.fillStyle = 'rgba(255,255,255,' + (0.8 * a).toFixed(3) + ')';
+      g.fillRect(x - 3, GRID_Y, 6, ROWS * CELL_H);
+    } else if (f.kind === 'grid9') {
+      const a = f.t / f.max;
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const rr2 = f.r + dr, cc = f.c + dc;
+        if (rr2 < 0 || rr2 >= ROWS || cc < 0 || cc >= COLS) continue;
+        g.fillStyle = 'rgba(255,' + (dr === 0 && dc === 0 ? 230 : 140) + ',60,' + (0.42 * a).toFixed(3) + ')';
+        g.fillRect(GRID_X + cc * CELL_W + 3, GRID_Y + rr2 * CELL_H + 3, CELL_W - 6, CELL_H - 6);
+      }
+      g.strokeStyle = 'rgba(255,215,120,' + a.toFixed(3) + ')';
+      g.lineWidth = 3;
+      g.strokeRect(GRID_X + (f.c - 1) * CELL_W + 2, GRID_Y + (f.r - 1) * CELL_H + 2, CELL_W * 3 - 4, CELL_H * 3 - 4);
+    } else if (f.kind === 'beast') {
       drawShredBeast(f);
     } else if (f.kind === 'pillar') {
       const a = f.t / f.max;
@@ -16755,25 +18110,162 @@ function drawShip(dt) {
 /* Boss 主炮蓄力：整行拉一条会变粗的红线，给玩家一秒钟把这行的机器救走 */
 function drawBossAim() {
   for (const e of enemies) {
-    if (e.dead || !(e.beamAim > 0)) continue;
-    const k = 1 - e.beamAim / 1.1, y = cellCy(e.row) - 8, x1 = e.x - e.w * 0.3;
+    if (e.dead || !(e.beamAim > 0) || !e.moveData) continue;
+    const D = e.moveData;
+    const k = 1 - e.beamAim / (e.aimMax || 1.1);
+    const blink = 0.45 + Math.sin(time * 18) * 0.25;
     g.save();
-    g.globalAlpha = 0.35 + k * 0.5;
-    g.strokeStyle = '#ff5d5d';
-    g.lineWidth = 1 + k * 5;
-    g.setLineDash([16, 10]);
-    g.lineDashOffset = -time * 120;
-    g.beginPath(); g.moveTo(GRID_X - 20, y); g.lineTo(x1, y); g.stroke();
-    g.setLineDash([]);
-    g.globalAlpha = 0.25 + k * 0.35;
-    g.fillStyle = '#ff5d5d';
-    g.fillRect(GRID_X - 20, cellCy(e.row) - CELL_H / 2 + 3, x1 - GRID_X + 20, CELL_H - 6);
-    // 炮口聚起来的光球
-    g.globalAlpha = 1;
-    emissive(g, '#ff5d5d', 14, () => {
-      g.fillStyle = '#ffd7c8';
-      g.beginPath(); g.arc(x1, y, 3 + k * 10, 0, TAU); g.fill();
-    });
+    const rowBand = (r, col) => {
+      g.globalAlpha = 0.2 + k * 0.35;
+      g.fillStyle = col;
+      g.fillRect(GRID_X - 20, cellCy(r) - CELL_H / 2 + 3, e.x - GRID_X, CELL_H - 6);
+      g.globalAlpha = 0.5 + k * 0.4;
+      g.strokeStyle = col; g.lineWidth = 1 + k * 4;
+      g.setLineDash([14, 9]); g.lineDashOffset = -time * 120;
+      g.beginPath(); g.moveTo(GRID_X - 20, cellCy(r) - 8); g.lineTo(e.x - e.w * 0.3, cellCy(r) - 8); g.stroke();
+      g.setLineDash([]);
+    };
+    const cellMark = (r, c, col) => {
+      const x = GRID_X + c * CELL_W, y = GRID_Y + r * CELL_H;
+      g.globalAlpha = blink;
+      g.fillStyle = col;
+      g.fillRect(x + 4, y + 4, CELL_W - 8, CELL_H - 8);
+      g.globalAlpha = 1;
+      g.strokeStyle = col; g.lineWidth = 3;
+      g.beginPath(); g.arc(x + CELL_W / 2, y + CELL_H / 2, 34 - k * 18, 0, TAU); g.stroke();
+    };
+    if (D.kind === 'beam') {
+      rowBand(e.row, '#ff5d5d');
+      g.globalAlpha = 1;
+      emissive(g, '#ff5d5d', 14, () => {
+        g.fillStyle = '#ffd7c8';
+        g.beginPath(); g.arc(e.x - e.w * 0.3, cellCy(e.row) - 8, 3 + k * 10, 0, TAU); g.fill();
+      });
+    } else if (D.kind === 'claw') {
+      rowBand(e.row, '#ff9d5d');
+    } else if (D.kind === 'quake') {
+      for (const r of D.rows) rowBand(r, '#b8925a');
+    } else if (D.kind === 'torpedo') {
+      for (const r of D.rows) rowBand(r, '#6fd8ff');
+    } else if (D.kind === 'sandstorm') {
+      for (const r of D.rows) rowBand(r, '#e0c080');
+    } else if (D.kind === 'pinch' || D.kind === 'tendril' || D.kind === 'meteor') {
+      const col = D.kind === 'pinch' ? '#ff9d5d' : D.kind === 'tendril' ? '#c98aff' : '#ff7a2e';
+      for (const m of D.targets) if (m && grid[m.row][m.col] === m) cellMark(m.row, m.col, col);
+    } else if (D.kind === 'icicle') {
+      const [r0, c0] = D.center;
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const r = r0 + dr, c = c0 + dc;
+        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+        g.globalAlpha = 0.25 + k * 0.35;
+        g.fillStyle = '#bfe9ff';
+        g.fillRect(GRID_X + c * CELL_W + 3, GRID_Y + r * CELL_H + 3, CELL_W - 6, CELL_H - 6);
+      }
+    } else if (D.kind === 'airstrike') {
+      g.globalAlpha = 0.2 + k * 0.35;
+      g.fillStyle = '#ff5d5d';
+      g.fillRect(GRID_X + D.col * CELL_W + 3, GRID_Y, CELL_W - 6, ROWS * CELL_H);
+      g.globalAlpha = 0.8;
+      g.strokeStyle = '#ff5d5d'; g.lineWidth = 2; g.setLineDash([10, 8]); g.lineDashOffset = -time * 80;
+      g.strokeRect(GRID_X + D.col * CELL_W + 4, GRID_Y + 2, CELL_W - 8, ROWS * CELL_H - 4);
+      g.setLineDash([]);
+    }
+    g.restore();
+  }
+}
+// Boss 招式的画面
+function drawBossFx() {
+  for (const f of bossFx) {
+    g.save();
+    if (f.kind === 'claw') {
+      // 一只张开的大钳子，后面拖着一条链
+      const y = cellCy(f.row) - 4;
+      g.strokeStyle = '#6a5040'; g.lineWidth = 4;
+      g.beginPath(); g.moveTo(f.x0, y); g.lineTo(f.x + 20, y); g.stroke();
+      g.translate(f.x, y);
+      const open = 0.35 + Math.sin(time * 16) * 0.2;
+      for (const sgn of [-1, 1]) {
+        g.save(); g.rotate(sgn * open);
+        g.fillStyle = '#e0603a';
+        g.beginPath(); g.moveTo(10, 0); g.quadraticCurveTo(-10, sgn * 26, -38, sgn * 6); g.lineTo(-30, sgn * 2); g.quadraticCurveTo(-8, sgn * 12, 10, 0); g.fill();
+        g.fillStyle = '#ffd0b0';
+        for (let k = 0; k < 4; k++) { g.beginPath(); g.arc(-12 - k * 6, sgn * (8 - k), 2, 0, TAU); g.fill(); }
+        g.restore();
+      }
+      g.fillStyle = '#b8452a'; g.beginPath(); g.arc(10, 0, 9, 0, TAU); g.fill();
+    } else if (f.kind === 'quake') {
+      const y = cellCy(f.row) + 24;
+      g.fillStyle = 'rgba(140,110,70,0.7)';
+      for (let k = 0; k < 5; k++) {
+        const xx = f.x + k * 14, h2 = 18 - k * 3;
+        g.beginPath(); g.moveTo(xx - 8, y); g.lineTo(xx, y - h2); g.lineTo(xx + 8, y); g.closePath(); g.fill();
+      }
+      g.strokeStyle = 'rgba(60,40,20,0.6)'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(f.x, y + 2); for (let xx = f.x; xx < f.x + 120; xx += 10) g.lineTo(xx, y + 2 + rand(-3, 3)); g.stroke();
+    } else if (f.kind === 'torp') {
+      const y = cellCy(f.row);
+      g.translate(f.x, y);
+      g.fillStyle = 'rgba(160,230,255,0.4)';
+      g.beginPath(); g.ellipse(26, 0, 22, 4, 0, 0, TAU); g.fill();
+      g.fillStyle = '#5c6d80'; rr(g, -16, -6, 32, 12, 6); g.fill();
+      g.fillStyle = '#ff5d5d'; g.beginPath(); g.arc(-15, 0, 6, Math.PI / 2, Math.PI * 1.5); g.fill();
+      g.fillStyle = '#ffc531'; g.fillRect(14, -7, 4, 14);
+    } else if (f.kind === 'sand') {
+      const a = f.t / f.max;
+      g.globalAlpha = a * 0.6;
+      g.fillStyle = '#d8b878';
+      g.fillRect(GRID_X, cellCy(f.row) - CELL_H / 2, COLS * CELL_W, CELL_H);
+      g.fillStyle = 'rgba(255,240,200,0.7)';
+      for (let k = 0; k < 18; k++) {
+        const xx = GRID_X + ((k * 97 + time * 600) % (COLS * CELL_W)), yy = cellCy(f.row) - 30 + (k * 13) % 60;
+        g.fillRect(xx, yy, 14, 2);
+      }
+    } else if (f.kind === 'meteor' || f.kind === 'bomb') {
+      const x = cellCx(f.c), y = cellCy(f.r);
+      if (!f.done) {
+        const p = clamp(f.t / f.dur, 0, 1);
+        const sx = x + (1 - p) * 160, sy = y - (1 - p) * 420;
+        if (f.kind === 'meteor') {
+          g.fillStyle = 'rgba(255,122,46,0.45)';
+          g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + 50, sy - 120); g.lineTo(sx + 14, sy - 8); g.closePath(); g.fill();
+          emissive(g, '#ff7a2e', 16, () => { g.fillStyle = '#ffd08a'; g.beginPath(); g.arc(sx, sy, 12, 0, TAU); g.fill(); });
+        } else {
+          g.translate(x, y - (1 - p) * 420);
+          g.fillStyle = '#3a4250'; rr(g, -6, -14, 12, 24, 5); g.fill();
+          g.fillStyle = '#ffc531'; g.fillRect(-6, -16, 12, 4);
+        }
+      }
+    } else if (f.kind === 'icicle') {
+      const x = cellCx(f.c), y = cellCy(f.r);
+      if (!f.done) {
+        const p = clamp(f.t / f.dur, 0, 1);
+        g.translate(x, y - (1 - p) * 300);
+        g.fillStyle = '#d9f2ff';
+        g.beginPath(); g.moveTo(-7, -26); g.lineTo(7, -26); g.lineTo(0, 10); g.closePath(); g.fill();
+      } else {
+        g.globalAlpha = clamp(1 - (f.t - f.dur) / 0.4, 0, 1);
+        g.fillStyle = 'rgba(191,233,255,0.5)';
+        g.fillRect(GRID_X + f.c * CELL_W + 6, GRID_Y + f.r * CELL_H + 6, CELL_W - 12, CELL_H - 12);
+      }
+    } else if (f.kind === 'pinchfx') {
+      const a = f.t / f.max;
+      g.translate(f.x, f.y);
+      g.globalAlpha = a;
+      for (const sgn of [-1, 1]) {
+        g.fillStyle = '#e0603a';
+        g.beginPath(); g.moveTo(-40, sgn * (8 + a * 22)); g.quadraticCurveTo(0, sgn * (30 + a * 10), 40, sgn * (4 + a * 18)); g.lineTo(30, sgn * 2); g.closePath(); g.fill();
+      }
+    } else if (f.kind === 'tendrilfx') {
+      const a = f.t / f.max;
+      g.translate(f.x, f.y + 30);
+      g.strokeStyle = 'rgba(160,90,230,' + a.toFixed(2) + ')'; g.lineWidth = 6; g.lineCap = 'round';
+      for (let k = 0; k < 4; k++) {
+        g.beginPath(); g.moveTo(-24 + k * 16, 0);
+        g.quadraticCurveTo(-30 + k * 16 + Math.sin(time * 9 + k) * 12, -40, -10 + k * 8, -70 * (1 - a * 0.3));
+        g.stroke();
+      }
+      g.lineCap = 'butt';
+    }
     g.restore();
   }
 }
@@ -16967,6 +18459,7 @@ function drawBullets() {
         : b.kind === 'rocket' ? 'rgba(255,140,60,0.9)'
         : b.kind === 'flak' ? 'rgba(168,232,255,0.9)'
         : b.kind === 'tri' ? 'rgba(127,240,127,0.9)'
+        : b.kind === 'holo' ? 'rgba(111,232,255,0.9)'
         : 'rgba(255,205,80,0.9)';
     }
     if (b.kind === 'rocket') {
@@ -16988,6 +18481,11 @@ function drawBullets() {
       g.lineTo(b.x + 8, y + 5);
       g.closePath();
       g.fill();
+    } else if (b.kind === 'holo') {
+      g.fillStyle = 'rgba(111,232,255,0.3)';
+      g.fillRect(b.x - 22, y - 2, 22, 4);
+      g.fillStyle = '#bff6ff';
+      rr(g, b.x - 7, y - 3, 14, 6, 3); g.fill();
     } else if (b.kind === 'tri') {
       // 三线射手的穿透弹：一颗绿色能量豆拖着一条亮尾
       const tk = 1 + ((b.bt || 1) - 1) * 0.25;
@@ -18288,6 +19786,8 @@ window.__game = {
   ultNameAt: (r, c) => (grid[r][c] ? ultName(grid[r][c]) : null),
   castUlt: (r, c) => { const m = grid[r][c]; if (!m || !ultReady()) return false; spendUlt(); fireUltimate(m); renderTray(); return true; },
   placeKind: (kind, r, c) => { const mods = [{ kind, lv: 1 }]; return place(typeOfModules(mods), r, c, mods); },
+  holoState: i => (enemies[i] ? { base: !!enemies[i].holoBase, t: +(enemies[i].holoT || 0).toFixed(2), hp: Math.round(enemies[i].hp), dead: !!enemies[i].dead } : null),
+  downAt: (r, c) => (grid[r][c] ? +(grid[r][c].down || 0).toFixed(2) : -1),
   enemyStun: i => (enemies[i] ? +(enemies[i].stunT || 0).toFixed(2) : null),
   ultKindAt: (r, c) => (grid[r][c] ? ultKindOf(grid[r][c]) : null),
   ultKinds: () => Object.keys(ULTS),
@@ -18311,6 +19811,8 @@ window.__game = {
   setSbat: (i, on) => { if (enemies[i]) enemies[i].sbat = !!on; },
   bossBeamT: () => { const k = enemies.find(e => e.king && !e.dead); return k ? +(k.beamT || 0).toFixed(2) : null; },
   beamDbg: () => { const k = enemies.find(e => e.king && !e.dead); return k ? { t: +(k.beamT||0).toFixed(2), aim: +(k.beamAim||0).toFixed(2), fire: +(k.beamFire||0).toFixed(2), nb: beams.length, x: Math.round(k.x) } : null; },
+  forceMove: kind => { const k = enemies.find(e => e.king && !e.dead); if (!k) return false; k.moveData = planBossMove(k, kind); k.beamAim = 0.01; k.aimMax = 1; return k.moveData.kind; },
+  bossMoves: t => (BOSS_MOVES[t] || []).slice(),
   forceBossBeam: () => { const k = enemies.find(e => e.king && !e.dead); if (k) { k.beamT = 0.01; return true; } return false; },
   // 给测试用：这台机器的招式到底有没有生效（不打伤害的那几台靠这个验）
   effectSeen: (kind) => {
@@ -18425,6 +19927,16 @@ window.__game = {
   get mapOrder() { return MAP_ORDER.slice(); },
   setStage: (m, st) => { curMap = m; curStage = st; bgCanvas = null; },
   startCamp: (m, st, inf) => enterStage(m, st, inf),
+  startCustom: cfg => enterStage(cfg.map, 1, false, cfg),
+  tileKind: (r, c) => (tileAt(r, c) ? tileAt(r, c).kind : null),
+  setTile: (r, c, kind) => { tiles[r][c] = kind ? { kind, armed: true, cd: 0, snap: 0, prog: 0 } : null; },
+  stageTiles: (m, st) => stageTiles(m, st),
+  maxHpAt: (r, c) => (grid[r][c] ? grid[r][c].maxHp : null),
+  get custom() { return customCfg; },
+  get stageWaves() { return stageWaves(); },
+  roster: (m, st) => stageRoster(m, st).map(t => ENEMIES[t].name),
+  rosterIds: (m, st) => stageRoster(m, st),
+  waveTypes: n => [...new Set(waveEnemies(n))],
   // 测试用：跳过选卡界面直接进关（等价于「全带上」）
   startCampAll: (m, st, inf) => { curMap = m; curStage = st; campEndless = !!inf; bgCanvas = null; pickedCards = null; startGame('campaign'); },
   get picked() { return pickedCards ? pickedCards.slice() : null; },
