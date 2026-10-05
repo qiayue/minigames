@@ -122,6 +122,9 @@ let linkSeq = 0;          // 虚空链接的组号
 const _fxSeen = { vortex: 0, rewind: 0, salvage: 0 };   // 只给自动化测试看的计数
 let suckLines = [];       // 抽能潜艇的管线特效
 let worms = [];           // 沙虫巢放出去的小沙虫
+let ultFx = [];           // 大招的专属画面：横扫、光柱、延时爆点
+let ultFlash = null;      // 放大招那一下全屏泛一层颜色
+let reflectT = 0;         // 反射屏障：这几秒里敌人的子弹全部反弹回去
 /* 飞船图（天空之城）：场地左边不是基地而是一艘飞船。
    漏过去的敌人不会「冲进基地」直接判负，而是贴着船舷烧船；
    船体血量见底才算输，所以漏一两只还有救。 */
@@ -150,6 +153,9 @@ const PICK_SLOTS = 8;
 let pickDraft = [];
 let pendingStage = null;
 const ULT_CAP = 5;
+// 创造模式：大招不要电池，想放几次放几次
+function ultReady() { return creative() || ults > 0; }
+function spendUlt() { if (!creative()) ults--; }
 function endlessRound() { return Math.floor((wave - 1) / 5) + 1; }   // 第几轮 Boss
 function endlessBuff() { return 1 + 0.55 * (endlessRound() - 1); }
 const STAGE_WAVES = 5;             // 每关 5 波，最后一关的最后一波是 Boss
@@ -1261,7 +1267,7 @@ function initGame() {
   // 每行门口摆一辆小推车：被摸到就冲出去清场，每行只有一次
   carts = Array.from({ length: ROWS }, (_, r) => ({ row: r, x: GRID_X - 30, go: false, used: false }));
   shipMax = mapDef().ship || 0; shipHp = shipMax; shipHit = 0; shipFires = [];
-  ults = 0;
+  ults = 0; ultFx = []; ultFlash = null; reflectT = 0;
   waveState = 'pre'; waveTimer = 15; queue = []; spawnT = 0;
   surgeDone = false; surgeAt = 0; alarmT = 0;
   skyT = 3; lastRows = [];
@@ -1597,9 +1603,9 @@ function renderTray() {
   }
   const ub = $('ultBtn');
   if (ub) {
-    $('ultNum').textContent = ults;
-    ub.disabled = ults <= 0;
-    ub.classList.toggle('ready', ults > 0 && !(sel && sel.mode === 'ult'));
+    $('ultNum').textContent = creative() ? '∞' : ults;
+    ub.disabled = !ultReady();
+    ub.classList.toggle('ready', ultReady() && !(sel && sel.mode === 'ult'));
     ub.classList.toggle('sel', !!(sel && sel.mode === 'ult'));
   }
   $('shovelBtn').classList.toggle('sel', !!(sel && sel.mode === 'shovel'));
@@ -1801,6 +1807,8 @@ function wardBite(m, e) {
 }
 
 function damageMachine(m, d) {
+  // 绝对领域：这几秒刀枪不入
+  if (m.invT > 0) { m.shHit = 0.25; return; }
   // 能量护盾优先承伤
   if (m.sh > 0) {
     const absorbed = Math.min(m.sh, d);
@@ -2419,7 +2427,13 @@ function enemiesInRange(r, cx, cells) {
 
 function updateMachines(dt) {
   // 第一遍：超频光环（周围 8 格获得攻速加成）
-  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) { const m = grid[r][c]; if (m) m.haste = 0; }
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const m = grid[r][c];
+    if (!m) continue;
+    m.haste = 0;
+    if (m.invT > 0) m.invT -= dt;
+    if (m.overT > 0) { m.overT -= dt; m.haste = 1.5; }    // 全线超频大招
+  }
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const b = grid[r][c];
@@ -2428,7 +2442,7 @@ function updateMachines(dt) {
       for (let rr2 = Math.max(0, r - 1); rr2 <= Math.min(ROWS - 1, r + 1); rr2++) {
         for (let cc = Math.max(0, c - 1); cc <= Math.min(COLS - 1, c + 1); cc++) {
           const o = grid[rr2][cc];
-          if (o && o.type !== 'box') o.haste = Math.max(o.haste, hv);
+          if (o && o.type !== 'box') o.haste = Math.max(o.haste, hv + (o.overT > 0 ? 1.5 : 0));
         }
       }
     }
@@ -3469,6 +3483,18 @@ function updateEnemyBullets(dt) {
     const b = ebullets[i];
     b.x -= b.speed * dt;
     if (tryDeflect(b)) { ebullets.splice(i, 1); continue; }
+    // 反射屏障 / 虚空镜狱：子弹一进战场就被原路弹回去，打在这一行最近的敌人身上
+    if (reflectT > 0 && b.x < FIELD_X) {
+      const t = enemies.filter(e => !e.dead && !e.charmed && e.row === b.row && e.x > b.x)
+        .sort((a, c) => a.x - c.x)[0];
+      if (t) {
+        zaps.push({ pts: [{ x: b.x, y: b.y }, { x: t.x, y: rowCy(t) }], t: 0.2, max: 0.2, color: '#8ff0e0', bt: 2 });
+        damageEnemy(t, (b.dmg || 100) * 3, 'true');
+      }
+      spawnParts(b.x, b.y, '#8ff0e0', 6, 100, 0.3, 'spark');
+      ebullets.splice(i, 1);
+      continue;
+    }
     const col = Math.floor((b.x - GRID_X) / CELL_W);
     let hit = null;
     if (col >= 0 && col < COLS) {
@@ -3704,7 +3730,11 @@ function updateCarts(dt) {
       spawnParts(e.x, rowCy(e), '#ffc531', 14, 160, 0.5, 'spark');
     }
     if (Math.random() < dt * 20) spawnParts(ct.x - 20, cellCy(ct.row) + 18, '#8fa1b8', 1, 60, 0.4, 'smoke');
-    if (ct.x > W + 60) ct.go = false;
+    if (ct.x > W + 60) {
+      ct.go = false;
+      // 创造模式：推完一趟自己开回门口待命
+      if (creative()) { ct.used = false; ct.x = GRID_X - 30; }
+    }
   }
 }
 function drawCarts() {
@@ -3886,8 +3916,8 @@ function updateMissiles(dt) {
       spawnParts(mi.x, mi.y, '#ffb98a', 1, 30, 0.35, 'smoke');
     }
     if (Math.hypot(tx - mi.x, ty - mi.y) < 18) {
-      damageEnemy(tgt, mi.dmg * 3, 'ranged');
-      addFloat(tgt.x, ty - 44, '对空×3', '#ffb98a');
+      damageEnemy(tgt, mi.ult ? mi.dmg : mi.dmg * 3, mi.ult ? 'true' : 'ranged');
+      if (!mi.ult) addFloat(tgt.x, ty - 44, '对空×3', '#ffb98a');
       for (const o of enemies) {
         if (o === tgt || o.dead) continue;
         if (Math.hypot(o.x - mi.x, rowCy(o) - mi.y) < mi.splash) damageEnemy(o, mi.dmg, 'ranged');
@@ -4353,9 +4383,12 @@ function updateEnemies(dt) {
     const stopLine = shipMax > 0 ? GRID_X - 12 : GRID_X - 26;
     if (front < stopLine) {
       const ct = carts[e.row];
-      if (ct && !ct.used) {
-        // 小推车：最后一道保险，冲出去把这一行犁干净，每行只有一次
-        ct.used = true; ct.go = true; ct.x = GRID_X - 30;
+      // 创造模式：小推车无限 —— 正在跑的那辆还没回来，就先把敌人顶在线上等它
+      if (ct && creative() && ct.go) { e.x += stopLine - front; continue; }
+      if (ct && (!ct.used || creative())) {
+        // 小推车：最后一道保险，冲出去把这一行犁干净，每行只有一次（创造模式无限）
+        ct.used = true; ct.go = true; ct.hitKing = false;
+        ct.x = Math.min(GRID_X - 30, e.x - e.w / 2 - 30);
         addFloat(GRID_X + 40, cellCy(e.row) - 40, '小推车出动！', '#ffc531');
         shake(0.3, 6);
         sfx('horn');
@@ -4840,6 +4873,7 @@ function update(dt) {
   updateEnemies(dt);
   updateOrbs(dt);
   updatePharaohPull(dt);
+  updateUltFx(dt);
   updateFx(dt);
 }
 // 创造模式可以关掉敌潮，安心搭配机器
@@ -5436,10 +5470,10 @@ cv.addEventListener('pointerdown', ev => {
       addFloat(cellCx(cell.c), cellCy(cell.r) - 30, '点一台机器放大招', '#ff5d5d');
       return;
     }
-    if (ults <= 0) { sel = null; renderTray(); return; }
-    ults--;
+    if (!ultReady()) { sel = null; renderTray(); return; }
+    spendUlt();
     fireUltimate(m);
-    if (ults <= 0) sel = null;          // 用完就自动退出，免得乱点
+    if (!ultReady()) sel = null;        // 用完就自动退出，免得乱点（创造模式一直开着）
     renderTray();
     return;
   }
@@ -6023,7 +6057,7 @@ $('pickBackBtn') && $('pickBackBtn').addEventListener('click', () => {
   state = 'menu';
 });
 $('ultBtn') && $('ultBtn').addEventListener('click', () => {
-  if (state !== 'playing' || ults <= 0) return;
+  if (state !== 'playing' || !ultReady()) return;
   sel = (sel && sel.mode === 'ult') ? null : { mode: 'ult' };
   renderTray();
 });
@@ -6100,6 +6134,7 @@ function draw() {
   drawShip(_frameDt);
   drawBossAim();
   drawBeams();
+  drawUltFx();
   drawBullets();
   drawShells();
   drawNets();
@@ -7595,6 +7630,34 @@ function drawMachine(ctx, type, x, y, s, m) {
   // 金属高光只给场上的机器（卡面小图上那道反光会变成一条灰杠）；挤的时候先省掉
   if (fxQuality >= 0.65 && m && m.row !== undefined) drawMetalSheen(ctx, m);
   if (mods.length) drawLevelRig(ctx, totalLv(mods), m);
+  // 绝对领域：罩一层会闪的蓝色力场罩
+  if (m && m.invT > 0) {
+    const a = Math.min(1, m.invT / 0.6) * (0.55 + Math.sin(time * 6) * 0.15);
+    ctx.save();
+    ctx.globalAlpha = a;
+    const dg = ctx.createRadialGradient(0, -4, 10, 0, -4, 44);
+    dg.addColorStop(0, 'rgba(143,208,255,0)');
+    dg.addColorStop(0.75, 'rgba(143,208,255,0.18)');
+    dg.addColorStop(1, 'rgba(200,236,255,0.65)');
+    ctx.fillStyle = dg;
+    ctx.beginPath(); ctx.arc(0, -4, 44, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(200,236,255,0.9)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, -4, 44, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
+  // 全线超频：机身上窜着橙色的速度线
+  if (m && m.overT > 0) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,215,100,0.75)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const ph = (time * 3 + i * 0.25) % 1;
+      const yy = 30 - ph * 70;
+      ctx.globalAlpha = 1 - ph;
+      ctx.beginPath(); ctx.moveTo(-30 + i * 18, yy); ctx.lineTo(-30 + i * 18, yy - 12); ctx.stroke();
+    }
+    ctx.restore();
+  }
   // 元素表层：直接长在机体上，不额外挂东西、也不占徽章位
   if (elemMod && pri && !ELEM_TIER[pri.kind]) drawElementSkin(ctx, elemMod.kind, m);
   // 杂交进来的能力，一律长在机体上：最强的三件挂出实体结构，
@@ -15861,110 +15924,573 @@ function drawTracers() {
 }
 
 /* ===== 超级大招 =====
-   一格大招花在哪台机器上，就按那台机器的主模块放对应的招。
-   每一招都是「一次性的大动静」，不是加个 buff —— 玩家花掉电池要看得见回报。 */
+   一格大招花在哪台机器上，就按那台机器的「主模块」放它自己那一招 ——
+   五十多种能力，每一种都有自己的大招，不再有「通用的过载爆发」。
+   每一招都是一次性的大动静（有的会带几秒余波），玩家花掉电池要看得见回报。 */
 function ultKindOf(m) {
-  const order = ['laser', 'prism', 'frost', 'zap', 'emp', 'mortar', 'rocket', 'aa',
-    'hunter', 'sniper', 'shot', 'repair', 'shield', 'energy'];
-  for (const k of order) if (hasKind(m, k)) return k;
-  return (m.modules && m.modules[0] && m.modules[0].kind) || 'shot';
+  const k = (m.modules && m.modules[0] && m.modules[0].kind) || 'shot';
+  return ULTS[k] ? k : 'shot';
 }
-const ULT_NAME = {
-  laser: '湮灭光幕', prism: '湮灭光幕', frost: '绝对零度', zap: '天罚雷暴', emp: '天罚雷暴',
-  mortar: '地毯轰炸', rocket: '地毯轰炸', aa: '防空火网', sniper: '穿甲弹幕',
-  hunter: '穿甲弹幕', shot: '穿甲弹幕', repair: '全场抢修', shield: '全场抢修',
-  energy: '电网超频', _: '过载爆发',
-};
-function ultName(m) { return ULT_NAME[ultKindOf(m)] || ULT_NAME._; }
-function liveFoes() { return enemies.filter(e => !e.dead && !e.charmed); }
+function ultName(m) { return ULTS[ultKindOf(m)].name; }
+function liveFoes() { return enemies.filter(e => !e.dead && !e.charmed && !e.under && e.x <= FIELD_X + 10); }
+// Boss 吃「百分比 / 秒杀类」效果要打折，不然一格电池直接带走关底
+function ultBossMul(e) { return e.king ? 0.35 : e.boss ? 0.6 : 1; }
+function ultHurt(e, d) { damageEnemy(e, d, 'true'); }
+function ultPillar(x, y, color) { ultFx.push({ kind: 'pillar', x, y, color, t: 0.5, max: 0.5 }); }
+function ultSweep(row, x, color, shape) {
+  ultFx.push({ kind: 'sweep', row, x, color, shape, t: 0, max: (W - x) / 900 + 0.2 });
+}
+function ultBlast(x, y, delay, dmg, rad, color, extra) {
+  ultFx.push(Object.assign({ kind: 'blast', x, y, delay, dmg, rad, color, done: false, t: 0, max: 0.35 }, extra || {}));
+}
+function ultPushBack(e, cells) {
+  if (e.king) return;
+  e.x = Math.min(FIELD_X - 4, e.x + CELL_W * cells * (e.boss ? 0.5 : 1));
+}
+function ultAllMachines(fn) {
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const o = grid[r][c];
+    if (o && o.type !== 'box' && o.modules) fn(o, r, c);
+  }
+}
+function ultBurn(e, dps, t) { e.burnT = Math.max(e.burnT || 0, t); e.burnDps = Math.max(e.burnDps || 0, dps); }
+function ultPoison(e, dps, t) { e.poisonT = Math.max(e.poisonT || 0, t); e.poisonDps = Math.max(e.poisonDps || 0, dps); }
+function ultFreeze(e, t) {
+  e.slowT = Math.max(e.slowT || 0, t + 3);
+  if (!e.king) { e.frozenT = Math.max(e.frozenT || 0, t); e.stunT = Math.max(e.stunT || 0, t); }
+}
+function ultRain(color, n) {
+  for (let i = 0; i < n; i++) spawnParts(rand(GRID_X, FIELD_X), rand(GRID_Y, GRID_Y + ROWS * CELL_H), color, 1, 80, 1, 'spark');
+}
+const RAINBOW = ['#ff5d5d', '#ff9d2e', '#ffd764', '#58d68b', '#4cc2ff', '#c98aff'];
 
-function fireUltimate(m) {
-  const k = ultKindOf(m);
-  const cx = cellCx(m.col), cy = cellCy(m.row);
-  const lv = m.modules ? totalLv(m.modules) : 1;
-  const P = 1 + (lv - 1) * 0.22;                // 机器等级越高，大招越猛
-  addFloat(cx, cy - 46, '★ ' + ultName(m), '#c98aff');
-  spawnParts(cx, cy, '#c98aff', 26, 220, 0.8, 'spark');
-  shake(0.5, 10);
-  sfx('ult');
-  m.flash = 0.6; m.recoil = 0.35; m.ultGlow = 1.2;
-  if (k === 'laser' || k === 'prism') {
-    // 湮灭光幕：每一行都来一道贯穿光柱
+/* 每一种能力的大招。fire(m, X)：X = { cx, cy, P（等级倍率）, lv, r, c } */
+const ULTS = {
+  shot: { name: '穿甲弹幕', color: '#ffd764', desc: '本行加上下两行一轮倾泻', fire(m, X) {
+    for (let d = -1; d <= 1; d++) {
+      const r = X.r + d;
+      if (r < 0 || r >= ROWS) continue;
+      const mul = d === 0 ? 1 : 0.5;
+      tracers.push({ x0: X.cx, y0: X.cy - 14, x1: W, y1: cellCy(r) - 14, t: 0.35, max: 0.35 });
+      for (const e of liveFoes()) if (e.row === r && e.x > X.cx - CELL_W) ultHurt(e, 1100 * X.P * mul);
+    }
+    for (let i = 0; i < 16; i++) {
+      bullets.push({ kind: 'shot', row: X.r, x: X.cx + 20 + i * 10, dmg: 1, speed: 900,
+        dy: (i % 3 - 1) * 6, bt: 5, pierce: 9, hit: new Set(), spin: 0 });
+    }
+  } },
+  energy: { name: '电网超频', color: '#ffc531', desc: '直接灌一大笔电，地上的电池全部自动收走', fire(m, X) {
+    const gain = 450 + X.lv * 60;
+    if (!creative()) energy += gain;
+    for (let i = orbs.length - 1; i >= 0; i--) if (!orbs[i].sbat) { if (!creative()) energy += orbs[i].val; orbs.splice(i, 1); }
+    energyFlash = 1;
+    addFloat(X.cx, X.cy - 70, '+' + gain + '⚡', '#ffc531');
+  } },
+  armor: { name: '钢铁长城', color: '#c8d4e0', desc: '全线机器套一层厚甲，贴脸的敌人全被顶回去', fire(m, X) {
+    ultAllMachines(o => {
+      o.sh = o.maxSh = Math.max(o.maxSh || 0, Math.round(o.maxHp * 1.2 * X.P));
+      shocks.push({ x: cellCx(o.col), y: cellCy(o.row), t: 0.4, max: 0.4, reach: 40, color: '#c8d4e0' });
+    });
+    for (const e of liveFoes()) {
+      const c = colAtX(e.x - e.w / 2);
+      if (c >= 0 && c < COLS && (grid[e.row][c] || (c > 0 && grid[e.row][c - 1]))) {
+        ultPushBack(e, 1.3); e.stunT = Math.max(e.stunT || 0, 1.5);
+      }
+    }
+  } },
+  melee: { name: '千拳风暴', color: '#ff9d2e', desc: '前方三行四格内的敌人被一顿乱拳打飞', fire(m, X) {
+    for (const e of liveFoes()) {
+      if (Math.abs(e.row - X.r) > 1 || e.x < X.cx - 20 || e.x > X.cx + CELL_W * 4.5) continue;
+      ultHurt(e, 760 * X.P);
+      ultPushBack(e, 1.8);
+      e.stunT = Math.max(e.stunT || 0, 0.9);
+      shocks.push({ x: e.x, y: rowCy(e), t: 0.3, max: 0.3, reach: 34, color: '#ff9d2e' });
+    }
+    for (let d = -1; d <= 1; d++) if (X.r + d >= 0 && X.r + d < ROWS) ultSweep(X.r + d, X.cx, '#ff9d2e', 'fist');
+  } },
+  frost: { name: '绝对零度', color: '#bfe9ff', desc: '整个战场冻住三秒，顺带一记寒伤', fire(m, X) {
+    for (const e of liveFoes()) { ultFreeze(e, 3.2); ultHurt(e, 420 * X.P); spawnParts(e.x, rowCy(e), '#bfe9ff', 8, 110, 0.6, 'spark'); }
+    ultRain('#bfe9ff', 50);
+  } },
+  shred: { name: '绞肉旋涡', color: '#ffb36b', desc: '把本行敌人全吸到嘴边，小的直接绞碎', fire(m, X) {
+    const mouth = X.cx + CELL_W * 0.7;
+    for (const e of liveFoes()) {
+      if (e.row !== X.r || e.x < X.cx - 10) continue;
+      if (!e.king) e.x = mouth + rand(0, CELL_W * 0.5);
+      if (!e.boss && e.hp + e.shield < 1500 * X.P) ultHurt(e, e.hp + e.shield + 1);
+      else ultHurt(e, 1100 * X.P * ultBossMul(e));
+      spawnParts(e.x, rowCy(e), '#c8935a', 10, 140, 0.5, 'gear');
+    }
+    shocks.push({ x: mouth, y: X.cy, t: 0.8, max: 0.8, reach: CELL_W * 3, color: '#ffb36b', suck: true });
+  } },
+  magnet: { name: '磁暴牵引', color: '#ffca6b', desc: '全场敌人被磁暴扯回最右边，护盾和装甲一起扯掉', fire(m, X) {
+    for (const e of liveFoes()) {
+      zaps.push({ pts: [{ x: X.cx, y: X.cy - 30 }, { x: e.x, y: rowCy(e) }], t: 0.35, max: 0.35, color: '#ffca6b', bt: 3 });
+      e.shield = 0;
+      addShatter(e, 3);
+      if (!e.king) e.x = FIELD_X - rand(0, CELL_W * 1.2);
+      e.pulled = 0.5;
+    }
+  } },
+  zap: { name: '天罚雷暴', color: '#d9b8ff', desc: '场上每个敌人头上劈一道雷，还要瘫一会', fire(m, X) {
+    for (const e of liveFoes()) {
+      zaps.push({ pts: [{ x: e.x + rand(-10, 10), y: GRID_Y - 20 }, { x: e.x, y: rowCy(e) }], t: 0.3, max: 0.3, color: '#d9b8ff', bt: 5 });
+      ultPillar(e.x, rowCy(e), '#d9b8ff');
+      ultHurt(e, 760 * X.P);
+      e.stunT = Math.max(e.stunT || 0, e.king ? 1 : 2.4);
+    }
+  } },
+  laser: { name: '湮灭光幕', color: '#ff8ae0', desc: '每一行都来一道贯穿光柱', fire(m, X) {
     for (let r = 0; r < ROWS; r++) {
-      beams.push({ row: r, x0: cx, t: 0.6, max: 0.6, bt: 6, kind: 'singular', color: '#ff8ae0' });
-      for (const e of liveFoes()) if (e.row === r && e.x > cx - CELL_W) damageEnemy(e, 900 * P, 'true');
+      beams.push({ row: r, x0: X.cx, t: 0.6, max: 0.6, bt: 6, kind: 'singular', color: '#ff8ae0' });
+      for (const e of liveFoes()) if (e.row === r && e.x > X.cx - CELL_W) ultHurt(e, 900 * X.P);
     }
-  } else if (k === 'frost') {
-    // 绝对零度：整个战场冻住，顺带一记寒伤
+  } },
+  rocket: { name: '末日齐射', color: '#ffb98a', desc: '给场上每一个敌人都发一枚追踪火箭', fire(m, X) {
     for (const e of liveFoes()) {
-      e.slowT = Math.max(e.slowT || 0, 6);
-      e.frozenT = Math.max(e.frozenT || 0, 3.2);
-      e.stunT = Math.max(e.stunT || 0, 3.2);
-      damageEnemy(e, 420 * P, 'true');
-      spawnParts(e.x, rowCy(e), '#bfe9ff', 8, 110, 0.6, 'spark');
+      missiles.push({ x: X.cx + rand(-8, 8), y: X.cy - 26, target: e, dmg: 700 * X.P, splash: CELL_W * 0.6,
+        t: rand(0, 0.2), ang: -Math.PI / 2 + rand(-0.6, 0.6), ult: true });
     }
-    for (let i = 0; i < 40; i++) spawnParts(rand(GRID_X, W), rand(GRID_Y, H), '#bfe9ff', 1, 90, 1, 'spark');
-  } else if (k === 'zap' || k === 'emp') {
-    // 天罚雷暴：场上每个敌人头上劈一道，还要瘫一会儿
-    for (const e of liveFoes()) {
-      zaps.push({ pts: [{ x: e.x, y: GRID_Y - 20 }, { x: e.x, y: rowCy(e) }], t: 0.3, max: 0.3, color: '#d9b8ff', bt: 5 });
-      damageEnemy(e, 760 * P, 'true');
-      e.stunT = Math.max(e.stunT || 0, 2.4);
-      e.silenceT = Math.max(e.silenceT || 0, 3);
+  } },
+  mine: { name: '连环雷场', color: '#ff7a2e', desc: '每个地面敌人脚下依次炸开一颗雷', fire(m, X) {
+    let k = 0;
+    for (const e of liveFoes().sort((a, b) => a.x - b.x)) {
+      if (e.fly) continue;
+      ultBlast(e.x, cellCy(e.row) + 10, 0.1 + k * 0.08, 760 * X.P, CELL_W * 0.75, '#ff7a2e', { row: e.row });
+      k++;
     }
-  } else if (k === 'mortar' || k === 'rocket') {
-    // 地毯轰炸：整片战场落 14 发
+  } },
+  flame: { name: '焚天烈焰', color: '#ff7a2e', desc: '全场点着，每一行领头的敌人脚下烧出一摊火', fire(m, X) {
+    for (const e of liveFoes()) ultBurn(e, 120 * X.P, 8);
+    for (let r = 0; r < ROWS; r++) {
+      ultSweep(r, X.cx, '#ff7a2e', 'fire');
+      const lead = liveFoes().filter(e => e.row === r).sort((a, b) => a.x - b.x)[0];
+      if (lead) pools.push({ x: lead.x, row: r, t: 6, max: 6, dps: 90 * X.P, own: true });
+    }
+  } },
+  poison: { name: '剧毒瘟疫', color: '#8fe36b', desc: '全场染毒，毒到走不动', fire(m, X) {
+    for (const e of liveFoes()) { ultPoison(e, 85 * X.P, 12); e.slowT = Math.max(e.slowT || 0, 5); }
+    ultRain('#8fe36b', 50);
+  } },
+  mortar: { name: '地毯轰炸', color: '#ffb36b', desc: '整片战场落十四发重炮', fire(m, X) {
     for (let i = 0; i < 14; i++) {
       const bx = GRID_X + rand(CELL_W, COLS * CELL_W), br = Math.floor(rand(0, ROWS));
-      shells.push({ row: br, x0: cx, y0: cy - 18, tx: bx, t: 0, dur: 0.5 + i * 0.045,
-        dmg: 620 * P, splash: CELL_W * 1.1, shatter: 1 });
+      shells.push({ row: br, x0: X.cx, y0: X.cy - 18, tx: bx, t: 0, dur: 0.5 + i * 0.045,
+        dmg: 620 * X.P, splash: CELL_W * 1.1, shatter: 1 });
     }
-  } else if (k === 'aa') {
-    // 防空火网：天上的一个都别想跑
+  } },
+  sniper: { name: '斩首狙击', color: '#ff5d5d', desc: '一枪点掉场上血最厚的那一个', fire(m, X) {
+    const t = liveFoes().sort((a, b) => (b.hp + b.shield) - (a.hp + a.shield))[0];
+    if (!t) { addFloat(X.cx, X.cy - 70, '没有目标', '#9fb4c8'); return; }
+    tracers.push({ x0: X.cx + 20, y0: X.cy - 20, x1: t.x, y1: rowCy(t), t: 0.5, max: 0.5 });
+    ultPillar(t.x, rowCy(t), '#ff5d5d');
+    ultHurt(t, 6500 * X.P * (t.king ? 0.6 : 1));
+    addFloat(t.x, rowCy(t) - 60, '斩首！', '#ff5d5d');
+  } },
+  repair: { name: '全场抢修', color: '#58d68b', desc: '所有机器补满血、解除瘫痪', fire(m, X) {
+    ultAllMachines((o, r, c) => { o.hp = o.maxHp; o.stunT = 0; o.wet = 0; spawnParts(cellCx(c), cellCy(r), '#58d68b', 6, 90, 0.5, 'spark'); });
+    addFloat(W / 2, GRID_Y + 40, '全线修复', '#58d68b');
+  } },
+  spikes: { name: '钢刺地狱', color: '#c8935a', desc: '每个地面敌人脚下捅出钢刺，钉在原地', fire(m, X) {
+    for (const e of liveFoes()) {
+      if (e.fly) continue;
+      ultHurt(e, 540 * X.P);
+      e.stunT = Math.max(e.stunT || 0, e.king ? 1 : 2.6);
+      e.slowT = Math.max(e.slowT || 0, 4);
+      ultFx.push({ kind: 'spike', x: e.x, y: cellCy(e.row) + 26, t: 0.6, max: 0.6 });
+    }
+  } },
+  shield: { name: '绝对领域', color: '#8fd0ff', desc: '七秒内所有机器刀枪不入', fire(m, X) {
+    ultAllMachines(o => { o.invT = 7; });
+    addFloat(W / 2, GRID_Y + 40, '绝对领域展开', '#8fd0ff');
+  } },
+  booster: { name: '全线超频', color: '#ffd764', desc: '九秒内全场机器攻速 +150%', fire(m, X) {
+    ultAllMachines(o => { o.overT = 9; });
+    addFloat(W / 2, GRID_Y + 40, '全线超频！', '#ffd764');
+  } },
+  saw: { name: '旋刃风暴', color: '#e0e6ee', desc: '每一行都滚过一排巨型锯轮，顺手把装甲锯碎', fire(m, X) {
+    for (let r = 0; r < ROWS; r++) ultSweep(r, X.cx, '#e0e6ee', 'saw');
+    for (const e of liveFoes()) { ultHurt(e, 680 * X.P); addShatter(e, 2); }
+  } },
+  emp: { name: '全域瘫痪', color: '#9fc4ff', desc: '全场停摆四秒，护盾清零，技能锁八秒', fire(m, X) {
+    for (const e of liveFoes()) {
+      e.stunT = Math.max(e.stunT || 0, e.king ? 2 : 4);
+      e.shield = 0;
+      e.silenceT = Math.max(e.silenceT || 0, 8);
+    }
+    shocks.push({ x: GRID_X + COLS * CELL_W / 2, y: GRID_Y + ROWS * CELL_H / 2, t: 0.9, max: 0.9, reach: W * 0.6, color: '#9fc4ff' });
+  } },
+  aa: { name: '防空火网', color: '#ff9d2e', desc: '天上的一个都别想跑', fire(m, X) {
     let n = 0;
     for (const e of liveFoes()) {
       if (!e.fly) continue;
       n++;
-      tracers.push({ x0: cx, y0: cy - 20, x1: e.x, y1: rowCy(e), t: 0.3, max: 0.3 });
-      damageEnemy(e, 1700 * P, 'true');
+      tracers.push({ x0: X.cx, y0: X.cy - 20, x1: e.x, y1: rowCy(e), t: 0.3, max: 0.3 });
+      ultHurt(e, 1700 * X.P);
       spawnParts(e.x, rowCy(e), '#ff9d2e', 12, 160, 0.6, 'spark');
     }
-    if (!n) addFloat(cx, cy - 70, '天上没货', '#9fb4c8');
-  } else if (k === 'repair' || k === 'shield') {
-    // 全场抢修：所有机器补满，再罩一层护盾
-    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      const o = grid[r][c];
-      if (!o) continue;
-      o.hp = o.maxHp;
-      o.sh = o.maxSh = Math.max(o.maxSh || 0, Math.round(o.maxHp * 0.6));
-      o.stunT = 0;
-      spawnParts(cellCx(c), cellCy(r), '#58d68b', 6, 90, 0.5, 'spark');
+    if (!n) addFloat(X.cx, X.cy - 70, '天上没货', '#9fb4c8');
+  } },
+  net: { name: '天罗地网', color: '#9fe0b0', desc: '飞的全拽下来，地上的全罩住', fire(m, X) {
+    for (const e of liveFoes()) {
+      if (e.fly && !e.king) { e.fly = false; e.grounded = true; }
+      e.slowT = Math.max(e.slowT || 0, 7);
+      e.stunT = Math.max(e.stunT || 0, e.king ? 0.6 : 1.6);
+      shocks.push({ x: e.x, y: rowCy(e), t: 0.4, max: 0.4, reach: 36, color: '#9fe0b0' });
     }
-    addFloat(W / 2, GRID_Y + 40, '全线修复，护盾展开', '#58d68b');
-  } else if (k === 'energy') {
-    // 电网超频：直接灌一大笔电，外加把场上的电池全部自动收走
-    const gain = 450 + lv * 60;
-    energy += gain;
-    for (let i = orbs.length - 1; i >= 0; i--) if (!orbs[i].sbat) { energy += orbs[i].val; orbs.splice(i, 1); }
+    for (let r = 0; r < ROWS; r++) ultSweep(r, X.cx, '#9fe0b0', 'net');
+  } },
+  hunter: { name: '猎杀名单', color: '#ffb98a', desc: '四枚重型导弹，专挑最硬的四个', fire(m, X) {
+    const list = liveFoes().sort((a, b) => (b.hp + b.shield) - (a.hp + a.shield)).slice(0, 4);
+    for (const e of list) missiles.push({ x: X.cx, y: X.cy - 26, target: e, dmg: 2600 * X.P, splash: CELL_W * 0.8, t: 0, ang: -1.4, ult: true });
+    if (!list.length) addFloat(X.cx, X.cy - 70, '没有目标', '#9fb4c8');
+  } },
+  deflect: { name: '反射屏障', color: '#8ff0e0', desc: '十秒内敌人的子弹全部反弹回去', fire(m, X) {
+    reflectT = 10;
+    for (const b of ebullets) {
+      const t = liveFoes().filter(e => e.row === b.row && e.x > b.x).sort((a, c) => a.x - c.x)[0];
+      if (t) ultHurt(t, (b.dmg || 100) * 3);
+    }
+    ebullets.length = 0;
+    for (let r = 0; r < ROWS; r++) ultSweep(r, GRID_X, '#8ff0e0', 'wall');
+  } },
+  sonic: { name: '音爆冲击', color: '#ffe9b0', desc: '三道音爆把全场震退三格', fire(m, X) {
+    for (const e of liveFoes()) { ultHurt(e, 450 * X.P); ultPushBack(e, 3); e.stunT = Math.max(e.stunT || 0, 1.2); }
+    for (let k = 0; k < 3; k++) shocks.push({ x: X.cx, y: X.cy, t: 0.6 + k * 0.2, max: 0.6 + k * 0.2, reach: W * (0.4 + k * 0.25), color: '#ffe9b0' });
+  } },
+  drone: { name: '蜂群出巢', color: '#ffd79a', desc: '一口气放出十架自爆无人机', fire(m, X) {
+    for (let i = 0; i < 10; i++) {
+      allies.push({ src: m, x: X.cx + rand(-20, 20), y: X.cy - 34 + rand(-20, 20), vx: rand(-60, 60), vy: rand(-60, 0),
+        dmg: 70 * X.P, life: 16, cd: rand(0, 0.4), spin: rand(0, TAU) });
+    }
+  } },
+  gravity: { name: '奇点坍缩', color: '#b9a8ff', desc: '战场中央开一口引力井，全场敌人被拖过去压碎', fire(m, X) {
+    const gx = GRID_X + COLS * CELL_W * 0.62, gy = GRID_Y + ROWS * CELL_H / 2;
+    for (const e of liveFoes()) {
+      if (!e.king) e.x += (gx - e.x) * 0.6;
+      e.stunT = Math.max(e.stunT || 0, e.king ? 1 : 3);
+      e.pulled = 0.8;
+    }
+    shocks.push({ x: gx, y: gy, t: 1.2, max: 1.2, reach: W * 0.5, color: '#b9a8ff', suck: true });
+    for (const e of liveFoes()) ultBlast(e.x, rowCy(e), 1.0, 0, 0, '#b9a8ff', { target: e, tdmg: 900 * X.P });
+  } },
+  prism: { name: '虹光棱阵', color: '#ff8ae0', desc: '一道彩虹光在所有敌人之间来回折射', fire(m, X) {
+    const list = liveFoes().sort((a, b) => a.x - b.x);
+    let px = X.cx, py = X.cy - 20;
+    list.forEach((e, i) => {
+      zaps.push({ pts: [{ x: px, y: py }, { x: e.x, y: rowCy(e) }], t: 0.5, max: 0.5, color: RAINBOW[i % RAINBOW.length], bt: 4 });
+      ultHurt(e, 760 * X.P);
+      px = e.x; py = rowCy(e);
+    });
+  } },
+  vortex: { name: '乾坤大挪移', color: '#6fd8ff', desc: '全场敌人卷走，打乱通道吐回最右边', fire(m, X) {
+    for (const e of liveFoes()) {
+      if (e.king) continue;
+      const rows = [];
+      for (let r2 = 0; r2 < ROWS; r2++) if (rowPassable(ENEMIES[e.type], r2)) rows.push(r2);
+      spawnParts(e.x, rowCy(e), '#6fd8ff', 10, 120, 0.5, 'spark');
+      if (rows.length) e.row = rows[Math.floor(Math.random() * rows.length)];
+      e.x = FIELD_X - rand(0, 70);
+      e.stunT = Math.max(e.stunT || 0, 1);
+      e.pulled = 0.5;
+    }
+    _fxSeen.vortex++;
+  } },
+  quicksand: { name: '流沙吞噬', color: '#d8b378', desc: '整片战场变成流沙，地面的敌人一起往下沉', fire(m, X) {
+    for (const e of liveFoes()) {
+      if (e.fly) continue;
+      const w = e.king ? 0.15 : e.boss ? 0.3 : e.heavy ? 0.55 : 1;
+      e.sink = Math.min(100, (e.sink || 0) + 75 * w * Math.min(X.P, 1.6));
+      e.sinkT = 4;
+      e.slowT = Math.max(e.slowT || 0, 6);
+      if (e.sink >= 100) { addFloat(e.x, rowCy(e) - 40, '被吞没！', '#d8b378'); ultHurt(e, e.hp + e.shield + 1); }
+      spawnParts(e.x, cellCy(e.row) + 14, '#d8b378', 8, 90, 0.7, 'smoke');
+    }
+  } },
+  jammer: { name: '全频干扰', color: '#9fb4ff', desc: '全场技能锁十四秒，Boss 停止召唤，子弹全清', fire(m, X) {
+    for (const e of liveFoes()) {
+      e.silenceT = Math.max(e.silenceT || 0, 14);
+      e.cloakT = 0;
+      if (e.king) { e.summonT = (e.summonT || 0) + 8; e.skillT = (e.skillT || 0) + 6; }
+    }
+    ebullets.length = 0;
+    for (let k = 0; k < 2; k++) shocks.push({ x: X.cx, y: X.cy, t: 0.7 + k * 0.3, max: 0.7 + k * 0.3, reach: W * 0.7, color: '#9fb4ff' });
+  } },
+  forgeammo: { name: '军火库全开', color: '#ffc531', desc: '每一台会开火的机器塞满十五发熔铸弹', fire(m, X) {
+    ultAllMachines((o, r, c) => {
+      if (!o.modules.some(x => AMMO_KINDS.indexOf(x.kind) >= 0)) return;
+      o.ammo = (o.ammo || 0) + 15; o.ammoMul = Math.max(o.ammoMul || 0, 2.2); o.ammoAt = time;
+      spawnParts(cellCx(c), cellCy(r) - 20, '#ffc531', 8, 90, 0.5, 'spark');
+    });
+  } },
+  rewind: { name: '时光倒流', color: '#bfe9ff', desc: '机器回到满血，敌人退回两格半', fire(m, X) {
+    ultAllMachines(o => { o.hp = o.maxHp; o.stunT = 0; });
+    for (const e of liveFoes()) {
+      const from = e.x;
+      ultPushBack(e, 2.5);
+      e.slowT = Math.max(e.slowT || 0, 4);
+      if (e.x > from + 4) zaps.push({ pts: [{ x: from, y: rowCy(e) }, { x: e.x, y: rowCy(e) }], t: 0.4, max: 0.4, color: '#bfe9ff', bt: 2 });
+    }
+    _fxSeen.rewind++;
+  } },
+  blackhole: { name: '黑洞吞噬', color: '#c98aff', desc: '在敌人最扎堆的地方开一个黑洞，按百分比撕', fire(m, X) {
+    const list = liveFoes();
+    if (!list.length) return;
+    let best = list[0], bn = -1;
+    for (const a of list) {
+      const n = list.filter(b => Math.hypot(a.x - b.x, rowCy(a) - rowCy(b)) < CELL_W * 2.2).length;
+      if (n > bn) { bn = n; best = a; }
+    }
+    const hx = best.x, hy = rowCy(best);
+    for (const e of list) {
+      if (Math.hypot(e.x - hx, rowCy(e) - hy) > CELL_W * 2.8) continue;
+      if (!e.king) e.x += (hx - e.x) * 0.7;
+      e.stunT = Math.max(e.stunT || 0, e.king ? 1 : 3);
+      ultHurt(e, e.hp * 0.45 * ultBossMul(e) + 500 * X.P);
+    }
+    shocks.push({ x: hx, y: hy, t: 1.1, max: 1.1, reach: CELL_W * 2.8, color: '#c98aff', suck: true });
+    ultFx.push({ kind: 'hole', x: hx, y: hy, t: 1.6, max: 1.6 });
+  } },
+  sub: { name: '深海抽能', color: '#4cc2ff', desc: '从全场每个敌人身上抽血，抽到的全变成电', fire(m, X) {
+    let got = 0;
+    for (const e of liveFoes()) {
+      const before = e.hp;
+      ultHurt(e, 320 * X.P);
+      got += Math.max(0, before - Math.max(e.hp, 0));
+      suckLines.push({ x0: e.x, y0: rowCy(e), x1: X.cx, y1: X.cy, t: 0.6, max: 0.6 });
+    }
+    const gain = Math.min(800, Math.round(got * 0.5));
+    if (!creative()) energy += gain;
     energyFlash = 1;
-    addFloat(cx, cy - 70, '+' + gain + '⚡', '#ffc531');
-  } else {
-    // 穿甲弹幕 / 过载爆发：本行一轮倾泻，顺带把相邻两行也扫一遍
-    for (let d = -1; d <= 1; d++) {
-      const r = m.row + d;
-      if (r < 0 || r >= ROWS) continue;
-      const mul = d === 0 ? 1 : 0.5;
-      tracers.push({ x0: cx, y0: cy - 14, x1: W, y1: cellCy(r) - 14, t: 0.35, max: 0.35 });
-      for (const e of liveFoes()) {
-        if (e.row !== r || e.x < cx - CELL_W) continue;
-        damageEnemy(e, 1100 * P * mul, 'true');
-        spawnParts(e.x, rowCy(e), '#ffd764', 9, 140, 0.5, 'spark');
+    addFloat(X.cx, X.cy - 70, '+' + gain + '⚡', '#ffc531');
+  } },
+  bubble: { name: '泡泡升天', color: '#9fe8ff', desc: '全场敌人裹进泡泡飘走六秒，什么都干不了', fire(m, X) {
+    for (const e of liveFoes()) {
+      if (e.king) continue;
+      e.bubbleT = Math.max(e.bubbleT || 0, e.boss ? 3 : 6);
+      e.bubbleDmg = 260 * X.P;
+      if (e.baseFly === undefined) e.baseFly = !!e.fly;
+      e.fly = true;
+      spawnParts(e.x, rowCy(e), '#9fe8ff', 8, 90, 0.5, 'spark');
+    }
+  } },
+  salvage: { name: '全场回收', color: '#ffc531', desc: '残血的全部当场拆掉换电，其余的也挨一刀', fire(m, X) {
+    let n = 0;
+    for (const e of liveFoes()) {
+      if (!e.king && e.hp / e.maxHp < 0.4) { ultHurt(e, e.hp + e.shield + 1); n++; spawnParts(e.x, rowCy(e), '#ffc531', 10, 120, 0.5, 'gear'); }
+      else ultHurt(e, 260 * X.P);
+    }
+    const gain = 40 + n * 35;
+    if (!creative()) energy += gain;
+    _fxSeen.salvage++;
+    addFloat(X.cx, X.cy - 70, '回收 ' + n + ' 台 +' + gain + '⚡', '#ffc531');
+  } },
+  curse: { name: '万咒连爆', color: '#c98aff', desc: '全场打上诅咒，死一个炸一片', fire(m, X) {
+    for (const e of liveFoes()) { e.cursed = Math.max(e.cursed || 0, 0.6); spawnParts(e.x, rowCy(e) - 20, '#c98aff', 6, 70, 0.6, 'spark'); }
+    for (const e of liveFoes()) ultHurt(e, 320 * X.P);
+  } },
+  voidlink: { name: '万物相连', color: '#c98aff', desc: '全场敌人拴成一串十二秒，打一个等于打全部', fire(m, X) {
+    const list = liveFoes();
+    const gid = ++linkSeq;
+    for (const e of list) { e.linkG = gid; e.linkT = 12; e.linkPct = 0.6; }
+    if (list.length) ultHurt(list.sort((a, b) => a.x - b.x)[0], 1000 * X.P);
+  } },
+  worm: { name: '沙虫狂潮', color: '#d8b378', desc: '每一行钻出三条巨型沙虫，从头啃到尾', fire(m, X) {
+    for (let r = 0; r < ROWS; r++) for (let k = 0; k < 3; k++) {
+      worms.push({ row: r, x: GRID_X + 20 - k * 30, dmg: 280 * X.P, left: COLS * CELL_W, seg: 9, hit: new Set(), t: 0 });
+    }
+  } },
+  summon: { name: '巨兽降临', color: '#58d68b', desc: '每一条通道都放出一头我方机械巨象', fire(m, X) {
+    for (let r = 0; r < ROWS; r++) {
+      if (!rowPassable(ENEMIES.mechtitan, r)) continue;
+      spawnEnemy('mechtitan', r, null);
+      const ne = enemies[enemies.length - 1];
+      ne.charmed = true; ne.charmT = 20; ne.x = GRID_X + 40;
+      ne.hp = ne.maxHp = Math.round(ne.maxHp * X.P); ne.dmg = Math.round(ne.dmg * X.P);
+      spawnParts(ne.x, rowCy(ne), '#58d68b', 16, 140, 0.6, 'spark');
+    }
+  } },
+  hack: { name: '全面策反', color: '#58d68b', desc: '一口气改写五台最硬的敌人替你打', fire(m, X) {
+    const list = liveFoes().filter(e => !e.king && !e.boss).sort((a, b) => b.maxHp - a.maxHp).slice(0, 5);
+    for (const e of list) {
+      e.charmed = true; e.charmT = 15; e.hp = e.maxHp; e.affix = null; e.scoreVal = 0;
+      zaps.push({ pts: [{ x: X.cx, y: X.cy - 26 }, { x: e.x, y: rowCy(e) }], t: 0.5, max: 0.5, color: '#58d68b', bt: 3 });
+    }
+    if (!list.length) addFloat(X.cx, X.cy - 70, '没有能改写的', '#9fb4c8');
+  } },
+  // ---- 元素机：每一种也有自己的大招 ----
+  obsidian: { name: '黑曜碎裂', color: '#7d6aa8', desc: '全场敌人的装甲一次碎满，之后吃伤害多一大截', fire(m, X) {
+    for (const e of liveFoes()) { addShatter(e, SHATTER_MAX); ultHurt(e, 380 * X.P); }
+    ultRain('#7d6aa8', 40);
+  } },
+  plasma: { name: '等离子新星', color: '#ff8ae0', desc: '以自己为圆心炸开一圈等离子', fire(m, X) {
+    const rad = CELL_W * 3.4;
+    for (const e of liveFoes()) {
+      if (Math.hypot(e.x - X.cx, rowCy(e) - X.cy) > rad) continue;
+      ultHurt(e, 1700 * X.P); ultBurn(e, 80 * X.P, 4);
+    }
+    for (let k = 0; k < 3; k++) shocks.push({ x: X.cx, y: X.cy, t: 0.5 + k * 0.15, max: 0.5 + k * 0.15, reach: rad * (0.6 + k * 0.2), color: '#ff8ae0' });
+  } },
+  stormfrost: { name: '冰雷风暴', color: '#9fdcff', desc: '冰雹夹着雷，全场冻住再劈', fire(m, X) {
+    for (const e of liveFoes()) {
+      ultFreeze(e, 1.6); ultHurt(e, 440 * X.P);
+      zaps.push({ pts: [{ x: e.x, y: GRID_Y - 10 }, { x: e.x, y: rowCy(e) }], t: 0.3, max: 0.3, color: '#9fdcff', bt: 4 });
+    }
+    ultRain('#bfe9ff', 40);
+  } },
+  corrosion: { name: '强酸蚀甲', color: '#b8e05a', desc: '全场护盾清零、装甲腐蚀、持续掉血', fire(m, X) {
+    for (const e of liveFoes()) { e.shield = 0; addShatter(e, 4); ultPoison(e, 60 * X.P, 8); }
+    ultRain('#b8e05a', 40);
+  } },
+  voidglass: { name: '虚空镜狱', color: '#c98aff', desc: '全场定身、装甲碎满，敌人的子弹反弹六秒', fire(m, X) {
+    reflectT = Math.max(reflectT, 6);
+    for (const e of liveFoes()) { e.stunT = Math.max(e.stunT || 0, e.king ? 1 : 2.5); addShatter(e, SHATTER_MAX); }
+    shocks.push({ x: X.cx, y: X.cy, t: 0.8, max: 0.8, reach: W * 0.6, color: '#c98aff', suck: true });
+  } },
+  rimeglass: { name: '霜晶棱镜', color: '#bfe9ff', desc: '每一行一道冰晶光柱，打中就冻住', fire(m, X) {
+    for (let r = 0; r < ROWS; r++) beams.push({ row: r, x0: X.cx, t: 0.6, max: 0.6, bt: 6, kind: 'singular', color: '#bfe9ff' });
+    for (const e of liveFoes()) if (e.x > X.cx - CELL_W) { ultHurt(e, 620 * X.P); ultFreeze(e, 2); }
+  } },
+  acidglass: { name: '酸晶雨', color: '#b8e05a', desc: '十六颗酸晶砸进敌群', fire(m, X) {
+    const list = liveFoes();
+    for (let i = 0; i < 16 && list.length; i++) {
+      const e = list[i % list.length];
+      ultBlast(e.x + rand(-20, 20), rowCy(e), 0.15 + i * 0.07, 380 * X.P, CELL_W * 0.7, '#b8e05a', { poison: 50 * X.P, row: e.row });
+    }
+  } },
+  ionstorm: { name: '离子风暴', color: '#d9b8ff', desc: '三轮离子雷，一轮比一轮密', fire(m, X) {
+    for (let k = 0; k < 3; k++) for (const e of liveFoes()) {
+      ultBlast(e.x, rowCy(e), 0.1 + k * 0.45, 0, 0, '#d9b8ff', { target: e, tdmg: 320 * X.P, zap: true, stun: 0.6 });
+    }
+  } },
+  venomplasma: { name: '毒焰新星', color: '#e07bff', desc: '全场又烧又毒', fire(m, X) {
+    for (const e of liveFoes()) { ultBurn(e, 110 * X.P, 7); ultPoison(e, 70 * X.P, 9); }
+    shocks.push({ x: X.cx, y: X.cy, t: 0.8, max: 0.8, reach: W * 0.65, color: '#e07bff' });
+  } },
+  cryotoxin: { name: '冰毒寒潮', color: '#8fe3d0', desc: '全场冻住三秒，解冻之后毒还在', fire(m, X) {
+    for (const e of liveFoes()) { ultFreeze(e, 3); ultPoison(e, 75 * X.P, 10); }
+    ultRain('#8fe3d0', 50);
+  } },
+};
+
+function fireUltimate(m) {
+  const k = ultKindOf(m), U = ULTS[k];
+  const lv = m.modules ? totalLv(m.modules) : 1;
+  const X = { cx: cellCx(m.col), cy: cellCy(m.row), P: 1 + (lv - 1) * 0.22, lv, r: m.row, c: m.col };
+  addFloat(X.cx, X.cy - 46, '★ ' + U.name, U.color);
+  spawnParts(X.cx, X.cy, U.color, 26, 220, 0.8, 'spark');
+  shake(0.5, 10);
+  sfx('ult');
+  m.flash = 0.6; m.recoil = 0.35; m.ultGlow = 1.2;
+  ultFlash = { color: U.color, t: 0.45 };
+  banner('★ ' + U.name, U.desc);
+  bannerT = 1.3;
+  U.fire(m, X);
+}
+
+// 延时爆点 / 横扫 / 光柱这些大招画面的推进
+function updateUltFx(dt) {
+  if (reflectT > 0) reflectT -= dt;
+  if (ultFlash && (ultFlash.t -= dt) <= 0) ultFlash = null;
+  for (let i = ultFx.length - 1; i >= 0; i--) {
+    const f = ultFx[i];
+    if (f.kind === 'blast' && !f.done) {
+      f.delay -= dt;
+      if (f.delay > 0) continue;
+      f.done = true;
+      if (f.target) {
+        const e = f.target;
+        if (!e.dead) {
+          if (f.zap) zaps.push({ pts: [{ x: e.x + rand(-14, 14), y: GRID_Y - 20 }, { x: e.x, y: rowCy(e) }], t: 0.25, max: 0.25, color: f.color, bt: 4 });
+          ultHurt(e, f.tdmg);
+          if (f.stun) e.stunT = Math.max(e.stunT || 0, e.king ? f.stun * 0.4 : f.stun);
+          spawnParts(e.x, rowCy(e), f.color, 6, 110, 0.4, 'spark');
+        }
+      } else {
+        for (const e of liveFoes()) {
+          if (Math.hypot(e.x - f.x, rowCy(e) - f.y) > f.rad) continue;
+          ultHurt(e, f.dmg);
+          if (f.poison) ultPoison(e, f.poison, 6);
+        }
+        shocks.push({ x: f.x, y: f.y, t: 0.35, max: 0.35, reach: f.rad, color: f.color });
+        spawnParts(f.x, f.y, f.color, 14, 170, 0.6, 'spark');
+        spawnParts(f.x, f.y, '#5b6470', 6, 80, 0.8, 'smoke');
+        sfx('boom');
+      }
+      f.t = f.max;
+      continue;
+    }
+    f.t += f.kind === 'sweep' ? dt : -dt;
+    if (f.kind === 'sweep' ? f.t >= f.max : f.t <= 0) ultFx.splice(i, 1);
+  }
+}
+
+function drawUltFx() {
+  for (const f of ultFx) {
+    if (f.kind === 'blast') continue;
+    g.save();
+    if (f.kind === 'pillar') {
+      const a = f.t / f.max;
+      g.globalAlpha = a;
+      g.fillStyle = hexA(f.color, 0.35);
+      g.fillRect(f.x - 16, 0, 32, f.y);
+      g.fillStyle = 'rgba(255,255,255,0.85)';
+      g.fillRect(f.x - 4, 0, 8, f.y);
+      g.beginPath(); g.ellipse(f.x, f.y, 30 * a + 10, 9, 0, 0, TAU); g.fill();
+    } else if (f.kind === 'spike') {
+      const k = Math.min(1, (1 - f.t / f.max) * 4);
+      g.globalAlpha = Math.min(1, f.t / f.max * 2);
+      g.fillStyle = '#c8d4e0';
+      for (let i = -2; i <= 2; i++) {
+        const h = (22 + (i % 2 ? 8 : 0)) * k;
+        g.beginPath(); g.moveTo(f.x + i * 9 - 4, f.y); g.lineTo(f.x + i * 9, f.y - h); g.lineTo(f.x + i * 9 + 4, f.y); g.closePath(); g.fill();
+      }
+    } else if (f.kind === 'hole') {
+      const a = Math.min(1, f.t / 0.4);
+      g.globalAlpha = a;
+      const rg = g.createRadialGradient(f.x, f.y, 2, f.x, f.y, 70);
+      rg.addColorStop(0, '#000000'); rg.addColorStop(0.45, 'rgba(40,10,70,0.9)'); rg.addColorStop(1, 'rgba(201,138,255,0)');
+      g.fillStyle = rg;
+      g.beginPath(); g.arc(f.x, f.y, 70, 0, TAU); g.fill();
+      g.strokeStyle = 'rgba(201,138,255,0.7)'; g.lineWidth = 2;
+      for (let k = 0; k < 3; k++) { g.beginPath(); g.ellipse(f.x, f.y, 46 - k * 10, 14 - k * 3, time * (2 + k), 0, TAU); g.stroke(); }
+    } else if (f.kind === 'sweep') {
+      const x = f.x + f.t * 900, y = cellCy(f.row) - 4;
+      if (x > W + 60) { g.restore(); continue; }
+      g.fillStyle = hexA(f.color, 0.18);
+      g.fillRect(f.x, cellCy(f.row) - CELL_H / 2 + 6, x - f.x, CELL_H - 12);
+      g.translate(x, y);
+      if (f.shape === 'saw') {
+        g.rotate(time * 18);
+        g.fillStyle = '#c8d4e0';
+        g.beginPath();
+        for (let k = 0; k < 16; k++) { const a = k / 16 * TAU, r2 = k % 2 ? 30 : 22; g.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); }
+        g.closePath(); g.fill();
+        g.fillStyle = '#4c5f74'; g.beginPath(); g.arc(0, 0, 8, 0, TAU); g.fill();
+      } else if (f.shape === 'fire') {
+        for (let k = 0; k < 5; k++) {
+          g.fillStyle = k % 2 ? 'rgba(255,157,46,0.7)' : 'rgba(255,230,140,0.8)';
+          g.beginPath(); g.ellipse(-k * 14, Math.sin(time * 20 + k) * 6, 18 - k * 2, 26 - k * 3, 0, 0, TAU); g.fill();
+        }
+      } else if (f.shape === 'fist') {
+        g.fillStyle = '#ffb36b';
+        rr(g, -14, -12, 28, 24, 8); g.fill();
+        g.fillStyle = '#7a4a1a'; for (let k = 0; k < 3; k++) { rr(g, 4, -9 + k * 7, 8, 5, 2); g.fill(); }
+      } else if (f.shape === 'net') {
+        g.strokeStyle = 'rgba(159,224,176,0.9)'; g.lineWidth = 2;
+        for (let k = -3; k <= 3; k++) { g.beginPath(); g.moveTo(k * 8, -30); g.lineTo(k * 8, 30); g.stroke(); g.beginPath(); g.moveTo(-26, k * 8); g.lineTo(26, k * 8); g.stroke(); }
+      } else if (f.shape === 'wall') {
+        g.fillStyle = 'rgba(143,240,224,0.5)'; rr(g, -6, -CELL_H / 2 + 8, 12, CELL_H - 16, 5); g.fill();
       }
     }
-    for (let i = 0; i < 16; i++) {
-      bullets.push({ kind: 'shot', row: m.row, x: cx + 20 + i * 10, dmg: 1, speed: 900,
-        dy: (i % 3 - 1) * 6, bt: 5, pierce: 9, hit: new Set(), spin: 0 });
-    }
+    g.restore();
+  }
+  if (ultFlash) {
+    g.save();
+    g.globalAlpha = clamp(ultFlash.t / 0.45, 0, 1) * 0.22;
+    g.fillStyle = ultFlash.color;
+    g.fillRect(0, 0, W, H);
+    g.restore();
   }
 }
 
@@ -17540,7 +18066,16 @@ window.__game = {
   get ults() { return ults; },
   addUlt: n => { ults = Math.min(ULT_CAP, ults + n); renderTray(); },
   ultNameAt: (r, c) => (grid[r][c] ? ultName(grid[r][c]) : null),
-  castUlt: (r, c) => { const m = grid[r][c]; if (!m || ults <= 0) return false; ults--; fireUltimate(m); renderTray(); return true; },
+  castUlt: (r, c) => { const m = grid[r][c]; if (!m || !ultReady()) return false; spendUlt(); fireUltimate(m); renderTray(); return true; },
+  placeKind: (kind, r, c) => { const mods = [{ kind, lv: 1 }]; return place(typeOfModules(mods), r, c, mods); },
+  enemyStun: i => (enemies[i] ? +(enemies[i].stunT || 0).toFixed(2) : null),
+  ultKindAt: (r, c) => (grid[r][c] ? ultKindOf(grid[r][c]) : null),
+  ultKinds: () => Object.keys(ULTS),
+  ultNames: () => Object.keys(ULTS).map(k => ULTS[k].name),
+  allKinds: () => Object.keys(MOD_STAT),
+  invAt: (r, c) => (grid[r][c] ? +(grid[r][c].invT || 0).toFixed(2) : -1),
+  overAt: (r, c) => (grid[r][c] ? +(grid[r][c].overT || 0).toFixed(2) : -1),
+  get reflectT() { return reflectT; },
   sbatCount: () => orbs.filter(o => o.sbat).length,
   setLv: (r, c, lv) => {
     const m = grid[r][c];
