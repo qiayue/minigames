@@ -117,7 +117,7 @@ const GROUND_ONLY = ['mine', 'spikes'];
    平台不占机器位——它是格子的属性，机器拆了平台还在，跟睡莲叶一样。 */
 const WATER_NATIVE = ['lilypad', 'sub', 'bubble', 'torpedo', 'vortex'];
 // 军械熔炉能给哪些「会开火」的模块塞熔铸弹（纯辅助机体塞了也没用）
-const AMMO_KINDS = ['shot', 'aa', 'laser', 'mortar', 'sniper', 'zap', 'prism', 'hunter'];
+const AMMO_KINDS = ['shot', 'tri', 'aa', 'laser', 'mortar', 'sniper', 'zap', 'prism', 'hunter'];
 let linkSeq = 0;          // 虚空链接的组号
 const _fxSeen = { vortex: 0, rewind: 0, salvage: 0 };   // 只给自动化测试看的计数
 let suckLines = [];       // 抽能潜艇的管线特效
@@ -125,6 +125,7 @@ let worms = [];           // 沙虫巢放出去的小沙虫
 let ultFx = [];           // 大招的专属画面：横扫、光柱、延时爆点
 let ultFlash = null;      // 放大招那一下全屏泛一层颜色
 let reflectT = 0;         // 反射屏障：这几秒里敌人的子弹全部反弹回去
+let virusT = 0;           // 病毒投放：这几秒里咬任何一台机器都会被改写
 /* 飞船图（天空之城）：场地左边不是基地而是一艘飞船。
    漏过去的敌人不会「冲进基地」直接判负，而是贴着船舷烧船；
    船体血量见底才算输，所以漏一两只还有救。 */
@@ -394,7 +395,8 @@ const MACHINES = {
   salvage:   { name: '拆解回收站', rarity: 'rare',   hp: 400,  desc: '范围内每死一个敌人就地拆成废料，按它的身价返还能量——杀得越多越有钱' },
   sandworm:  { name: '沙虫巢',     rarity: 'epic',   hp: 520,  desc: '往前放小沙虫：在沙底下拱着走，一路啃穿挡在前面的敌人——巢越大，放出来的虫越多越长' },
   beacon:    { name: '召唤信标',   rarity: 'epic',   hp: 380,  desc: '放出我方的机械巨兽：猎犬冲在前面，巨象压阵——它们会一路平推出去' },
-  hacker:    { name: '程序改写器', rarity: 'epic',   hp: 340,  desc: '改写敌人的程序：被改写的那台会掉头，替你打剩下的敌人' },
+  threepeater: { name: '三线射手', rarity: 'rare', hp: 300, desc: '一次朝本行和上下两行各打一发穿透弹，每一发打穿整排——三排一起扫' },
+  hacker:    { name: '程序改写器', rarity: 'epic',   hp: 340,  desc: '自己不出手，等着被吃：哪个敌人一口咬下去，就被改写成我方、掉头去打自己人（改写器被吃掉；Boss 改不动）' },
   curse:     { name: '诅咒石碑',   rarity: 'epic',   hp: 360,  desc: '给敌人挂上法老的诅咒：带着诅咒死的会炸开（按它最大生命算），并把诅咒传染给炸到的人' },
   voidlink:  { name: '虚空链接',   rarity: 'epic',   hp: 320,  desc: '把几个敌人链在一起：打其中任意一个，其余被链住的同步掉血' },
   // ---- 合成机型（只能通过合成获得，不进盲盒池） ----
@@ -426,7 +428,7 @@ const MACHINES = {
 // 普通模式：卡槽顺序、价格与冷却（秒）
 const CLASSIC_ORDER = [
   'generator', 'turret', 'barricade', 'spikes', 'puncher', 'mine', 'fan', 'shredder',
-  'flame', 'poison', 'mortar', 'magnet', 'shield', 'booster', 'saw',
+  'threepeater', 'flame', 'poison', 'mortar', 'magnet', 'shield', 'booster', 'saw',
   'aa', 'net', 'hunter', 'deflect', 'sonic',
   'tesla', 'railgun', 'prism', 'sniper', 'emp', 'gravity', 'drone', 'repair', 'rocket',
   // 地图专属卡排在最后，只有对应地图（和创造模式）才会出现在卡槽里
@@ -462,7 +464,7 @@ const MAP_CARDS = {
      3. MAP_CARDS —— 这张图的专属机型（见上）。
    创造模式不受限，单局的盲盒/普通模式也照旧给全套。 */
 const CORE_CARDS = ['generator', 'turret', 'barricade', 'spikes', 'puncher',
-                    'mine', 'fan', 'shredder', 'aa', 'repair'];
+                    'mine', 'fan', 'shredder', 'aa', 'repair', 'threepeater'];
 // 废铁厂是老家：传统机器一台不少（fullKit），只是别的图的专属卡进不来。
 // 其余地图才按 MAP_KIT 分配常规机器。
 const FULL_KIT_MAP = 'scrapyard';
@@ -540,7 +542,7 @@ function pickPool() {
 }
 const CLASSIC_COST = {
   generator: 50, turret: 100, barricade: 50, spikes: 75, puncher: 100, mine: 100, fan: 150,
-  shredder: 150, flame: 175, poison: 175, mortar: 200, magnet: 175,
+  shredder: 150, threepeater: 300, flame: 175, poison: 175, mortar: 200, magnet: 175,
   shield: 175, booster: 200, saw: 200,
   aa: 150, net: 160, hunter: 225, deflect: 175, sonic: 175,
   tesla: 250, railgun: 250, prism: 275, sniper: 275, emp: 250,
@@ -556,7 +558,7 @@ const CLASSIC_COST = {
 };
 const CLASSIC_CD = {
   generator: 5, turret: 5, barricade: 15, spikes: 8, puncher: 5, mine: 8, fan: 8,
-  shredder: 12, flame: 10, poison: 10, mortar: 12, magnet: 12,
+  shredder: 12, threepeater: 9, flame: 10, poison: 10, mortar: 12, magnet: 12,
   shield: 14, booster: 14, saw: 12,
   aa: 10, net: 11, hunter: 15, deflect: 14, sonic: 12,
   tesla: 15, railgun: 15, prism: 16, sniper: 18, emp: 16,
@@ -577,7 +579,7 @@ const CLASSIC_CD = {
  * 能力数量与等级都没有上限——理论上可以无限叠加。
  */
 const KIND_ORDER = [
-  'shot', 'laser', 'prism', 'sniper', 'zap', 'rocket', 'mortar', 'sonic', 'aa',
+  'shot', 'tri', 'laser', 'prism', 'sniper', 'zap', 'rocket', 'mortar', 'sonic', 'aa',
   'hunter', 'saw', 'shred', 'mine', 'net', 'flame', 'poison', 'emp', 'gravity', 'magnet',
   'melee', 'frost', 'drone', 'spikes', 'armor', 'deflect',
   'vortex', 'jammer', 'blackhole', 'forgeammo', 'rewind', 'quicksand', 'sub', 'bubble',
@@ -671,6 +673,7 @@ const LADDER_NAME = {
   worm:      ['沙虫巢', '沙虫巢', '沙虫巢'],
   summon:    ['召唤信标', '召唤信标', '召唤信标'],
   hack:      ['程序改写器', '程序改写器', '程序改写器'],
+  tri:       ['三线射手', '三线射手', '三线射手'],
   // ---- 元素融合产物：只能由两种元素杂交得到，买不到 ----
   obsidian:   ['黑曜石炮', '曜岩重炮', '玄曜裂地炮'],
   plasma:     ['等离子喷枪', '等离子炬', '恒星喷流炉'],
@@ -729,6 +732,7 @@ const LADDER_TYPE = {
   worm:      ['sandworm', 'sandworm2', 'sandworm3'],
   summon:    ['beacon', 'beacon2', 'beacon3'],
   hack:      ['hacker', 'hacker2', 'hacker3'],
+  tri:       ['threepeater', 'threepeater2', 'threepeater3'],
   obsidian:   ['obsidian', 'obsidian2', 'obsidian3'],
   plasma:     ['plasma', 'plasma2', 'plasma3'],
   stormfrost: ['stormfrost', 'stormfrost2', 'stormfrost3'],
@@ -750,7 +754,7 @@ const KIND_ADJ = {
   net: '捕网', hunter: '猎空',
   vortex: '换位', quicksand: '流沙', jammer: '干扰', forgeammo: '熔铸', rewind: '回溯', blackhole: '黑洞',
   sub: '抽能', bubble: '气泡', salvage: '回收', curse: '诅咒', voidlink: '链接',
-  worm: '沙虫', summon: '召唤', hack: '改写',
+  worm: '沙虫', summon: '召唤', hack: '改写', tri: '三线',
   obsidian: '黑曜石', plasma: '等离子', stormfrost: '霜雷', corrosion: '腐蚀',
   voidglass: '曜离', rimeglass: '零曜', acidglass: '蚀曜',
   ionstorm: '离暴', venomplasma: '疫离', cryotoxin: '寒疫',
@@ -780,7 +784,8 @@ const KIND_DESC = {
   voidlink: '把几个敌人链在一起，伤害同步分摊',
   worm: '往前放小沙虫，在沙底下拱着一路啃过去',
   summon: '放出我方机械巨兽，一路平推出去',
-  hack: '改写敌人程序，让它掉头替你打',
+  hack: '等着被咬：咬它的敌人被改写成我方，掉头去打自己人',
+  tri: '同时朝三行各打一发穿透弹，每发打穿整排',
   obsidian: '黑曜石弹贯穿整行，命中叠「碎裂」——每层让目标多吃 12% 伤害',
   plasma: '等离子喷流灼烧走廊内所有敌人，并不断麻痹它们',
   stormfrost: '闪电链同时冻结；对已被冻结或减速的目标伤害翻倍',
@@ -802,7 +807,7 @@ const KIND_HP = {
   net: 120, hunter: -40,
   vortex: 20, quicksand: 180, jammer: 0, forgeammo: 120, rewind: 40, blackhole: 0,
   sub: 120, bubble: -40, salvage: 100, curse: 60, voidlink: 20,
-  worm: 200, summon: 60, hack: 0,
+  worm: 200, summon: 60, hack: 0, tri: 0,
   obsidian: 260, plasma: 60, stormfrost: 90, corrosion: 40,
   voidglass: 200, rimeglass: 220, acidglass: 180, ionstorm: 120, venomplasma: 100, cryotoxin: 140,
 };
@@ -964,7 +969,7 @@ function descOfModules(mods) {
   }).join('，');
 }
 // 会索敌的模块（用来算这台机器的射程）。狙击/激光/火箭没有 range 属性＝覆盖整行。
-const RANGED_KINDS = ['shot', 'frost', 'poison', 'zap', 'aa', 'prism', 'mortar',
+const RANGED_KINDS = ['shot', 'tri', 'frost', 'poison', 'zap', 'aa', 'prism', 'mortar',
                       'flame', 'sonic', 'sniper', 'laser', 'rocket'];
 // 返回这台机器的最远索敌距离（格）；Infinity 表示整行
 function machineReach(m) {
@@ -1178,7 +1183,7 @@ function rollAffix(type) {
 
 const BOX_POOL = {
   common: [['turret', 16], ['generator', 16], ['barricade', 8], ['puncher', 9], ['mine', 8], ['spikes', 8]],
-  rare:   [['shredder', 6], ['fan', 6], ['magnet', 5], ['flame', 6], ['poison', 5], ['mortar', 5], ['shield', 5], ['booster', 5], ['saw', 5], ['aa', 6], ['deflect', 5], ['sonic', 5]],
+  rare:   [['shredder', 6], ['threepeater', 5], ['fan', 6], ['magnet', 5], ['flame', 6], ['poison', 5], ['mortar', 5], ['shield', 5], ['booster', 5], ['saw', 5], ['aa', 6], ['deflect', 5], ['sonic', 5]],
   epic:   [['tesla', 4], ['rocket', 3], ['railgun', 3], ['sniper', 3], ['emp', 3], ['repair', 3], ['prism', 3], ['gravity', 3], ['drone', 3]],
 };
 
@@ -1267,7 +1272,7 @@ function initGame() {
   // 每行门口摆一辆小推车：被摸到就冲出去清场，每行只有一次
   carts = Array.from({ length: ROWS }, (_, r) => ({ row: r, x: GRID_X - 30, go: false, used: false }));
   shipMax = mapDef().ship || 0; shipHp = shipMax; shipHit = 0; shipFires = [];
-  ults = 0; ultFx = []; ultFlash = null; reflectT = 0;
+  ults = 0; ultFx = []; ultFlash = null; reflectT = 0; virusT = 0;
   waveState = 'pre'; waveTimer = 15; queue = []; spawnT = 0;
   surgeDone = false; surgeAt = 0; alarmT = 0;
   skyT = 3; lastRows = [];
@@ -2320,7 +2325,8 @@ const MOD_STAT = {
   voidlink:  { cd: [4.5, 3.4, 2.5], range: [4.2, 4.8, 5.4], targets: [2, 3, 4], pct: [0.35, 0.5, 0.7], hold: [5, 6, 7] },
   worm:      { cd: [5.0, 3.8, 2.8], dmg: [130, 185, 260], targets: [1, 2, 3], range: [4.5, 5.5, 6.5] },
   summon:    { cd: [14, 11, 8], life: [16, 20, 26], targets: [1, 1, 2] },
-  hack:      { cd: [12, 9, 6.5], range: [4.0, 4.8, 5.6], hold: [10, 14, 20] },
+  hack:      { cd: [12, 9, 6.5], hold: [10, 14, 20] },   // 不隔空出手，没有射程
+  tri:       { interval: [1.7, 1.4, 1.15], dmg: [40, 58, 84] },   // 没有射程 = 整排
   // ---- 元素融合产物 ----
   obsidian:   { cd: [1.5, 1.15, 0.85], dmg: [110, 150, 205], range: [4.8, 5.4, 6.0], shatter: [1, 1, 2] },
   plasma:     { interval: [0.24, 0.18, 0.13], dmg: [18, 26, 36], range: [2.8, 3.4, 4.0],
@@ -2518,6 +2524,25 @@ function updateMachines(dt) {
             }
             if (bt >= 4) { m.recoil = 0.2; if (shakeT <= 0.02) shake(0.05, 1.2); }
             sfx(bk === 'arc' ? 'zap' : bk === 'ice' ? 'ice' : 'shoot');
+          }
+        } else if (kind === 'tri') {
+          /* 三线射手：本行 + 上下两行，每行一发穿透弹，一发打穿整排。
+             三排里任意一排有敌人就开火（跟豌豆三线射手一个打法）。 */
+          m.mt.tri = (m.mt.tri || 0) + mdt;
+          const rows3 = [r - 1, r, r + 1].filter(q => q >= 0 && q < ROWS);
+          if (m.mt.tri >= st('interval') && rows3.some(q => enemyAhead(q, cx)) && bulletBudget()) {
+            m.mt.tri = 0;
+            m.recoil = 0.16;
+            const am2 = useAmmo(m);
+            const bt = bulletTier(lv);
+            for (const q of rows3) {
+              bullets.push({
+                kind: 'tri', row: q, x: cx + 30, x0: cx + 30, dmg: st('dmg') * am2, speed: 460 + bt * 20,
+                dy: (r - q) * CELL_H, dy0: (r - q) * CELL_H,   // 斜着飞进旁边那一行
+                bt, pierce: 99, hit: new Set(), spin: 0,
+              });
+            }
+            sfx('shoot');
           }
         } else if (kind === 'energy') {
           m.mt.energy = (m.mt.energy || 0) + mdt;
@@ -3325,27 +3350,8 @@ function updateMachines(dt) {
             sfx('horn');
           }
         } else if (kind === 'hack') {
-          // 程序改写器：把一台敌人改写成我方 —— 它会掉头去打剩下的敌人
-          if ((m.mcd.hack || 0) <= 0) {
-            const far = Math.min(cx + modReach(st), FIELD_X);
-            const prey = foesInRow(r).filter(e => !e.dead && !e.king && !e.boss && !e.charmed
-                && e.x > cx && e.x <= far)
-              .sort((a2, b2) => b2.maxHp - a2.maxHp)[0];
-            if (prey) {
-              m.mcd.hack = st('cd');
-              m.flash = 0.4;
-              prey.charmed = true;
-              prey.charmT = st('hold');
-              prey.hp = prey.maxHp;
-              prey.affix = null;
-              prey.scoreVal = 0;
-              zaps.push({ pts: [{ x: cx, y: cellCy(r) - 26 }, { x: prey.x, y: rowCy(prey) }],
-                t: 0.4, max: 0.4, color: '#58d68b', bt: 3 });
-              spawnParts(prey.x, rowCy(prey), '#58d68b', 18, 150, 0.7, 'spark');
-              addFloat(prey.x, rowCy(prey) - 46, '程序已改写', '#58d68b');
-              sfx('fuse');
-            }
-          }
+          // 程序改写器自己不出手：它等着被咬。头顶的天线一直闪，告诉玩家它在待命
+          if ((m.mcd.hack || 0) <= 0 && Math.random() < dt * 1.2) m.pulse = Math.max(m.pulse, 0.25);
         } else if (kind === 'worm') {
           /* 沙虫巢：往前放小沙虫。虫在沙底下拱着走，地面上只看得见一串鼓包，
              啃穿它路上的每一个敌人，走完射程就钻回去。 */
@@ -3935,6 +3941,7 @@ function updateBullets(dt) {
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     b.x += b.speed * dt;
+    if (b.dy0) b.dy = b.dy0 * Math.max(0, 1 - (b.x - b.x0) / 70);
     if (b.kind === 'rocket') {
       for (const e of enemies) {
         if (e.row === b.row && !e.dead && !b.hit.has(e) && Math.abs(b.x - e.x) < e.w / 2 + 16) {
@@ -4357,6 +4364,8 @@ function updateEnemies(dt) {
         e.hitT = e.heavy ? 0.8 : 0.95;
         e.hitCycle = e.hitT;        // 给画面算「压身子」的进度用
         e.atk = 0.17;               // 咬完往回弹的那一下
+        // 程序改写器：不隔空改写，得被敌人一口咬下去才中招（跟魅惑菇一个道理）
+        if (biteRewrite(m, e)) continue;
         damageMachine(m, e.dmg);
         // 寒霜机器人：一口咬下去把机器冻住，短时间打不出东西
         if (e.chill) {
@@ -4653,6 +4662,47 @@ function onEnemyDeath(e) {
 /* 被改写的单位：掉头往右走，碰到敌人就咬。
    它用的是敌人那一整套（血条、受击、造型），只是方向和阵营反过来——
    所以「召唤我方巨兽」也可以直接复用它：生出来就是改写状态。 */
+/* 被咬的那一口：
+   - 纯程序改写器：咬它的敌人被改写成我方，掉头去打自己人；改写器被吃掉
+   - 杂交进别的机器里的改写模块：同样改写，但机器不会被吃掉，模块进冷却
+   - 「病毒投放」大招期间：场上任何一台机器被咬，咬它的都中招
+   Boss 和关底 Boss 的程序改不动——一口咬碎，什么事都没有。 */
+function biteRewrite(m, e) {
+  const own = m.modules && hasKind(m, 'hack');
+  const virus = virusT > 0;
+  if (!own && !virus) return false;
+  const pure = own && m.modules[0].kind === 'hack';
+  if (own && !pure && !virus && (m.mcd.hack || 0) > 0) return false;   // 副模块还在冷却
+  const cx = cellCx(m.col), cy = cellCy(m.row);
+  if (e.king || e.boss) {
+    if (pure) {
+      addFloat(e.x, rowCy(e) - 50, '程序改不动！', '#ff5d5d');
+      spawnParts(cx, cy, '#58d68b', 10, 120, 0.5, 'spark');
+      removeMachine(m.row, m.col);
+      sfx('break');
+      return true;
+    }
+    return false;
+  }
+  const lv = own ? Math.max(1, kindLv(m, 'hack')) : 1;
+  e.charmed = true;
+  e.charmT = modStat('hack', 'hold', lv);
+  e.hp = e.maxHp;
+  e.affix = null;
+  e.scoreVal = 0;
+  e.hitT = 0;
+  zaps.push({ pts: [{ x: cx, y: cy - 20 }, { x: e.x, y: rowCy(e) }], t: 0.4, max: 0.4, color: '#58d68b', bt: 3 });
+  spawnParts(e.x, rowCy(e), '#58d68b', 18, 150, 0.7, 'spark');
+  addFloat(e.x, rowCy(e) - 46, pure ? '吃下了改写程序！' : '程序已改写', '#58d68b');
+  sfx('fuse');
+  _fxSeen.hack = (_fxSeen.hack || 0) + 1;
+  if (pure) {
+    removeMachine(m.row, m.col);         // 改写器被吃掉了
+  } else if (own) {
+    m.mcd.hack = modStat('hack', 'cd', lv);
+  }
+  return true;
+}
 function updateCharmed(e, dt) {
   e.anim += dt * (e.moving ? 1 : (e.fly ? 0.75 : 0.16));
   e.moving = false;
@@ -7645,6 +7695,17 @@ function drawMachine(ctx, type, x, y, s, m) {
     ctx.beginPath(); ctx.arc(0, -4, 44, 0, TAU); ctx.stroke();
     ctx.restore();
   }
+  // 病毒投放期间：每台机器身上爬着一圈绿色的代码环，谁咬谁中招
+  if (m && m.row !== undefined && virusT > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, virusT) * 0.7;
+    ctx.strokeStyle = '#58d68b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 4]);
+    ctx.lineDashOffset = -time * 30;
+    ctx.beginPath(); ctx.ellipse(0, 6, 36, 30, 0, 0, TAU); ctx.stroke();
+    ctx.restore();
+  }
   // 全线超频：机身上窜着橙色的速度线
   if (m && m.overT > 0) {
     ctx.save();
@@ -7838,6 +7899,7 @@ function drawChassisInner(ctx, type, pri, m) {
     case 'worm': return drawSandworm(ctx, m, lv);
     case 'summon': return drawBeacon(ctx, m, lv);
     case 'hack': return drawHacker(ctx, m, lv);
+    case 'tri': return drawThreepeater(ctx, m, lv);
     case 'blackhole': return drawBlackhole(ctx, m, lv);
     case 'obsidian': return drawObsidian(ctx, m, lv);
     case 'plasma': return drawPlasma(ctx, m, lv);
@@ -8859,6 +8921,57 @@ function drawBeacon(ctx, m, lv) {
 }
 
 // 程序改写器：一台架着天线的终端，屏上滚着改写中的代码
+/* 三线射手：一个转鼓炮塔头，三根炮管扇形排开 —— 中间平射，上下两根
+   斜指旁边两行。炮管口亮着绿色的能量环，开火时三根一起往后一坐。 */
+function drawThreepeater(ctx, m, lv) {
+  const P = themed(pal(lv));
+  const L = m && m.modules ? Math.max(1, kindLv(m, 'tri')) : 1;
+  const rec = m && m.recoil > 0 ? m.recoil * 40 : 0;
+  pedestal(ctx, P, 46, lv);
+  panel(ctx, -16, 0, 32, 18, 6, P);
+  // 炮管：上 / 中 / 下
+  for (const [ang, len] of [[-0.42, 34], [0, 38], [0.42, 34]]) {
+    ctx.save();
+    ctx.translate(2, -16);
+    ctx.rotate(ang);
+    const bl = len + Math.min(L - 1, 4) * 3 - rec;
+    ctx.fillStyle = P.dark;
+    rr(ctx, 6, -5.5, bl, 11, 4); ctx.fill();
+    ctx.fillStyle = P.light || '#c8d4e0';
+    rr(ctx, 6, -5.5, bl, 3.4, 2); ctx.fill();
+    // 散热环
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    for (let k = 0; k < 2; k++) rr(ctx, 14 + k * 9, -6, 3, 12, 1.2);
+    ctx.fill();
+    // 炮口能量环
+    emissive(ctx, 'rgba(120,230,120,0.9)', 9, () => {
+      ctx.strokeStyle = '#9ff59f';
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.ellipse(6 + bl, 0, 3, 6.5, 0, 0, TAU); ctx.stroke();
+    });
+    ctx.restore();
+  }
+  // 转鼓炮塔头
+  const hg = ctx.createRadialGradient(-4, -24, 2, 2, -16, 20);
+  hg.addColorStop(0, '#d9e4ee');
+  hg.addColorStop(1, P.base || '#5f7186');
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(2, -16, 16, 0, TAU); ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.arc(2, -16, 16, 0, TAU); ctx.stroke();
+  // 三个指示灯：表示三条线
+  for (let k = 0; k < 3; k++) {
+    const on = Math.sin(time * 4 + k * 2.1) > -0.2;
+    ctx.fillStyle = on ? '#7ff07f' : '#2f5a35';
+    ctx.beginPath(); ctx.arc(-6 + k * 7, -16, 2.6, 0, TAU); ctx.fill();
+  }
+  // 头顶瞄准镜
+  ctx.fillStyle = P.dark;
+  rr(ctx, -6, -36, 14, 7, 3); ctx.fill();
+  ctx.fillStyle = '#8fe8ff';
+  ctx.beginPath(); ctx.arc(6, -32.5, 2.4, 0, TAU); ctx.fill();
+}
+
 function drawHacker(ctx, m, lv) {
   const P = themed(pal(lv));
   const t = time;
@@ -8898,6 +9011,18 @@ function drawHacker(ctx, m, lv) {
   rr(ctx, -16, 2, 32, 8, 2); ctx.fill();
   ctx.fillStyle = '#5c6d80';
   for (let i = 0; i < 6; i++) ctx.fillRect(-14 + i * 5, 4, 3, 4);
+  // 诱饵芯片：挑在一根杆子上伸到前面，晃悠着等敌人来咬
+  const sw = Math.sin(t * 2.2) * 3;
+  ctx.strokeStyle = P.dark; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(16, -4); ctx.quadraticCurveTo(28, -14, 32, -6 + sw); ctx.stroke();
+  emissive(ctx, 'rgba(88,214,139,0.95)', 12, () => {
+    ctx.fillStyle = '#1d3a2a';
+    rr(ctx, 26, -4 + sw, 12, 12, 2.4); ctx.fill();
+    ctx.strokeStyle = '#8ff0c0'; ctx.lineWidth = 1.4;
+    rr(ctx, 26, -4 + sw, 12, 12, 2.4); ctx.stroke();
+    ctx.fillStyle = '#8ff0c0';
+    for (let k = 0; k < 3; k++) { ctx.fillRect(24, -1 + sw + k * 3.4, 2, 1.6); ctx.fillRect(38, -1 + sw + k * 3.4, 2, 1.6); }
+  });
 }
 
 // 拆解回收站：一台带抓斗的压块机，压出来的方块在往外掉钱
@@ -15979,6 +16104,12 @@ const ULTS = {
         dy: (i % 3 - 1) * 6, bt: 5, pierce: 9, hit: new Set(), spin: 0 });
     }
   } },
+  tri: { name: '三线风暴', color: '#7ff07f', desc: '六行同时连射五轮穿透弹，整张图来回扫五遍', fire(m, X) {
+    for (let k = 0; k < 5; k++) for (let r = 0; r < ROWS; r++) {
+      bullets.push({ kind: 'tri', row: r, x: X.cx + 30 - k * 46, x0: X.cx + 30 - k * 46, dmg: 220 * X.P, speed: 620,
+        dy: (X.r - r) * CELL_H, dy0: (X.r - r) * CELL_H, bt: 4, pierce: 99, hit: new Set(), spin: 0 });
+    }
+  } },
   energy: { name: '电网超频', color: '#ffc531', desc: '直接灌一大笔电，地上的电池全部自动收走', fire(m, X) {
     const gain = 450 + X.lv * 60;
     if (!creative()) energy += gain;
@@ -16012,16 +16143,14 @@ const ULTS = {
     for (const e of liveFoes()) { ultFreeze(e, 3.2); ultHurt(e, 420 * X.P); spawnParts(e.x, rowCy(e), '#bfe9ff', 8, 110, 0.6, 'spark'); }
     ultRain('#bfe9ff', 50);
   } },
-  shred: { name: '绞肉旋涡', color: '#ffb36b', desc: '把本行敌人全吸到嘴边，小的直接绞碎', fire(m, X) {
-    const mouth = X.cx + CELL_W * 0.7;
-    for (const e of liveFoes()) {
-      if (e.row !== X.r || e.x < X.cx - 10) continue;
-      if (!e.king) e.x = mouth + rand(0, CELL_W * 0.5);
-      if (!e.boss && e.hp + e.shield < 1500 * X.P) ultHurt(e, e.hp + e.shield + 1);
-      else ultHurt(e, 1100 * X.P * ultBossMul(e));
-      spawnParts(e.x, rowCy(e), '#c8935a', 10, 140, 0.5, 'gear');
+  shred: { name: '碾碎巨兽', color: '#ffb36b', desc: '冲出一头扛着巨型粉碎滚筒的机械兽，整排敌人一路碾碎', fire(m, X) {
+    // Lv4 起三行一起冲：本行和上下两行各放一头
+    const rows = X.lv >= 4 ? [X.r - 1, X.r, X.r + 1] : [X.r];
+    for (const r of rows) {
+      if (r < 0 || r >= ROWS) continue;
+      ultFx.push({ kind: 'beast', row: r, x: X.cx + 10, spd: 420, hit: new Set(), P: X.P, t: 0, max: 99 });
     }
-    shocks.push({ x: mouth, y: X.cy, t: 0.8, max: 0.8, reach: CELL_W * 3, color: '#ffb36b', suck: true });
+    sfx('shred');
   } },
   magnet: { name: '磁暴牵引', color: '#ffca6b', desc: '全场敌人被磁暴扯回最右边，护盾和装甲一起扯掉', fire(m, X) {
     for (const e of liveFoes()) {
@@ -16310,13 +16439,10 @@ const ULTS = {
       spawnParts(ne.x, rowCy(ne), '#58d68b', 16, 140, 0.6, 'spark');
     }
   } },
-  hack: { name: '全面策反', color: '#58d68b', desc: '一口气改写五台最硬的敌人替你打', fire(m, X) {
-    const list = liveFoes().filter(e => !e.king && !e.boss).sort((a, b) => b.maxHp - a.maxHp).slice(0, 5);
-    for (const e of list) {
-      e.charmed = true; e.charmT = 15; e.hp = e.maxHp; e.affix = null; e.scoreVal = 0;
-      zaps.push({ pts: [{ x: X.cx, y: X.cy - 26 }, { x: e.x, y: rowCy(e) }], t: 0.5, max: 0.5, color: '#58d68b', bt: 3 });
-    }
-    if (!list.length) addFloat(X.cx, X.cy - 70, '没有能改写的', '#9fb4c8');
+  hack: { name: '病毒投放', color: '#58d68b', desc: '十二秒内全场每台机器都带着改写程序，谁咬谁中招', fire(m, X) {
+    virusT = 12;
+    ultAllMachines((o, r, c) => spawnParts(cellCx(c), cellCy(r), '#58d68b', 6, 80, 0.6, 'spark'));
+    addFloat(W / 2, GRID_Y + 40, '病毒已投放：咬哪台都会被改写', '#58d68b');
   } },
   // ---- 元素机：每一种也有自己的大招 ----
   obsidian: { name: '黑曜碎裂', color: '#7d6aa8', desc: '全场敌人的装甲一次碎满，之后吃伤害多一大截', fire(m, X) {
@@ -16384,13 +16510,14 @@ function fireUltimate(m) {
   m.flash = 0.6; m.recoil = 0.35; m.ultGlow = 1.2;
   ultFlash = { color: U.color, t: 0.45 };
   banner('★ ' + U.name, U.desc);
-  bannerT = 1.3;
+  bannerT = 0.9;
   U.fire(m, X);
 }
 
 // 延时爆点 / 横扫 / 光柱这些大招画面的推进
 function updateUltFx(dt) {
   if (reflectT > 0) reflectT -= dt;
+  if (virusT > 0) virusT -= dt;
   if (ultFlash && (ultFlash.t -= dt) <= 0) ultFlash = null;
   for (let i = ultFx.length - 1; i >= 0; i--) {
     const f = ultFx[i];
@@ -16420,16 +16547,99 @@ function updateUltFx(dt) {
       f.t = f.max;
       continue;
     }
+    if (f.kind === 'beast') {
+      f.t += dt;
+      f.x += f.spd * dt;
+      for (const e of enemies) {
+        if (e.dead || e.charmed || e.under || e.row !== f.row || f.hit.has(e)) continue;
+        if (Math.abs(e.x - (f.x + 46)) > e.w / 2 + 20) continue;
+        f.hit.add(e);
+        if (e.king) {
+          // 关底 Boss 碾不死：滚筒在它身上啃掉一大截，巨兽自己也撞散了
+          ultHurt(e, e.maxHp * 0.2);
+          addFloat(e.x, rowCy(e) - 70, '滚筒崩了！', '#ffb36b');
+          spawnParts(f.x + 46, rowCy(e), '#8fa1b8', 24, 200, 0.8, 'gear');
+          shake(0.4, 8); sfx('break');
+          f.x = W + 200;
+          break;
+        }
+        ultHurt(e, e.hp + e.shield + 1);   // 除了关底 Boss，挡在这一排的一律碾碎
+        spawnParts(e.x, rowCy(e), '#c8935a', 16, 180, 0.6, 'gear');
+        spawnParts(e.x, rowCy(e), '#ffd764', 8, 140, 0.4, 'spark');
+        if (!e.dead) addFloat(e.x, rowCy(e) - 44, '碾！', '#ffb36b');
+        shake(0.12, 3);
+        sfx('shred');
+      }
+      if (Math.random() < dt * 30) spawnParts(f.x - 30, cellCy(f.row) + 30, '#8a7a66', 1, 60, 0.5, 'smoke');
+      if (f.x > W + 120) ultFx.splice(i, 1);
+      continue;
+    }
     f.t += f.kind === 'sweep' ? dt : -dt;
     if (f.kind === 'sweep' ? f.t >= f.max : f.t <= 0) ultFx.splice(i, 1);
   }
+}
+
+/* 碾碎巨兽：一头钢板拼的机械野猪，四条腿在跑，
+   嘴前顶着一个比它脑袋还大的粉碎滚筒，齿刃一圈圈转，后面拖着烟尘 */
+function drawShredBeast(f) {
+  const y = cellCy(f.row) + 6, run = f.t * 22;
+  g.translate(f.x, y + Math.abs(Math.sin(run)) * -3);
+  // 影子
+  g.fillStyle = 'rgba(0,0,0,0.35)';
+  g.beginPath(); g.ellipse(4, 34, 58, 9, 0, 0, TAU); g.fill();
+  // 腿（前后交替）
+  for (const [lx, ph] of [[-30, 0], [-14, Math.PI], [12, Math.PI / 2], [26, Math.PI * 1.5]]) {
+    const sw = Math.sin(run + ph) * 9;
+    g.strokeStyle = '#3a4654'; g.lineWidth = 7; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(lx, 10); g.lineTo(lx + sw, 30); g.stroke();
+    g.fillStyle = '#1f2833';
+    rr(g, lx + sw - 6, 28, 12, 6, 3); g.fill();
+  }
+  g.lineCap = 'butt';
+  // 身子
+  eBody(-46, -22, 76, 38, 16, '#9fb2c6', '#56697e', '#2a3543');
+  hazardE(-38, 4, 56, 7);
+  // 背上的排气管 + 尾焰
+  g.fillStyle = '#4a5a6e';
+  rr(g, -40, -34, 8, 14, 3); g.fill(); rr(g, -28, -36, 8, 16, 3); g.fill();
+  for (let k = 0; k < 2; k++) {
+    const ph = (time * 3 + k * 0.5) % 1;
+    g.fillStyle = 'rgba(140,130,120,' + (0.4 * (1 - ph)).toFixed(2) + ')';
+    g.beginPath(); g.arc(-36 + k * 12 - ph * 20, -40 - ph * 16, 4 + ph * 7, 0, TAU); g.fill();
+  }
+  // 头
+  eBody(18, -26, 30, 30, 10, '#b7c6d6', '#5f7186', '#2a3543');
+  eEye(36, -14, 4.2, '#ff5d5d', 10);
+  // 獠牙
+  g.fillStyle = '#e6edf5';
+  g.beginPath(); g.moveTo(44, -2); g.lineTo(54, -10); g.lineTo(48, 2); g.closePath(); g.fill();
+  // 前面的巨型粉碎滚筒
+  g.save();
+  g.translate(64, 2);
+  g.fillStyle = '#2a323c';
+  rr(g, -8, -30, 16, 60, 6); g.fill();
+  g.fillStyle = '#5c6d80';
+  rr(g, -6, -28, 12, 56, 5); g.fill();
+  // 齿刃：一圈圈往下滚
+  g.fillStyle = '#e0e6ee';
+  for (let k = 0; k < 7; k++) {
+    const yy = ((k * 9 + time * 220) % 63) - 31;
+    g.beginPath(); g.moveTo(6, yy - 3); g.lineTo(15, yy); g.lineTo(6, yy + 3); g.closePath(); g.fill();
+  }
+  g.fillStyle = '#ffc531';
+  rr(g, -9, -33, 18, 5, 2); g.fill(); rr(g, -9, 28, 18, 5, 2); g.fill();
+  g.restore();
+  // 滚筒前面迸出的火星
+  if (Math.random() < 0.6) spawnParts(f.x + 80, y + rand(-20, 20), '#ffd764', 1, 160, 0.3, 'spark');
 }
 
 function drawUltFx() {
   for (const f of ultFx) {
     if (f.kind === 'blast') continue;
     g.save();
-    if (f.kind === 'pillar') {
+    if (f.kind === 'beast') {
+      drawShredBeast(f);
+    } else if (f.kind === 'pillar') {
       const a = f.t / f.max;
       g.globalAlpha = a;
       g.fillStyle = hexA(f.color, 0.35);
@@ -16756,6 +16966,7 @@ function drawBullets() {
         : b.kind === 'arc' ? 'rgba(199,123,255,0.9)'
         : b.kind === 'rocket' ? 'rgba(255,140,60,0.9)'
         : b.kind === 'flak' ? 'rgba(168,232,255,0.9)'
+        : b.kind === 'tri' ? 'rgba(127,240,127,0.9)'
         : 'rgba(255,205,80,0.9)';
     }
     if (b.kind === 'rocket') {
@@ -16777,6 +16988,15 @@ function drawBullets() {
       g.lineTo(b.x + 8, y + 5);
       g.closePath();
       g.fill();
+    } else if (b.kind === 'tri') {
+      // 三线射手的穿透弹：一颗绿色能量豆拖着一条亮尾
+      const tk = 1 + ((b.bt || 1) - 1) * 0.25;
+      g.fillStyle = 'rgba(127,240,127,0.28)';
+      g.beginPath(); g.ellipse(b.x - 14, y, 16 * tk, 4.5 * tk, 0, 0, TAU); g.fill();
+      g.fillStyle = '#7ff07f';
+      g.beginPath(); g.arc(b.x, y, 6.5 * tk, 0, TAU); g.fill();
+      g.fillStyle = '#e6ffe6';
+      g.beginPath(); g.arc(b.x + 1.5, y - 1.5, 2.6 * tk, 0, TAU); g.fill();
     } else if (b.kind === 'ice') {
       const ik = 1 + ((b.bt || 1) - 1) * 0.38;
       g.fillStyle = 'rgba(159,220,255,0.35)';
